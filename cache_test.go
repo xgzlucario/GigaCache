@@ -1,10 +1,12 @@
 package cache
 
 import (
+	"context"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/allegro/bigcache/v3"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -35,24 +37,33 @@ func TestCache(t *testing.T) {
 }
 
 func BenchmarkCache(b *testing.B) {
+	str := "abcdefghijklmnopqrstuvwxyz"
+
 	m := map[string][]byte{}
 	b.Run("stdmap", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			m[strconv.Itoa(i)] = []byte("value")
+			m[strconv.Itoa(i)] = []byte(str)
 		}
 	})
 
 	m2 := NewMap[string, []byte]()
 	b.Run("tidwall/hashmap", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			m2.Set(strconv.Itoa(i), []byte("value"))
+			m2.Set(strconv.Itoa(i), []byte(str))
 		}
 	})
 
 	c := NewGigaCache[string]()
 	b.Run("gigacache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			c.Set(strconv.Itoa(i), []byte("value"))
+			c.Set(strconv.Itoa(i), []byte(str))
+		}
+	})
+
+	bc, _ := bigcache.New(context.Background(), bigcache.Config{Shards: 1024, Verbose: false})
+	b.Run("bigcache", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			bc.Set(strconv.Itoa(i), []byte(str))
 		}
 	})
 }

@@ -1,13 +1,7 @@
 package main
 
 import (
-	"bytes"
-	"fmt"
-	"time"
 	"unsafe"
-
-	"github.com/brianvoe/gofakeit/v6"
-	cache "github.com/xgzlucario/GigaCache"
 )
 
 // String convert to bytes unsafe
@@ -24,46 +18,46 @@ func B2S(buf []byte) *string {
 	return (*string)(unsafe.Pointer(&buf))
 }
 
-func main() {
-	a := time.Now()
+// func main() {
+// 	a := time.Now()
 
-	var sum float64
-	var stat, count int64
+// 	var sum float64
+// 	var stat, count int64
 
-	bc := cache.NewGigaCache[string]()
+// 	bc := cache.NewGigaCache[string]()
 
-	// Stat
-	go func() {
-		for {
-			time.Sleep(time.Second)
-			fmt.Printf("[Cache] %.1fs\t count: %dk\t num: %dk\t avg: %.2f ns\n",
-				time.Since(a).Seconds(), count/1000, bc.Len()/1000, sum/float64(stat))
-		}
-	}()
+// 	// Stat
+// 	go func() {
+// 		for {
+// 			time.Sleep(time.Second)
+// 			fmt.Printf("[Cache] %.1fs\t count: %dk\t num: %dk\t avg: %.2f ns\n",
+// 				time.Since(a).Seconds(), count/1000, bc.Len()/1000, sum/float64(stat))
+// 		}
+// 	}()
 
-	// Get
-	go func() {
-		for {
-			a := time.Now()
-			ph := gofakeit.Phone()
+// 	// Get
+// 	go func() {
+// 		for {
+// 			a := time.Now()
+// 			ph := gofakeit.Phone()
 
-			val, ok := bc.Get(ph)
-			if ok && !bytes.Equal(S2B(&ph), val) {
-				panic("key and value not equal")
-			}
+// 			val, ok := bc.Get(ph)
+// 			if ok && !bytes.Equal(S2B(&ph), val) {
+// 				panic("key and value not equal")
+// 			}
 
-			c := time.Since(a).Microseconds()
-			sum += float64(c)
-			stat++
+// 			c := time.Since(a).Microseconds()
+// 			sum += float64(c)
+// 			stat++
 
-			time.Sleep(time.Microsecond)
-		}
-	}()
+// 			time.Sleep(time.Microsecond)
+// 		}
+// 	}()
 
-	// Set
-	for {
-		count++
-		v := gofakeit.Phone()
-		bc.SetEx(v, S2B(&v), time.Second*10)
-	}
-}
+// 	// Set
+// 	for {
+// 		count++
+// 		v := gofakeit.Phone()
+// 		bc.SetEx(v, S2B(&v), time.Second*10)
+// 	}
+// }
