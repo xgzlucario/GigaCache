@@ -1,0 +1,325 @@
+package cache
+
+import (
+	"encoding/binary"
+	"math"
+	"sync"
+	"time"
+	"unsafe"
+
+	"github.com/zeebo/xxh3"
+	"golang.org/x/exp/slices"
+)
+
+const (
+	startBits  = 32
+	offsetBits = 31
+	ttlBits    = 8
+	offsetMask = math.MaxUint32
+
+	noTTL             = 0
+	probeCount        = 100
+	compressThreshold = 0.5
+
+	bufferSize         = 1024
+	defaultShardsCount = 1024
+)
+
+var (
+	// When using LittleEndian, byte slices can be converted to uint64 unsafely.
+	order = binary.LittleEndian
+)
+
+// Idx is the index of BigCahce.
+// start(32)|offset(31)|hasTTL(1)
+type Idx uint64
+
+func (i Idx) start() int {
+	return int(i >> startBits)
+}
+
+func (i Idx) offset() int {
+	return int((i & offsetMask) >> 1)
+}
+
+func (i Idx) hasTTL() bool {
+	return i&1 == 1
+}
+
+func newIdx(start, offset int, hasTTL bool) Idx {
+	// bound check
+	if start > math.MaxUint32 || offset > math.MaxUint32>>1 {
+		panic("index overflow")
+	}
+
+	idx := Idx(start<<startBits | offset<<1)
+	if hasTTL {
+		idx |= 1
+	}
+	return idx
+}
+
+// GigaCache
+type GigaCache[K comparable] struct {
+	alive   bool
+	kstr    bool
+	ksize   int
+	mask    uint64
+	pool    *Pool
+	buckets []*bucket[K]
+}
+
+// bucket
+type bucket[K comparable] struct {
+	clock int64
+	count float64
+	buf   []byte
+	idx   Map[K, Idx]
+	sync.RWMutex
+}
+
+// NewGigaCache returns a new GigaCache.
+func NewGigaCache[K comparable]() *GigaCache[K] {
+	return newCache[K](defaultShardsCount)
+}
+
+// NewExtGigaCache returns a new GigaCache with shards specified.
+func NewExtGigaCache[K comparable](shards int) *GigaCache[K] {
+	return newCache[K](shards)
+}
+
+func newCache[K comparable](shards int) *GigaCache[K] {
+	cc := &GigaCache[K]{
+		alive:   true,
+		mask:    uint64(shards - 1),
+		buckets: make([]*bucket[K], shards),
+		pool:    NewDefaultPool(),
+	}
+	cc.detectHasher()
+
+	for i := range cc.buckets {
+		cc.buckets[i] = &bucket[K]{
+			clock: time.Now().UnixNano(),
+			idx:   NewMap[K, Idx](),
+			buf:   make([]byte, 0, bufferSize),
+		}
+	}
+
+	// eliminate
+	go func() {
+		for cc.alive {
+			time.Sleep(time.Millisecond)
+			for _, b := range cc.buckets {
+				b := b
+				// concurrent with the same as numCPU
+				cc.pool.Go(func() {
+					b.eliminate()
+				})
+			}
+		}
+	}()
+
+	return cc
+}
+
+// detectHasher Detect the key type.
+func (c *GigaCache[K]) detectHasher() {
+	var k K
+	switch ((interface{})(k)).(type) {
+	case string:
+		c.kstr = true
+	default:
+		c.ksize = int(unsafe.Sizeof(k))
+	}
+}
+
+// Hash is the real hash function.
+func (c *GigaCache[K]) hash(key K) uint64 {
+	var strKey string
+	if c.kstr {
+		strKey = *(*string)(unsafe.Pointer(&key))
+	} else {
+		strKey = *(*string)(unsafe.Pointer(&struct {
+			data unsafe.Pointer
+			len  int
+		}{unsafe.Pointer(&key), c.ksize}))
+	}
+
+	return xxh3.HashString(strKey) & c.mask
+}
+
+// getShard returns the bucket of the key.
+func (c *GigaCache[K]) getShard(key K) *bucket[K] {
+	return c.buckets[c.hash(key)]
+}
+
+// Set set key-value pairs.
+func (c *GigaCache[K]) Set(key K, val []byte) {
+	b := c.getShard(key)
+	b.Lock()
+	defer b.Unlock()
+
+	b.idx.Set(key, newIdx(len(b.buf), len(val), false))
+	b.buf = append(b.buf, val...)
+
+	b.count++
+}
+
+// SetEx set expiry time with key-value pairs.
+func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
+	b := c.getShard(key)
+	b.Lock()
+	defer b.Unlock()
+
+	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
+	b.buf = append(b.buf, val...)
+	b.buf = order.AppendUint64(b.buf, uint64(b.clock)+uint64(dur))
+
+	b.count++
+}
+
+// SetTx set deadline with key-value pairs.
+func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
+	b := c.getShard(key)
+	b.Lock()
+	defer b.Unlock()
+
+	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
+	b.buf = append(b.buf, val...)
+	b.buf = order.AppendUint64(b.buf, uint64(ts))
+
+	b.count++
+}
+
+// Get
+func (c *GigaCache[K]) Get(key K) ([]byte, bool) {
+	val, _, ok := c.GetTx(key)
+	return val, ok
+}
+
+// GetTx
+func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
+	b := c.getShard(key)
+	b.RLock()
+
+	if idx, ok := b.idx.Get(key); ok {
+		start := idx.start()
+		end := start + idx.offset()
+
+		// has ttl
+		if idx.hasTTL() {
+			ttl := int64(*(*uint64)(unsafe.Pointer(&b.buf[end])))
+
+			// not expired
+			if b.timeAlive(ttl) {
+				b.RUnlock()
+				return slices.Clone(b.buf[start:end]), ttl, true
+
+			} else {
+				// delete
+				b.RUnlock()
+				b.Lock()
+				b.idx.Delete(key)
+				b.Unlock()
+				return nil, -1, false
+			}
+
+		} else {
+			b.RUnlock()
+			return slices.Clone(b.buf[start:end]), noTTL, true
+		}
+	}
+
+	b.RUnlock()
+	return nil, -1, false
+}
+
+// Delete
+func (c *GigaCache[K]) Delete(key K) bool {
+	b := c.getShard(key)
+	b.Lock()
+	defer b.Unlock()
+
+	_, ok := b.idx.Delete(key)
+	return ok
+}
+
+// Len returns keys length. It returns not an exact value, it may contain expired keys.
+func (c *GigaCache[K]) Len() (r int) {
+	for _, b := range c.buckets {
+		b.RLock()
+		r += b.idx.Len()
+		b.RUnlock()
+	}
+	return
+}
+
+// StopEliminate
+func (c *GigaCache[K]) StopEliminate() {
+	c.alive = false
+}
+
+func (b *bucket[K]) timeAlive(ttl int64) bool {
+	return ttl > b.clock || ttl == noTTL
+}
+
+// eliminate the expired key-value pairs.
+func (b *bucket[K]) eliminate() {
+	b.Lock()
+	defer b.Unlock()
+
+	b.clock = time.Now().UnixNano()
+
+	var flag bool
+
+	// probing
+	for i := uint64(0); i < probeCount; i++ {
+		if i >= 20 && !flag {
+			break
+		}
+
+		k, idx, ok := b.idx.GetPos(uint64(b.clock) + i)
+
+		// expired
+		if ok && idx.hasTTL() {
+			end := idx.start() + idx.offset()
+			ttl := int64(*(*uint64)(unsafe.Pointer(&b.buf[end])))
+
+			if !b.timeAlive(ttl) {
+				flag = true
+				b.idx.Delete(k)
+			}
+		}
+	}
+
+	// on compress threshold
+	if float64(b.idx.Len())/b.count < compressThreshold {
+		b.compress()
+	}
+}
+
+// Compress migrates the unexpired data and save memory.
+// Trigger when the valid count (valid / total) in the cache is less than this value
+func (b *bucket[K]) compress() {
+	b.count = 0
+	length := float64(len(b.buf)) * compressThreshold
+	nbuf := make([]byte, 0, int(length))
+
+	b.idx.Scan(func(key K, idx Idx) bool {
+		// offset only contains value, except ttl
+		start, offset, has := idx.start(), idx.offset(), idx.hasTTL()
+
+		// reset
+		b.idx.Set(key, newIdx(len(nbuf), offset, has))
+		if has {
+			nbuf = append(nbuf, b.buf[start:start+offset+ttlBits]...)
+		} else {
+			nbuf = append(nbuf, b.buf[start:start+offset]...)
+		}
+
+		b.count++
+		return true
+	})
+
+	b.buf = nbuf
+}
