@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/allegro/bigcache/v3 v3.1.0
+	github.com/brianvoe/gofakeit/v6 v6.22.0
 	github.com/bytedance/sonic v1.9.1
 	github.com/sourcegraph/conc v0.3.0
 	github.com/stretchr/testify v1.8.4

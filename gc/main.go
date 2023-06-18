@@ -50,6 +50,8 @@ func main() {
 		benchFunc = gigaCache
 	case "stdmap":
 		benchFunc = stdMap
+	case "hashmap":
+		benchFunc = hashMap
 	default:
 		fmt.Printf("unknown cache: %s", c)
 		os.Exit(1)
@@ -69,6 +71,14 @@ func stdMap(entries, valueSize int) {
 	for i := 0; i < entries; i++ {
 		key, val := generateKeyValue(i, valueSize)
 		mapCache[key] = val
+	}
+}
+
+func hashMap(entries, valueSize int) {
+	mapCache := cache.NewMap[string, []byte]()
+	for i := 0; i < entries; i++ {
+		key, val := generateKeyValue(i, valueSize)
+		mapCache.Set(key, val)
 	}
 }
 
