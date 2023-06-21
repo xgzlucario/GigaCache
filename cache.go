@@ -28,7 +28,19 @@ const (
 var (
 	// When using LittleEndian, byte slices can be converted to uint64 unsafely.
 	order = binary.LittleEndian
+
+	// Global clock
+	globalClock = time.Now().UnixNano()
 )
+
+func init() {
+	go func() {
+		ticker := time.NewTicker(time.Millisecond)
+		for t := range ticker.C {
+			globalClock = t.UnixNano()
+		}
+	}()
+}
 
 // Idx is the index of BigCahce.
 // start(32)|offset(31)|hasTTL(1)
@@ -61,7 +73,6 @@ func newIdx(start, offset int, hasTTL bool) Idx {
 
 // GigaCache
 type GigaCache[K comparable] struct {
-	alive   bool
 	kstr    bool
 	ksize   int
 	mask    uint64
@@ -71,7 +82,6 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	clock int64
 	count float64
 	buf   []byte
 	idx   Map[K, Idx]
@@ -90,7 +100,6 @@ func NewExtGigaCache[K comparable](shards int) *GigaCache[K] {
 
 func newCache[K comparable](shards int) *GigaCache[K] {
 	cc := &GigaCache[K]{
-		alive:   true,
 		mask:    uint64(shards - 1),
 		buckets: make([]*bucket[K], shards),
 		pool:    NewDefaultPool(),
@@ -99,25 +108,10 @@ func newCache[K comparable](shards int) *GigaCache[K] {
 
 	for i := range cc.buckets {
 		cc.buckets[i] = &bucket[K]{
-			clock: time.Now().UnixNano(),
-			idx:   NewMap[K, Idx](),
-			buf:   make([]byte, 0, bufferSize),
+			idx: NewMap[K, Idx](),
+			buf: make([]byte, 0, bufferSize),
 		}
 	}
-
-	// eliminate
-	go func() {
-		for cc.alive {
-			time.Sleep(time.Millisecond)
-			for _, b := range cc.buckets {
-				b := b
-				// concurrent with the same as numCPU
-				cc.pool.Go(func() {
-					b.eliminate()
-				})
-			}
-		}
-	}()
 
 	return cc
 }
@@ -159,6 +153,8 @@ func (c *GigaCache[K]) Set(key K, val []byte) {
 	b.Lock()
 	defer b.Unlock()
 
+	b.eliminate()
+
 	b.idx.Set(key, newIdx(len(b.buf), len(val), false))
 	b.buf = append(b.buf, val...)
 
@@ -167,15 +163,7 @@ func (c *GigaCache[K]) Set(key K, val []byte) {
 
 // SetEx set expiry time with key-value pairs.
 func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
-	b := c.getShard(key)
-	b.Lock()
-	defer b.Unlock()
-
-	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
-	b.buf = append(b.buf, val...)
-	b.buf = order.AppendUint64(b.buf, uint64(b.clock)+uint64(dur))
-
-	b.count++
+	c.SetTx(key, val, globalClock+int64(dur))
 }
 
 // SetTx set deadline with key-value pairs.
@@ -183,6 +171,8 @@ func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
 	b := c.getShard(key)
 	b.Lock()
 	defer b.Unlock()
+
+	b.eliminate()
 
 	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
 	b.buf = append(b.buf, val...)
@@ -240,6 +230,8 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	b.Lock()
 	defer b.Unlock()
 
+	b.eliminate()
+
 	_, ok := b.idx.Delete(key)
 	return ok
 }
@@ -254,31 +246,15 @@ func (c *GigaCache[K]) Len() (r int) {
 	return
 }
 
-// StopEliminate
-func (c *GigaCache[K]) StopEliminate() {
-	c.alive = false
-}
-
 func (b *bucket[K]) timeAlive(ttl int64) bool {
-	return ttl > b.clock || ttl == noTTL
+	return ttl > globalClock || ttl == noTTL
 }
 
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
-	b.Lock()
-	defer b.Unlock()
-
-	b.clock = time.Now().UnixNano()
-
-	var flag bool
-
 	// probing
 	for i := uint64(0); i < probeCount; i++ {
-		if i >= 20 && !flag {
-			break
-		}
-
-		k, idx, ok := b.idx.GetPos(uint64(b.clock) + i)
+		k, idx, ok := b.idx.GetPos(uint64(globalClock) + i)
 
 		// expired
 		if ok && idx.hasTTL() {
@@ -286,10 +262,11 @@ func (b *bucket[K]) eliminate() {
 			ttl := int64(*(*uint64)(unsafe.Pointer(&b.buf[end])))
 
 			if !b.timeAlive(ttl) {
-				flag = true
 				b.idx.Delete(k)
+				continue
 			}
 		}
+		break
 	}
 
 	// on compress threshold

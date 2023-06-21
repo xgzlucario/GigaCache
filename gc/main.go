@@ -17,8 +17,14 @@ var previousPause time.Duration
 
 func gcPause() time.Duration {
 	runtime.GC()
+
 	var stats debug.GCStats
+	var memStats runtime.MemStats
 	debug.ReadGCStats(&stats)
+	runtime.ReadMemStats(&memStats)
+
+	fmt.Printf("Heap Objects Total: %d\n", memStats.HeapObjects)
+
 	pause := stats.PauseTotal - previousPause
 	previousPause = stats.PauseTotal
 	return pause
