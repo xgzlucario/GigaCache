@@ -252,21 +252,26 @@ func (b *bucket[K]) timeAlive(ttl int64) bool {
 
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
+	var failCont int
 	// probing
 	for i := uint64(0); i < probeCount; i++ {
 		k, idx, ok := b.idx.GetPos(uint64(globalClock) + i)
 
-		// expired
 		if ok && idx.hasTTL() {
 			end := idx.start() + idx.offset()
 			ttl := int64(*(*uint64)(unsafe.Pointer(&b.buf[end])))
 
+			// expired
 			if !b.timeAlive(ttl) {
 				b.idx.Delete(k)
-				continue
+				failCont = 0
 			}
 		}
-		break
+
+		failCont++
+		if failCont > 2 {
+			break
+		}
 	}
 
 	// on compress threshold

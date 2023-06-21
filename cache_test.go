@@ -16,7 +16,7 @@ func TestCache(t *testing.T) {
 	valid := map[string][]byte{}
 	ttl := map[string]int64{}
 
-	for i := 0; i < 100000; i++ {
+	for i := 0; i < 1000*1000; i++ {
 		p := "xgz" + strconv.Itoa(i)
 
 		// make it unexpired
@@ -36,34 +36,72 @@ func TestCache(t *testing.T) {
 	}
 }
 
-func BenchmarkCache(b *testing.B) {
-	str := "abcdefghijklmnopqrstuvwxyz"
+const (
+	num = 1000 * 10000
+)
 
-	m := map[string][]byte{}
+var (
+	str = []byte("0123456789")
+)
+
+func BenchmarkSet(b *testing.B) {
+	m1 := map[string][]byte{}
 	b.Run("stdmap", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			m[strconv.Itoa(i)] = []byte(str)
+			m1[strconv.Itoa(i)] = str
 		}
 	})
 
-	m2 := NewMap[string, []byte]()
-	b.Run("tidwall/hashmap", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m2.Set(strconv.Itoa(i), []byte(str))
-		}
-	})
-
-	c := NewGigaCache[string]()
+	m2 := NewGigaCache[string]()
 	b.Run("gigacache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			c.Set(strconv.Itoa(i), []byte(str))
+			m2.Set(strconv.Itoa(i), str)
 		}
 	})
 
-	bc, _ := bigcache.New(context.Background(), bigcache.Config{Shards: 1024, Verbose: false})
+	m3, _ := bigcache.New(context.Background(), bigcache.DefaultConfig(time.Minute))
 	b.Run("bigcache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			bc.Set(strconv.Itoa(i), []byte(str))
+			m3.Set(strconv.Itoa(i), str)
+		}
+	})
+}
+
+func BenchmarkGet(b *testing.B) {
+	m1 := map[string][]byte{}
+	for i := 0; i < num; i++ {
+		m1[strconv.Itoa(i)] = str
+	}
+	b.ResetTimer()
+	b.Run("stdmap", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = m1[strconv.Itoa(i)]
+		}
+	})
+
+	m2 := NewGigaCache[string]()
+	for i := 0; i < num; i++ {
+		m2.Set(strconv.Itoa(i), str)
+	}
+	b.ResetTimer()
+	b.Run("gigacache", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			m2.Get(strconv.Itoa(i))
+		}
+	})
+
+	m3, _ := bigcache.New(context.Background(), bigcache.Config{
+		Shards:             1024,
+		Verbose:            false,
+		MaxEntriesInWindow: num,
+	})
+	for i := 0; i < num; i++ {
+		m3.Set(strconv.Itoa(i), str)
+	}
+	b.ResetTimer()
+	b.Run("bigcache", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			m3.Get(strconv.Itoa(i))
 		}
 	})
 }

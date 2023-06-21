@@ -40,7 +40,7 @@ func main() {
 	// Stat
 	go func() {
 		for {
-			time.Sleep(time.Second)
+			time.Sleep(time.Second * 10)
 			fmt.Printf("[Cache] %.1fs\t count: %dk\t num: %dk\t avg: %.2f ns\n",
 				time.Since(a).Seconds(), count/1000, bc.Len()/1000, sum/float64(stat))
 		}
