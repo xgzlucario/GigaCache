@@ -265,6 +265,7 @@ func (b *bucket[K]) eliminate() {
 			if !b.timeAlive(ttl) {
 				b.idx.Delete(k)
 				failCont = 0
+				continue
 			}
 		}
 
@@ -287,9 +288,19 @@ func (b *bucket[K]) compress() {
 	length := float64(len(b.buf)) * compressThreshold
 	nbuf := make([]byte, 0, int(length))
 
+	delKeys := make([]K, 0)
+
 	b.idx.Scan(func(key K, idx Idx) bool {
 		// offset only contains value, except ttl
 		start, offset, has := idx.start(), idx.offset(), idx.hasTTL()
+
+		if has {
+			ttl := int64(*(*uint64)(unsafe.Pointer(&b.buf[start+offset])))
+			if !b.timeAlive(ttl) {
+				delKeys = append(delKeys, key)
+				return true
+			}
+		}
 
 		// reset
 		b.idx.Set(key, newIdx(len(nbuf), offset, has))
@@ -302,6 +313,10 @@ func (b *bucket[K]) compress() {
 		b.count++
 		return true
 	})
+
+	for _, key := range delKeys {
+		b.idx.Delete(key)
+	}
 
 	b.buf = nbuf
 }
