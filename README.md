@@ -4,7 +4,7 @@ Powerful, fast, expiration supported cache for managing Gigabytes of data.
 # Benchmark
 **Performance**
 
-```go
+```bash
 goos: linux
 goarch: amd64
 pkg: github.com/xgzlucario/GigaCache

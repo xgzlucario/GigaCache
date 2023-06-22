@@ -76,7 +76,6 @@ type GigaCache[K comparable] struct {
 	kstr    bool
 	ksize   int
 	mask    uint64
-	pool    *Pool
 	buckets []*bucket[K]
 }
 
@@ -102,7 +101,6 @@ func newCache[K comparable](shards int) *GigaCache[K] {
 	cc := &GigaCache[K]{
 		mask:    uint64(shards - 1),
 		buckets: make([]*bucket[K], shards),
-		pool:    NewDefaultPool(),
 	}
 	cc.detectHasher()
 
