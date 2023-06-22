@@ -1,7 +1,41 @@
 # GigaCache
 Powerful, fast, expiration supported cache for managing Gigabytes of data.
 
+# Usage
+
+**Install**
+
+```bash
+go get github.com/xgzlucario/GigaCache
+```
+
+**Example**
+
+```go
+package main
+
+import (
+    "fmt"
+	cache "github.com/xgzlucario/GigaCache"
+)
+
+func main() {
+    m := cache.NewGigaCache[string]()
+    
+    m.Set("foo", []byte("bar")) // Set with key
+    m.SetEx("foo1", []byte("bar1"), time.Minute) // Set key with expired duration
+    m.SetTx("foo2", []byte("bar2"), time.Now().Add(time.Minute).UnixNano()) // Set key with expired deadline
+    
+    val,ok := m.Get("foo")
+    fmt.Println(string(val), ok) // bar, true
+
+    val, ts, ok := m.GetTx("foo1")
+    fmt.Println(string(val), ts, ok) // bar1, 1687458634306210383(nanoseconds), true
+}
+```
+
 # Benchmark
+
 **Performance**
 
 ```bash
