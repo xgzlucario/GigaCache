@@ -3,13 +3,13 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"time"
 	"unsafe"
 
 	"net/http"
 	_ "net/http/pprof"
 
-	"github.com/brianvoe/gofakeit/v6"
 	cache "github.com/xgzlucario/GigaCache"
 )
 
@@ -40,7 +40,7 @@ func main() {
 	// Stat
 	go func() {
 		for {
-			time.Sleep(time.Second * 10)
+			time.Sleep(time.Second)
 			fmt.Printf("[Cache] %.1fs\t count: %dk\t num: %dk\t avg: %.2f ns\n",
 				time.Since(a).Seconds(), count/1000, bc.Len()/1000, sum/float64(stat))
 		}
@@ -48,9 +48,9 @@ func main() {
 
 	// Get
 	go func() {
-		for {
+		for i := 0; ; i++ {
 			a := time.Now()
-			ph := gofakeit.Phone()
+			ph := strconv.Itoa(i)
 
 			val, ok := bc.Get(ph)
 			if ok && !bytes.Equal(S2B(&ph), val) {
@@ -62,13 +62,15 @@ func main() {
 			stat++
 
 			time.Sleep(time.Microsecond)
+
+			i %= 99999
 		}
 	}()
 
 	// Set
-	for {
+	for i := 0; ; i++ {
 		count++
-		v := gofakeit.Phone()
+		v := strconv.Itoa(i)
 		bc.SetEx(v, S2B(&v), time.Second*10)
 	}
 }

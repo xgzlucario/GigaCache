@@ -3,6 +3,7 @@ package cache
 import (
 	"encoding/binary"
 	"math"
+	"math/rand"
 	"sync"
 	"time"
 	"unsafe"
@@ -251,9 +252,11 @@ func (b *bucket[K]) timeAlive(ttl int64) bool {
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
 	var failCont int
+	rdm := rand.Uint64()
+
 	// probing
 	for i := uint64(0); i < probeCount; i++ {
-		k, idx, ok := b.idx.GetPos(uint64(globalClock) + i)
+		k, idx, ok := b.idx.GetPos(rdm + i*3)
 
 		if ok && idx.hasTTL() {
 			end := idx.start() + idx.offset()
