@@ -9,7 +9,6 @@ import (
 	"unsafe"
 
 	"github.com/zeebo/xxh3"
-	"golang.org/x/exp/slices"
 )
 
 const (
@@ -202,7 +201,7 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 			// not expired
 			if b.timeAlive(ttl) {
 				b.RUnlock()
-				return slices.Clone(b.buf[start:end]), ttl, true
+				return b.buf[start:end], ttl, true
 
 			} else {
 				// delete
@@ -215,7 +214,7 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 
 		} else {
 			b.RUnlock()
-			return slices.Clone(b.buf[start:end]), noTTL, true
+			return b.buf[start:end], noTTL, true
 		}
 	}
 

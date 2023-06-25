@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	num = 2000 * 100000
+	num = 2000 * 10000
 )
 
 var (
