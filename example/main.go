@@ -28,6 +28,15 @@ func B2S(buf []byte) *string {
 }
 
 func main() {
+	// tt := time.Now().Add(time.Hour * 24 * 365 * 85)
+	// as := tt.UnixMilli()
+	// buf := binary.AppendUvarint(nil, uint64(as))
+	// fmt.Println(tt, as, buf)
+	// fmt.Println(binary.Uvarint(buf))
+	// fmt.Println()
+
+	// fmt.Println("==========================")
+
 	go http.ListenAndServe("localhost:6060", nil)
 
 	a := time.Now()

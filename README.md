@@ -38,17 +38,39 @@ func main() {
 
 **Performance**
 
-```bash
+GigaCache is compared to stdmap、[jellydator/ttlcache](https://github.com/jellydator/ttlcache).
+
+**Environment**
+
+```
 goos: linux
 goarch: amd64
-pkg: github.com/xgzlucario/GigaCache
 cpu: 13th Gen Intel(R) Core(TM) i5-13600KF
-Benchmark1/stdmap/Set-20         4157254	       279.6 ns/op	     152 B/op	       1 allocs/op
-Benchmark1/gigacache/Set-20      6257186	       219.3 ns/op	     111 B/op	       1 allocs/op
-Benchmark1/gigacache/SetTx-20    5129022	       222.7 ns/op	     231 B/op	       2 allocs/op
-BenchmarkGet/stdmap-20         	 7838728	       145.4 ns/op	       7 B/op	       0 allocs/op
-BenchmarkGet/gigacache-20      	 6222662	       166.6 ns/op	       7 B/op	       0 allocs/op
-PASS
+```
+
+**Set**
+
+```bash
+BenchmarkSet/stdmap/Set-20         	 4417606	       263.9 ns/op	     144 B/op	       1 allocs/op
+BenchmarkSet/gigacache/Set-20      	 5784351	       215.2 ns/op	     120 B/op	       1 allocs/op
+BenchmarkSet/gigacache/SetTx-20    	 4062008	       354.2 ns/op	     191 B/op	       1 allocs/op
+BenchmarkSet/ttlcache/Set-20       	 2794053	       485.4 ns/op	     187 B/op	       2 allocs/op
+```
+
+**Get** from 100k entries.
+
+```
+BenchmarkGet/stdmap-20         	10008024	       135.0 ns/op	       7 B/op	       0 allocs/op
+BenchmarkGet/gigacache-20      	 6685338	       163.7 ns/op	       7 B/op	       0 allocs/op
+BenchmarkGet/ttlcache-20       	 2045643	       510.5 ns/op	      55 B/op	       1 allocs/op
+```
+
+**Delete**
+
+```
+BenchmarkDelete/stdmap-20         	 8512951	       150.9 ns/op	       7 B/op	       0 allocs/op
+BenchmarkDelete/gigacache-20      	32437833	        33.82 ns/op	       7 B/op	       0 allocs/op
+BenchmarkDelete/ttlcache-20       	 2001484	       510.7 ns/op	      55 B/op	       1 allocs/op
 ```
 
 **GC pause time**（Reference to [allegro/bigcache-bench](https://github.com/allegro/bigcache-bench)）
