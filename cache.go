@@ -83,9 +83,10 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	count float64
-	buf   []byte
-	idx   *Map[K, Idx]
+	count    float64
+	expCount float64
+	buf      []byte
+	idx      *Map[K, Idx]
 	sync.RWMutex
 }
 
@@ -179,6 +180,7 @@ func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
 	b.buf = order.AppendUint64(b.buf, uint64(ts))
 
 	b.count++
+	b.expCount++
 }
 
 // Get
@@ -252,6 +254,10 @@ func (b *bucket[K]) timeAlive(ttl int64) bool {
 
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
+	if b.expCount == 0 {
+		return
+	}
+
 	var failCont int
 	rdm := rand.Uint64()
 
@@ -266,6 +272,7 @@ func (b *bucket[K]) eliminate() {
 			// expired
 			if !b.timeAlive(ttl) {
 				b.idx.Delete(k)
+				b.expCount--
 				failCont = 0
 				continue
 			}
@@ -287,6 +294,8 @@ func (b *bucket[K]) eliminate() {
 // Trigger when the valid count (valid / total) in the cache is less than this value
 func (b *bucket[K]) compress() {
 	b.count = 0
+	b.expCount = 0
+
 	length := float64(len(b.buf)) * compressThreshold
 	nbuf := make([]byte, 0, int(length))
 
@@ -308,6 +317,8 @@ func (b *bucket[K]) compress() {
 		b.idx.Set(key, newIdx(len(nbuf), offset, has))
 		if has {
 			nbuf = append(nbuf, b.buf[start:start+offset+ttlBits]...)
+			b.expCount++
+
 		} else {
 			nbuf = append(nbuf, b.buf[start:start+offset]...)
 		}

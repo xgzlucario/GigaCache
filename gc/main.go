@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -9,7 +8,6 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/allegro/bigcache/v3"
 	cache "github.com/xgzlucario/GigaCache"
 )
 
@@ -50,8 +48,6 @@ func main() {
 	var benchFunc func(entries, valueSize int)
 
 	switch c {
-	case "bigcache":
-		benchFunc = bigCache
 	case "gigacache":
 		benchFunc = gigaCache
 	case "stdmap":
@@ -75,22 +71,6 @@ func stdMap(entries, valueSize int) {
 	for i := 0; i < entries; i++ {
 		key, val := generateKeyValue(i, valueSize)
 		mapCache[key] = val
-	}
-}
-
-func bigCache(entries, valueSize int) {
-	config := bigcache.Config{
-		Shards:             256,
-		LifeWindow:         100 * time.Minute,
-		MaxEntriesInWindow: entries,
-		MaxEntrySize:       200,
-		Verbose:            true,
-	}
-
-	bigcache, _ := bigcache.New(context.Background(), config)
-	for i := 0; i < entries; i++ {
-		key, val := generateKeyValue(i, valueSize)
-		bigcache.Set(key, val)
 	}
 }
 

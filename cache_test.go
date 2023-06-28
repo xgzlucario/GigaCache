@@ -1,13 +1,10 @@
 package cache
 
 import (
-	"context"
+	"bytes"
 	"strconv"
 	"testing"
 	"time"
-
-	"github.com/allegro/bigcache/v3"
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -20,7 +17,6 @@ var (
 
 func TestCache(t *testing.T) {
 	cache := NewGigaCache[string]()
-
 	valid := map[string][]byte{}
 	ttl := map[string]int64{}
 
@@ -38,31 +34,38 @@ func TestCache(t *testing.T) {
 
 	for k, v := range valid {
 		value, ts, ok := cache.GetTx(k)
-		assert.True(t, ok)
-		assert.Equal(t, v, value)
-		assert.Equal(t, ttl[k], ts)
+
+		if !ok {
+			t.Errorf("key %s not found", k)
+		}
+		if !bytes.Equal(v, value) {
+			t.Errorf("key %s value not equal", k)
+		}
+		if ttl[k] != ts {
+			t.Errorf("key %s ttl not equal", k)
+		}
 	}
 }
 
-func BenchmarkSet(b *testing.B) {
+func Benchmark1(b *testing.B) {
 	m1 := map[string][]byte{}
-	b.Run("stdmap", func(b *testing.B) {
+	b.Run("stdmap/Set", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m1[strconv.Itoa(i)] = str
 		}
 	})
 
 	m2 := NewGigaCache[string]()
-	b.Run("gigacache", func(b *testing.B) {
+	b.Run("gigacache/Set", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m2.Set(strconv.Itoa(i), str)
 		}
 	})
 
-	m3, _ := bigcache.New(context.Background(), bigcache.DefaultConfig(time.Minute))
-	b.Run("bigcache", func(b *testing.B) {
+	m3 := NewGigaCache[string]()
+	b.Run("gigacache/SetTx", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			m3.Set(strconv.Itoa(i), str)
+			m3.SetTx(strconv.Itoa(i), str, time.Now().UnixNano())
 		}
 	})
 }
@@ -87,21 +90,6 @@ func BenchmarkGet(b *testing.B) {
 	b.Run("gigacache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m2.Get(strconv.Itoa(i))
-		}
-	})
-
-	m3, _ := bigcache.New(context.Background(), bigcache.Config{
-		Shards:             1024,
-		Verbose:            false,
-		MaxEntriesInWindow: num,
-	})
-	for i := 0; i < num; i++ {
-		m3.Set(strconv.Itoa(i), str)
-	}
-	b.ResetTimer()
-	b.Run("bigcache", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m3.Get(strconv.Itoa(i))
 		}
 	})
 }
