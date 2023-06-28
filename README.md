@@ -16,7 +16,7 @@ package main
 
 import (
     "fmt"
-	cache "github.com/xgzlucario/GigaCache"
+    cache "github.com/xgzlucario/GigaCache"
 )
 
 func main() {
@@ -43,12 +43,11 @@ goos: linux
 goarch: amd64
 pkg: github.com/xgzlucario/GigaCache
 cpu: 13th Gen Intel(R) Core(TM) i5-13600KF
-BenchmarkSet/stdmap-20         	 4133277	       282.7 ns/op	     153 B/op	       1 allocs/op
-BenchmarkSet/gigacache-20      	 5590371	       245.2 ns/op	     124 B/op	       1 allocs/op
-BenchmarkSet/bigcache-20       	 5770894	       254.2 ns/op	      44 B/op	       1 allocs/op
-BenchmarkGet/stdmap-20         	10570345	       123.3 ns/op	       7 B/op	       0 allocs/op
-BenchmarkGet/gigacache-20      	 8415250	       134.1 ns/op	       7 B/op	       0 allocs/op
-BenchmarkGet/bigcache-20       	 7785013	       152.1 ns/op	       7 B/op	       1 allocs/op
+Benchmark1/stdmap/Set-20         	 4290471	       263.7 ns/op	     148 B/op	       1 allocs/op
+Benchmark1/gigacache/Set-20      	 6566755	       208.9 ns/op	     116 B/op	       1 allocs/op
+Benchmark1/gigacache/SetTx-20    	 5261109	       227.7 ns/op	     232 B/op	       2 allocs/op
+BenchmarkGet/stdmap-20         	10696383	       127.2 ns/op	       7 B/op	       0 allocs/op
+BenchmarkGet/gigacache-20      	 8327406	       139.4 ns/op	       7 B/op	       0 allocs/op
 PASS
 ```
 
