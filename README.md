@@ -43,11 +43,11 @@ goos: linux
 goarch: amd64
 pkg: github.com/xgzlucario/GigaCache
 cpu: 13th Gen Intel(R) Core(TM) i5-13600KF
-Benchmark1/stdmap/Set-20         	 4290471	       263.7 ns/op	     148 B/op	       1 allocs/op
-Benchmark1/gigacache/Set-20      	 6566755	       208.9 ns/op	     116 B/op	       1 allocs/op
-Benchmark1/gigacache/SetTx-20    	 5261109	       227.7 ns/op	     232 B/op	       2 allocs/op
-BenchmarkGet/stdmap-20         	10696383	       127.2 ns/op	       7 B/op	       0 allocs/op
-BenchmarkGet/gigacache-20      	 8327406	       139.4 ns/op	       7 B/op	       0 allocs/op
+Benchmark1/stdmap/Set-20         4157254	       279.6 ns/op	     152 B/op	       1 allocs/op
+Benchmark1/gigacache/Set-20      6257186	       219.3 ns/op	     111 B/op	       1 allocs/op
+Benchmark1/gigacache/SetTx-20    5129022	       222.7 ns/op	     231 B/op	       2 allocs/op
+BenchmarkGet/stdmap-20         	 7838728	       145.4 ns/op	       7 B/op	       0 allocs/op
+BenchmarkGet/gigacache-20      	 6222662	       166.6 ns/op	       7 B/op	       0 allocs/op
 PASS
 ```
 

@@ -83,8 +83,8 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	count    float64
-	expCount float64
+	count    uint32 // The number of all keys
+	expCount uint32 // The number of keys with expiration times
 	buf      []byte
 	idx      *Map[K, Idx]
 	sync.RWMutex
@@ -152,14 +152,13 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 func (c *GigaCache[K]) Set(key K, val []byte) {
 	b := c.getShard(key)
 	b.Lock()
-	defer b.Unlock()
-
 	b.eliminate()
 
 	b.idx.Set(key, newIdx(len(b.buf), len(val), false))
 	b.buf = append(b.buf, val...)
 
 	b.count++
+	b.Unlock()
 }
 
 // SetEx set expiry time with key-value pairs.
@@ -171,8 +170,6 @@ func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
 	b := c.getShard(key)
 	b.Lock()
-	defer b.Unlock()
-
 	b.eliminate()
 
 	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
@@ -181,6 +178,7 @@ func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
 
 	b.count++
 	b.expCount++
+	b.Unlock()
 }
 
 // Get
@@ -227,15 +225,15 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 }
 
 // Delete
-func (c *GigaCache[K]) Delete(key K) bool {
+func (c *GigaCache[K]) Delete(key K) (ok bool) {
 	b := c.getShard(key)
 	b.Lock()
-	defer b.Unlock()
-
 	b.eliminate()
 
-	_, ok := b.idx.Delete(key)
-	return ok
+	_, ok = b.idx.Delete(key)
+	b.Unlock()
+
+	return
 }
 
 // Len returns keys length. It returns not an exact value, it may contain expired keys.
@@ -285,19 +283,19 @@ func (b *bucket[K]) eliminate() {
 	}
 
 	// on compress threshold
-	if float64(b.idx.Len())/b.count < compressThreshold {
-		b.compress()
+	if rate := float64(b.idx.Len()) / float64(b.count); rate < compressThreshold {
+		b.compress(rate)
 	}
 }
 
 // Compress migrates the unexpired data and save memory.
 // Trigger when the valid count (valid / total) in the cache is less than this value
-func (b *bucket[K]) compress() {
+func (b *bucket[K]) compress(rate float64) {
 	b.count = 0
 	b.expCount = 0
 
-	length := float64(len(b.buf)) * compressThreshold
-	nbuf := make([]byte, 0, int(length))
+	newCap := float64(len(b.buf)) * rate
+	nbuf := make([]byte, 0, int(newCap))
 
 	delKeys := make([]K, 0)
 
