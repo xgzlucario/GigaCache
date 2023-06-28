@@ -8,6 +8,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/bytedance/sonic"
+	"github.com/klauspost/compress/s2"
 	"github.com/zeebo/xxh3"
 )
 
@@ -83,7 +85,7 @@ type GigaCache[K comparable] struct {
 type bucket[K comparable] struct {
 	count float64
 	buf   []byte
-	idx   Map[K, Idx]
+	idx   *Map[K, Idx]
 	sync.RWMutex
 }
 
@@ -106,7 +108,7 @@ func newCache[K comparable](shards int) *GigaCache[K] {
 
 	for i := range cc.buckets {
 		cc.buckets[i] = &bucket[K]{
-			idx: NewMap[K, Idx](),
+			idx: New[K, Idx](0),
 			buf: make([]byte, 0, bufferSize),
 		}
 	}
@@ -290,7 +292,7 @@ func (b *bucket[K]) compress() {
 
 	delKeys := make([]K, 0)
 
-	b.idx.Scan(func(key K, idx Idx) bool {
+	b.idx.Scan(func(key K, idx Idx) {
 		// offset only contains value, except ttl
 		start, offset, has := idx.start(), idx.offset(), idx.hasTTL()
 
@@ -298,7 +300,7 @@ func (b *bucket[K]) compress() {
 			ttl := int64(*(*uint64)(unsafe.Pointer(&b.buf[start+offset])))
 			if !b.timeAlive(ttl) {
 				delKeys = append(delKeys, key)
-				return true
+				return
 			}
 		}
 
@@ -311,7 +313,6 @@ func (b *bucket[K]) compress() {
 		}
 
 		b.count++
-		return true
 	})
 
 	for _, key := range delKeys {
@@ -319,4 +320,49 @@ func (b *bucket[K]) compress() {
 	}
 
 	b.buf = nbuf
+}
+
+// MarshalJSON
+func (c *GigaCache[K]) MarshalJSON() ([]byte, error) {
+	plen := len(c.buckets[0].buf) * len(c.buckets)
+
+	buf := make([]byte, 0, plen)
+
+	buf = append(buf, '[')
+
+	for i, b := range c.buckets {
+		buf = append(buf, '"')
+
+		b.RLock()
+		src, _ := b.MarshalJSON()
+		buf = append(buf, src...)
+		b.RUnlock()
+
+		buf = append(buf, '"')
+		if i != len(c.buckets)-1 {
+			buf = append(buf, ',')
+		}
+	}
+
+	buf = append(buf, ']')
+
+	return s2.EncodeSnappy(nil, buf), nil
+}
+
+type bucketJSON[K comparable] struct {
+	K []K
+	I []Idx
+	B []byte
+}
+
+func (b *bucket[K]) MarshalJSON() ([]byte, error) {
+	k := make([]K, 0, b.idx.Len())
+	i := make([]Idx, 0, b.idx.Len())
+
+	b.idx.Scan(func(key K, idx Idx) {
+		k = append(k, key)
+		i = append(i, idx)
+	})
+
+	return sonic.Marshal(bucketJSON[K]{k, i, b.buf})
 }
