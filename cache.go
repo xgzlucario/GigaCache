@@ -42,8 +42,6 @@ var (
 
 	// Global clock
 	g_clock = time.Now().UnixMilli()
-	g_h     = uint32(g_clock >> ttlHighBits)
-	g_l     = uint16(g_clock & ttlLowMask)
 )
 
 func init() {
@@ -51,8 +49,6 @@ func init() {
 		ticker := time.NewTicker(time.Millisecond)
 		for t := range ticker.C {
 			g_clock = t.UnixMilli()
-			g_h = uint32(g_clock >> ttlHighBits)
-			g_l = uint16(g_clock & ttlLowMask)
 		}
 	}()
 }
@@ -176,7 +172,7 @@ func (c *GigaCache[K]) Set(key K, val []byte) {
 
 // SetEx set expiry time with key-value pairs.
 func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
-	if dur < 0 {
+	if dur <= 0 {
 		return
 	}
 
@@ -237,9 +233,9 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 
 		// has ttl
 		if idx.hasTTL() {
-			ttlHigh := uint64(*(*uint32)(unsafe.Pointer(&b.buf[end])))
-			ttlLow := uint64(*(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes])))
-			ttl := int64((ttlHigh << ttlLowBits) | ttlLow)
+			h := uint64(*(*uint32)(unsafe.Pointer(&b.buf[end])))
+			l := uint64(*(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes])))
+			ttl := int64((h << ttlLowBits) | l)
 
 			// not expired
 			if b.timeAlive(ttl) {
@@ -291,13 +287,6 @@ func (b *bucket[K]) timeAlive(ttl int64) bool {
 	return ttl > g_clock
 }
 
-func (b *bucket[K]) ttlAlive(h uint32, l uint16) bool {
-	if h >= g_h {
-		return l >= g_l
-	}
-	return false
-}
-
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
 	if b.expCount == 0 {
@@ -313,11 +302,12 @@ func (b *bucket[K]) eliminate() {
 
 		if ok && idx.hasTTL() {
 			end := idx.start() + idx.offset()
-			h := *(*uint32)(unsafe.Pointer(&b.buf[end]))
-			l := *(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes]))
+			h := uint64(*(*uint32)(unsafe.Pointer(&b.buf[end])))
+			l := uint64(*(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes])))
+			ttl := int64((h << ttlLowBits) | l)
 
 			// expired
-			if !b.ttlAlive(h, l) {
+			if !b.timeAlive(ttl) {
 				b.idx.Delete(k)
 				b.expCount--
 				failCont = 0
@@ -354,11 +344,12 @@ func (b *bucket[K]) compress(rate float64) {
 		end := start + offset
 
 		if has {
-			h := *(*uint32)(unsafe.Pointer(&b.buf[end]))
-			l := *(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes]))
+			h := uint64(*(*uint32)(unsafe.Pointer(&b.buf[end])))
+			l := uint64(*(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes])))
+			ttl := int64((h << ttlLowBits) | l)
 
 			// expired
-			if !b.ttlAlive(h, l) {
+			if !b.timeAlive(ttl) {
 				delKeys = append(delKeys, key)
 				return
 			}

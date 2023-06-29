@@ -40,18 +40,18 @@ func main() {
 	bc := cache.NewGigaCache[string]()
 
 	// Test
-	for i := 0; i < 10; i++ {
-		bc.SetEx("xgz"+strconv.Itoa(i), []byte("1"), time.Second*time.Duration(i))
-	}
+	// for i := 0; i < 10; i++ {
+	// 	bc.SetEx("xgz"+strconv.Itoa(i), []byte("1"), time.Second*time.Duration(i))
+	// }
 
-	for i := 0; i < 25; i++ {
-		fmt.Println()
-		for i := 0; i < 10; i++ {
-			c, ts, ok := bc.GetTx("xgz" + strconv.Itoa(i))
-			fmt.Println(string(c), time.Unix(0, ts), ok)
-		}
-		time.Sleep(time.Second / 2)
-	}
+	// for i := 0; i < 25; i++ {
+	// 	fmt.Println()
+	// 	for i := 0; i < 10; i++ {
+	// 		c, ts, ok := bc.GetTx("xgz" + strconv.Itoa(i))
+	// 		fmt.Println(string(c), time.Unix(0, ts), ok)
+	// 	}
+	// 	time.Sleep(time.Second / 2)
+	// }
 
 	// Stat
 	go func() {
