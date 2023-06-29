@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"runtime"
 	"strconv"
 	"time"
 	"unsafe"
@@ -28,14 +29,18 @@ func B2S(buf []byte) *string {
 }
 
 func main() {
-	// tt := time.Now().Add(time.Hour * 24 * 365 * 85)
-	// as := tt.UnixMilli()
-	// buf := binary.AppendUvarint(nil, uint64(as))
-	// fmt.Println(tt, as, buf)
-	// fmt.Println(binary.Uvarint(buf))
-	// fmt.Println()
+	// for {
+	// 	ww := time.Now().UnixMilli()
+	// 	fmt.Println("====================================")
 
-	// fmt.Println("==========================")
+	// 	// millisecond(32 x1)(16 x2)
+	// 	x1, x2 := uint32(ww>>16), uint16(ww&math.MaxUint16)
+
+	// 	fmt.Println(ww, x1, x2)
+	// 	fmt.Println(ww, uint64(x1)<<16|uint64(x2))
+
+	// 	time.Sleep(time.Second)
+	// }
 
 	go http.ListenAndServe("localhost:6060", nil)
 
@@ -43,15 +48,32 @@ func main() {
 
 	var sum float64
 	var stat, count int64
+	var mem runtime.MemStats
 
 	bc := cache.NewGigaCache[string]()
+
+	// Test
+	bc.SetEx("xgz", []byte("1ds"), time.Hour*77)
+	c, ts, ok := bc.GetTx("xgz")
+	fmt.Println(string(c), time.Unix(0, ts), time.Now().Add(time.Hour*77), ok)
+
+	bc.SetEx("xgz1", []byte("1ds"), time.Second)
+	time.Sleep(time.Second + time.Millisecond)
+	c, ts, ok = bc.GetTx("xgz1")
+	fmt.Println(string(c), time.Unix(0, ts), ok)
 
 	// Stat
 	go func() {
 		for {
 			time.Sleep(time.Second)
-			fmt.Printf("[Cache] %.1fs\t count: %dk\t num: %dk\t avg: %.2f ns\n",
-				time.Since(a).Seconds(), count/1000, bc.Len()/1000, sum/float64(stat))
+			runtime.ReadMemStats(&mem)
+
+			fmt.Printf("[Cache] %.1fs\t count: %dk\t num: %dk\t mem: %d MB\t avg: %.2f ns\n",
+				time.Since(a).Seconds(),
+				count/1000,
+				bc.Len()/1000,
+				mem.HeapAlloc/1e6,
+				sum/float64(stat))
 		}
 	}()
 

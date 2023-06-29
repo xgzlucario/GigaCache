@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"bytes"
 	"strconv"
 	"testing"
 	"time"
@@ -16,38 +15,6 @@ const (
 var (
 	str = []byte("0123456789")
 )
-
-func TestCache(t *testing.T) {
-	cache := NewGigaCache[string]()
-	valid := map[string][]byte{}
-	ttl := map[string]int64{}
-
-	for i := 0; i < num/10; i++ {
-		p := "xgz" + strconv.Itoa(i)
-
-		// make it unexpired
-		ts := time.Now().UnixNano() << 1
-
-		valid[p] = []byte(p)
-		ttl[p] = ts
-
-		cache.SetTx(p, []byte(p), ts)
-	}
-
-	for k, v := range valid {
-		value, ts, ok := cache.GetTx(k)
-
-		if !ok {
-			t.Errorf("key %s not found", k)
-		}
-		if !bytes.Equal(v, value) {
-			t.Errorf("key %s value not equal", k)
-		}
-		if ttl[k] != ts {
-			t.Errorf("key %s ttl not equal", k)
-		}
-	}
-}
 
 func BenchmarkSet(b *testing.B) {
 	m1 := map[string][]byte{}

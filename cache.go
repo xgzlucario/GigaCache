@@ -16,10 +16,19 @@ import (
 const (
 	startBits  = 32
 	offsetBits = 31
-	ttlBits    = 8
+
+	// for ttl
+	ttlHighBits  = 32
+	ttlLowBits   = 16
+	ttlHighBytes = ttlHighBits / 8
+	ttlLowBytes  = ttlLowBits / 8
+	ttlBytes     = ttlHighBytes + ttlLowBytes
+
+	ttlLowMask = math.MaxUint16
+	timeCarry  = 1e6 // ms
+
 	offsetMask = math.MaxUint32
 
-	noTTL             = 0
 	probeCount        = 100
 	compressThreshold = 0.5
 
@@ -32,14 +41,18 @@ var (
 	order = binary.LittleEndian
 
 	// Global clock
-	globalClock = time.Now().UnixNano()
+	g_clock = time.Now().UnixMilli()
+	g_h     = uint32(g_clock >> ttlHighBits)
+	g_l     = uint16(g_clock & ttlLowMask)
 )
 
 func init() {
 	go func() {
 		ticker := time.NewTicker(time.Millisecond)
 		for t := range ticker.C {
-			globalClock = t.UnixNano()
+			g_clock = t.UnixMilli()
+			g_h = uint32(g_clock >> ttlHighBits)
+			g_l = uint16(g_clock & ttlLowMask)
 		}
 	}()
 }
@@ -163,18 +176,44 @@ func (c *GigaCache[K]) Set(key K, val []byte) {
 
 // SetEx set expiry time with key-value pairs.
 func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
-	c.SetTx(key, val, globalClock+int64(dur))
-}
+	if dur < 0 {
+		return
+	}
 
-// SetTx set deadline with key-value pairs.
-func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
 	b := c.getShard(key)
 	b.Lock()
 	b.eliminate()
 
 	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
 	b.buf = append(b.buf, val...)
-	b.buf = order.AppendUint64(b.buf, uint64(ts))
+
+	// ttl
+	uts := uint64(g_clock + int64(dur)/timeCarry)
+	b.buf = order.AppendUint32(b.buf, uint32(uts>>ttlLowBits))
+	b.buf = order.AppendUint16(b.buf, uint16(uts&ttlLowMask))
+
+	b.count++
+	b.expCount++
+	b.Unlock()
+}
+
+// SetTx set deadline with key-value pairs.
+func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
+	if ts < g_clock {
+		return
+	}
+
+	b := c.getShard(key)
+	b.Lock()
+	b.eliminate()
+
+	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
+	b.buf = append(b.buf, val...)
+
+	// ttl
+	uts := uint64(ts / timeCarry)
+	b.buf = order.AppendUint32(b.buf, uint32(uts>>ttlLowBits))
+	b.buf = order.AppendUint16(b.buf, uint16(uts&ttlLowMask))
 
 	b.count++
 	b.expCount++
@@ -198,12 +237,14 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 
 		// has ttl
 		if idx.hasTTL() {
-			ttl := int64(*(*uint64)(unsafe.Pointer(&b.buf[end])))
+			ttlHigh := uint64(*(*uint32)(unsafe.Pointer(&b.buf[end])))
+			ttlLow := uint64(*(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes])))
+			ttl := int64((ttlHigh << ttlLowBits) | (ttlLow & ttlLowMask))
 
 			// not expired
 			if b.timeAlive(ttl) {
 				b.RUnlock()
-				return b.buf[start:end], ttl, true
+				return b.buf[start:end], ttl * timeCarry, true
 
 			} else {
 				// delete
@@ -211,12 +252,12 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 				b.Lock()
 				b.idx.Delete(key)
 				b.Unlock()
-				return nil, -1, false
+				return nil, ttl * timeCarry, false
 			}
 
 		} else {
 			b.RUnlock()
-			return b.buf[start:end], noTTL, true
+			return b.buf[start:end], 0, true
 		}
 	}
 
@@ -247,7 +288,14 @@ func (c *GigaCache[K]) Len() (r int) {
 }
 
 func (b *bucket[K]) timeAlive(ttl int64) bool {
-	return ttl > globalClock || ttl == noTTL
+	return ttl > g_clock
+}
+
+func (b *bucket[K]) ttlAlive(h uint32, l uint16) bool {
+	if h >= g_h {
+		return l >= g_l
+	}
+	return false
 }
 
 // eliminate the expired key-value pairs.
@@ -265,10 +313,11 @@ func (b *bucket[K]) eliminate() {
 
 		if ok && idx.hasTTL() {
 			end := idx.start() + idx.offset()
-			ttl := int64(*(*uint64)(unsafe.Pointer(&b.buf[end])))
+			h := *(*uint32)(unsafe.Pointer(&b.buf[end]))
+			l := *(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes]))
 
 			// expired
-			if !b.timeAlive(ttl) {
+			if !b.ttlAlive(h, l) {
 				b.idx.Delete(k)
 				b.expCount--
 				failCont = 0
@@ -302,10 +351,12 @@ func (b *bucket[K]) compress(rate float64) {
 	b.idx.Scan(func(key K, idx Idx) {
 		// offset only contains value, except ttl
 		start, offset, has := idx.start(), idx.offset(), idx.hasTTL()
+		end := start + offset
 
 		if has {
-			ttl := int64(*(*uint64)(unsafe.Pointer(&b.buf[start+offset])))
-			if !b.timeAlive(ttl) {
+			h := *(*uint32)(unsafe.Pointer(&b.buf[end]))
+			l := *(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes]))
+			if !b.ttlAlive(h, l) {
 				delKeys = append(delKeys, key)
 				return
 			}
@@ -314,11 +365,11 @@ func (b *bucket[K]) compress(rate float64) {
 		// reset
 		b.idx.Set(key, newIdx(len(nbuf), offset, has))
 		if has {
-			nbuf = append(nbuf, b.buf[start:start+offset+ttlBits]...)
+			nbuf = append(nbuf, b.buf[start:end+ttlBytes]...)
 			b.expCount++
 
 		} else {
-			nbuf = append(nbuf, b.buf[start:start+offset]...)
+			nbuf = append(nbuf, b.buf[start:end]...)
 		}
 
 		b.count++
