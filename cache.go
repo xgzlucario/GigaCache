@@ -239,7 +239,7 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 		if idx.hasTTL() {
 			ttlHigh := uint64(*(*uint32)(unsafe.Pointer(&b.buf[end])))
 			ttlLow := uint64(*(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes])))
-			ttl := int64((ttlHigh << ttlLowBits) | (ttlLow & ttlLowMask))
+			ttl := int64((ttlHigh << ttlLowBits) | ttlLow)
 
 			// not expired
 			if b.timeAlive(ttl) {
@@ -252,7 +252,7 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 				b.Lock()
 				b.idx.Delete(key)
 				b.Unlock()
-				return nil, ttl * timeCarry, false
+				return nil, 0, false
 			}
 
 		} else {
@@ -262,7 +262,7 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 	}
 
 	b.RUnlock()
-	return nil, -1, false
+	return nil, 0, false
 }
 
 // Delete
@@ -356,6 +356,8 @@ func (b *bucket[K]) compress(rate float64) {
 		if has {
 			h := *(*uint32)(unsafe.Pointer(&b.buf[end]))
 			l := *(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes]))
+
+			// expired
 			if !b.ttlAlive(h, l) {
 				delKeys = append(delKeys, key)
 				return

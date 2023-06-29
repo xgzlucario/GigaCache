@@ -29,19 +29,6 @@ func B2S(buf []byte) *string {
 }
 
 func main() {
-	// for {
-	// 	ww := time.Now().UnixMilli()
-	// 	fmt.Println("====================================")
-
-	// 	// millisecond(32 x1)(16 x2)
-	// 	x1, x2 := uint32(ww>>16), uint16(ww&math.MaxUint16)
-
-	// 	fmt.Println(ww, x1, x2)
-	// 	fmt.Println(ww, uint64(x1)<<16|uint64(x2))
-
-	// 	time.Sleep(time.Second)
-	// }
-
 	go http.ListenAndServe("localhost:6060", nil)
 
 	a := time.Now()
@@ -53,14 +40,18 @@ func main() {
 	bc := cache.NewGigaCache[string]()
 
 	// Test
-	bc.SetEx("xgz", []byte("1ds"), time.Hour*77)
-	c, ts, ok := bc.GetTx("xgz")
-	fmt.Println(string(c), time.Unix(0, ts), time.Now().Add(time.Hour*77), ok)
+	for i := 0; i < 10; i++ {
+		bc.SetEx("xgz"+strconv.Itoa(i), []byte("1"), time.Second*time.Duration(i))
+	}
 
-	bc.SetEx("xgz1", []byte("1ds"), time.Second)
-	time.Sleep(time.Second + time.Millisecond)
-	c, ts, ok = bc.GetTx("xgz1")
-	fmt.Println(string(c), time.Unix(0, ts), ok)
+	for i := 0; i < 25; i++ {
+		fmt.Println()
+		for i := 0; i < 10; i++ {
+			c, ts, ok := bc.GetTx("xgz" + strconv.Itoa(i))
+			fmt.Println(string(c), time.Unix(0, ts), ok)
+		}
+		time.Sleep(time.Second / 2)
+	}
 
 	// Stat
 	go func() {
