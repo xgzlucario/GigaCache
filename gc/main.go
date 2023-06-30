@@ -33,7 +33,7 @@ func main() {
 	entries := 0
 	repeat := 0
 	valueSize := 0
-	flag.StringVar(&c, "cache", "bigcache", "cache to bench.")
+	flag.StringVar(&c, "cache", "gigacache", "cache to bench.")
 	flag.IntVar(&entries, "entries", 20000000, "number of entries to test")
 	flag.IntVar(&repeat, "repeat", 50, "number of repetitions")
 	flag.IntVar(&valueSize, "value-size", 100, "size of single entry value in bytes")
@@ -75,7 +75,7 @@ func stdMap(entries, valueSize int) {
 }
 
 func gigaCache(entries, valueSize int) {
-	c := cache.NewExtGigaCache[string](256)
+	c := cache.NewGigaCache[string](256)
 	for i := 0; i < entries; i++ {
 		key, val := generateKeyValue(i, valueSize)
 		c.Set(key, val)

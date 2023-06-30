@@ -51,10 +51,10 @@ cpu: 13th Gen Intel(R) Core(TM) i5-13600KF
 **Set**
 
 ```bash
-BenchmarkSet/stdmap/Set-20         	 4417606	       263.9 ns/op	     144 B/op	       1 allocs/op
-BenchmarkSet/gigacache/Set-20      	 5784351	       215.2 ns/op	     120 B/op	       1 allocs/op
-BenchmarkSet/gigacache/SetTx-20    	 4062008	       354.2 ns/op	     191 B/op	       1 allocs/op
-BenchmarkSet/ttlcache/Set-20       	 2794053	       485.4 ns/op	     187 B/op	       2 allocs/op
+BenchmarkSet/stdmap/Set-20         	 4527399	       268.2 ns/op	     140 B/op	       1 allocs/op
+BenchmarkSet/gigacache/Set-20      	 6353096	       211.0 ns/op	     110 B/op	       1 allocs/op
+BenchmarkSet/gigacache/SetTx-20    	 4177327	       352.9 ns/op	     183 B/op	       1 allocs/op
+BenchmarkSet/ttlcache/Set-20       	 2748000	       491.9 ns/op	     187 B/op	       2 allocs/op
 ```
 
 **Get** from 100k entries.

@@ -7,6 +7,7 @@ require (
 	github.com/jellydator/ttlcache/v3 v3.0.1
 	github.com/klauspost/compress v1.16.6
 	github.com/zeebo/xxh3 v1.0.2
+	golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df
 )
 
 require (

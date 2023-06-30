@@ -3,10 +3,11 @@ package cache
 import (
 	"encoding/binary"
 	"math"
-	"math/rand"
 	"sync"
 	"time"
 	"unsafe"
+
+	"golang.org/x/exp/rand"
 
 	"github.com/bytedance/sonic"
 	"github.com/klauspost/compress/s2"
@@ -30,6 +31,7 @@ const (
 	offsetMask = math.MaxUint32
 
 	probeCount        = 100
+	probeSpace        = 3
 	compressThreshold = 0.5
 
 	bufferSize         = 1024
@@ -41,14 +43,14 @@ var (
 	order = binary.LittleEndian
 
 	// Global clock
-	g_clock = time.Now().UnixMilli()
+	clock = time.Now().UnixMilli()
 )
 
 func init() {
 	go func() {
 		ticker := time.NewTicker(time.Millisecond)
 		for t := range ticker.C {
-			g_clock = t.UnixMilli()
+			clock = t.UnixMilli()
 		}
 	}()
 }
@@ -100,16 +102,12 @@ type bucket[K comparable] struct {
 }
 
 // NewGigaCache returns a new GigaCache.
-func NewGigaCache[K comparable]() *GigaCache[K] {
-	return newCache[K](defaultShardsCount)
-}
+func NewGigaCache[K comparable](count ...int) *GigaCache[K] {
+	var shards = defaultShardsCount
+	if len(count) > 0 {
+		shards = count[0]
+	}
 
-// NewExtGigaCache returns a new GigaCache with shards specified.
-func NewExtGigaCache[K comparable](shards int) *GigaCache[K] {
-	return newCache[K](shards)
-}
-
-func newCache[K comparable](shards int) *GigaCache[K] {
 	cc := &GigaCache[K]{
 		mask:    uint64(shards - 1),
 		buckets: make([]*bucket[K], shards),
@@ -184,7 +182,7 @@ func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 	b.buf = append(b.buf, val...)
 
 	// ttl
-	uts := uint64(g_clock + int64(dur)/timeCarry)
+	uts := uint64(clock + int64(dur)/timeCarry)
 	b.buf = order.AppendUint32(b.buf, uint32(uts>>ttlLowBits))
 	b.buf = order.AppendUint16(b.buf, uint16(uts&ttlLowMask))
 
@@ -195,7 +193,7 @@ func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 
 // SetTx set deadline with key-value pairs.
 func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
-	if ts < g_clock {
+	if ts < clock {
 		return
 	}
 
@@ -233,22 +231,19 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 
 		// has ttl
 		if idx.hasTTL() {
-			h := uint64(*(*uint32)(unsafe.Pointer(&b.buf[end])))
-			l := uint64(*(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes])))
-			ttl := int64((h << ttlLowBits) | l)
+			ttl := parseTTL(b.buf[end:])
 
-			// not expired
-			if b.timeAlive(ttl) {
-				b.RUnlock()
-				return b.buf[start:end], ttl * timeCarry, true
-
-			} else {
-				// delete
+			// expired
+			if ttl < clock {
 				b.RUnlock()
 				b.Lock()
 				b.idx.Delete(key)
 				b.Unlock()
 				return nil, 0, false
+
+			} else {
+				b.RUnlock()
+				return b.buf[start:end], ttl * timeCarry, true
 			}
 
 		} else {
@@ -283,8 +278,12 @@ func (c *GigaCache[K]) Len() (r int) {
 	return
 }
 
-func (b *bucket[K]) timeAlive(ttl int64) bool {
-	return ttl > g_clock
+func parseTTL(b []byte) int64 {
+	_ = b[ttlBytes-1]
+	return int64(
+		(uint64(*(*uint32)(unsafe.Pointer(&b[0]))) << ttlLowBits) |
+			uint64(*(*uint16)(unsafe.Pointer(&b[ttlHighBytes]))),
+	)
 }
 
 // eliminate the expired key-value pairs.
@@ -298,16 +297,14 @@ func (b *bucket[K]) eliminate() {
 
 	// probing
 	for i := uint64(0); i < probeCount; i++ {
-		k, idx, ok := b.idx.GetPos(rdm + i*3)
+		k, idx, ok := b.idx.GetPos(rdm + i*probeSpace)
 
 		if ok && idx.hasTTL() {
 			end := idx.start() + idx.offset()
-			h := uint64(*(*uint32)(unsafe.Pointer(&b.buf[end])))
-			l := uint64(*(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes])))
-			ttl := int64((h << ttlLowBits) | l)
+			ttl := parseTTL(b.buf[end:])
 
 			// expired
-			if !b.timeAlive(ttl) {
+			if ttl < clock {
 				b.idx.Delete(k)
 				b.expCount--
 				failCont = 0
@@ -344,12 +341,10 @@ func (b *bucket[K]) compress(rate float64) {
 		end := start + offset
 
 		if has {
-			h := uint64(*(*uint32)(unsafe.Pointer(&b.buf[end])))
-			l := uint64(*(*uint16)(unsafe.Pointer(&b.buf[end+ttlHighBytes])))
-			ttl := int64((h << ttlLowBits) | l)
+			ttl := parseTTL(b.buf[end:])
 
 			// expired
-			if !b.timeAlive(ttl) {
+			if ttl < clock {
 				delKeys = append(delKeys, key)
 				return
 			}

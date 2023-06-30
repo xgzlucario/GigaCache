@@ -23,11 +23,6 @@ func S2B(str *string) []byte {
 	return *(*[]byte)(unsafe.Pointer(&byteSliceHeader))
 }
 
-// Bytes convert to string unsafe
-func B2S(buf []byte) *string {
-	return (*string)(unsafe.Pointer(&buf))
-}
-
 func main() {
 	go http.ListenAndServe("localhost:6060", nil)
 
@@ -44,13 +39,13 @@ func main() {
 	// 	bc.SetEx("xgz"+strconv.Itoa(i), []byte("1"), time.Second*time.Duration(i))
 	// }
 
-	// for i := 0; i < 25; i++ {
+	// for i := 0; i < 10; i++ {
 	// 	fmt.Println()
 	// 	for i := 0; i < 10; i++ {
 	// 		c, ts, ok := bc.GetTx("xgz" + strconv.Itoa(i))
 	// 		fmt.Println(string(c), time.Unix(0, ts), ok)
 	// 	}
-	// 	time.Sleep(time.Second / 2)
+	// 	time.Sleep(time.Second)
 	// }
 
 	// Stat
@@ -60,11 +55,7 @@ func main() {
 			runtime.ReadMemStats(&mem)
 
 			fmt.Printf("[Cache] %.1fs\t count: %dk\t num: %dk\t mem: %d MB\t avg: %.2f ns\n",
-				time.Since(a).Seconds(),
-				count/1000,
-				bc.Len()/1000,
-				mem.HeapAlloc/1e6,
-				sum/float64(stat))
+				time.Since(a).Seconds(), count/1e3, bc.Len()/1e3, mem.HeapAlloc/1e6, sum/float64(stat))
 		}
 	}()
 
@@ -74,9 +65,10 @@ func main() {
 			a := time.Now()
 			ph := strconv.Itoa(i)
 
-			val, ok := bc.Get(ph)
+			val, _, ok := bc.GetTx(ph)
 			if ok && !bytes.Equal(S2B(&ph), val) {
 				panic("key and value not equal")
+
 			}
 
 			c := time.Since(a).Microseconds()
@@ -85,7 +77,7 @@ func main() {
 
 			time.Sleep(time.Microsecond)
 
-			i %= 99999
+			i %= 1e6
 		}
 	}()
 
