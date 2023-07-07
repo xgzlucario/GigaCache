@@ -35,18 +35,18 @@ func main() {
 	bc := cache.NewGigaCache[string]()
 
 	// Test
-	// for i := 0; i < 10; i++ {
-	// 	bc.SetEx("xgz"+strconv.Itoa(i), []byte("1"), time.Second*time.Duration(i))
-	// }
+	for i := 0; i < 10; i++ {
+		bc.SetEx("xgz"+strconv.Itoa(i), []byte("1"), time.Second*time.Duration(i))
+	}
 
-	// for i := 0; i < 10; i++ {
-	// 	fmt.Println()
-	// 	for i := 0; i < 10; i++ {
-	// 		c, ts, ok := bc.GetTx("xgz" + strconv.Itoa(i))
-	// 		fmt.Println(string(c), time.Unix(0, ts), ok)
-	// 	}
-	// 	time.Sleep(time.Second)
-	// }
+	for i := 0; i < 10; i++ {
+		fmt.Println()
+		for i := 0; i < 10; i++ {
+			c, ts, ok := bc.GetTx("xgz" + strconv.Itoa(i))
+			fmt.Println(string(c), time.Unix(0, ts), ok)
+		}
+		time.Sleep(time.Second)
+	}
 
 	// Stat
 	go func() {
@@ -54,8 +54,8 @@ func main() {
 			time.Sleep(time.Second)
 			runtime.ReadMemStats(&mem)
 
-			fmt.Printf("[Cache] %.1fs\t count: %dk\t num: %dk\t mem: %d MB\t avg: %.2f ns\n",
-				time.Since(a).Seconds(), count/1e3, bc.Len()/1e3, mem.HeapAlloc/1e6, sum/float64(stat))
+			fmt.Printf("[Cache] %.0fs\t count: %dk\t num: %dk\t avg: %.2f ns\n",
+				time.Since(a).Seconds(), count/1e3, bc.Len()/1e3, sum/float64(stat))
 		}
 	}()
 
@@ -77,7 +77,7 @@ func main() {
 
 			time.Sleep(time.Microsecond)
 
-			i %= 1e6
+			i %= 1e9
 		}
 	}()
 
