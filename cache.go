@@ -30,12 +30,15 @@ const (
 
 	offsetMask = math.MaxUint32
 
+	bufferSize         = 1024
+	defaultShardsCount = 1024
+
+	// eliminate probing
+	probeInterval     = 3
 	probeCount        = 100
 	probeSpace        = 3
 	compressThreshold = 0.5
-
-	bufferSize         = 1024
-	defaultShardsCount = 1024
+	maxFailCount      = 3
 )
 
 var (
@@ -94,10 +97,9 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	count    uint32 // The number of all keys
-	expCount uint32 // The number of keys with expiration times
-	buf      []byte
-	idx      *Map[K, Idx]
+	count uint32
+	buf   []byte
+	idx   *Map[K, Idx]
 	sync.RWMutex
 }
 
@@ -116,7 +118,7 @@ func NewGigaCache[K comparable](count ...int) *GigaCache[K] {
 
 	for i := range cc.buckets {
 		cc.buckets[i] = &bucket[K]{
-			idx: New[K, Idx](0),
+			idx: newMap[K, Idx](0),
 			buf: make([]byte, 0, bufferSize),
 		}
 	}
@@ -187,7 +189,6 @@ func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 	b.buf = order.AppendUint16(b.buf, uint16(uts&ttlLowMask))
 
 	b.count++
-	b.expCount++
 	b.Unlock()
 }
 
@@ -210,7 +211,6 @@ func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
 	b.buf = order.AppendUint16(b.buf, uint16(uts&ttlLowMask))
 
 	b.count++
-	b.expCount++
 	b.Unlock()
 }
 
@@ -224,6 +224,7 @@ func (c *GigaCache[K]) Get(key K) ([]byte, bool) {
 func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 	b := c.getShard(key)
 	b.RLock()
+	defer b.RUnlock()
 
 	if idx, ok := b.idx.Get(key); ok {
 		start := idx.start()
@@ -235,24 +236,17 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 
 			// expired
 			if ttl < clock {
-				b.RUnlock()
-				b.Lock()
-				b.idx.Delete(key)
-				b.Unlock()
 				return nil, 0, false
 
 			} else {
-				b.RUnlock()
 				return b.buf[start:end], ttl * timeCarry, true
 			}
 
 		} else {
-			b.RUnlock()
 			return b.buf[start:end], 0, true
 		}
 	}
 
-	b.RUnlock()
 	return nil, 0, false
 }
 
@@ -260,9 +254,10 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 func (c *GigaCache[K]) Delete(key K) (ok bool) {
 	b := c.getShard(key)
 	b.Lock()
-	b.eliminate()
 
 	_, ok = b.idx.Delete(key)
+	b.eliminate()
+
 	b.Unlock()
 
 	return
@@ -288,7 +283,7 @@ func parseTTL(b []byte) int64 {
 
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
-	if b.expCount == 0 {
+	if b.count%probeInterval != 0 {
 		return
 	}
 
@@ -306,14 +301,13 @@ func (b *bucket[K]) eliminate() {
 			// expired
 			if ttl < clock {
 				b.idx.Delete(k)
-				b.expCount--
 				failCont = 0
 				continue
 			}
 		}
 
 		failCont++
-		if failCont > 2 {
+		if failCont > maxFailCount {
 			break
 		}
 	}
@@ -328,7 +322,6 @@ func (b *bucket[K]) eliminate() {
 // Trigger when the valid count (valid / total) in the cache is less than this value
 func (b *bucket[K]) compress(rate float64) {
 	b.count = 0
-	b.expCount = 0
 
 	newCap := float64(len(b.buf)) * rate
 	nbuf := make([]byte, 0, int(newCap))
@@ -354,8 +347,6 @@ func (b *bucket[K]) compress(rate float64) {
 		b.idx.Set(key, newIdx(len(nbuf), offset, has))
 		if has {
 			nbuf = append(nbuf, b.buf[start:end+ttlBytes]...)
-			b.expCount++
-
 		} else {
 			nbuf = append(nbuf, b.buf[start:end]...)
 		}

@@ -51,7 +51,7 @@ func main() {
 	// Stat
 	go func() {
 		for {
-			time.Sleep(time.Second)
+			time.Sleep(time.Second * 3)
 			runtime.ReadMemStats(&mem)
 
 			fmt.Printf("[Cache] %.0fs\t count: %dk\t num: %dk\t avg: %.2f ns\n",

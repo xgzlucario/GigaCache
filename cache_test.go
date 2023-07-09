@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/exp/rand"
+
 	"github.com/jellydator/ttlcache/v3"
 )
 
@@ -15,6 +17,30 @@ const (
 var (
 	str = []byte("0123456789")
 )
+
+func TestIdx(b *testing.T) {
+	for i := 0; i < 1e8; i++ {
+		a, b := int(rand.Uint32()), int(rand.Uint32()>>1)
+		idx := newIdx(int(a), int(b), i%2 == 0)
+
+		if idx.start() != a {
+			panic("a")
+		}
+		if idx.offset() != b {
+			panic("b")
+		}
+
+		if i%2 == 0 {
+			if !idx.hasTTL() {
+				panic("c")
+			}
+		} else {
+			if idx.hasTTL() {
+				panic("c")
+			}
+		}
+	}
+}
 
 func BenchmarkSet(b *testing.B) {
 	m1 := map[string][]byte{}

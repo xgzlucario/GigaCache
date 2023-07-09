@@ -73,7 +73,7 @@ type Map[K comparable, V any] struct {
 }
 
 // New returns a new Map. Like map[string]interface{}
-func New[K comparable, V any](cap int) *Map[K, V] {
+func newMap[K comparable, V any](cap int) *Map[K, V] {
 	m := new(Map[K, V])
 	m.cap = cap
 	sz := 8
@@ -103,7 +103,7 @@ func (m *Map[K, V]) detectHasher() {
 }
 
 func (m *Map[K, V]) resize(newCap int) {
-	nmap := New[K, V](newCap)
+	nmap := newMap[K, V](newCap)
 	for i := 0; i < len(m.buckets); i++ {
 		if m.buckets[i].dib() > 0 {
 			nmap.set(m.buckets[i].hash(), m.buckets[i].key, m.buckets[i].value)
@@ -118,7 +118,7 @@ func (m *Map[K, V]) resize(newCap int) {
 // Returns the previous value, or false when no value was assigned.
 func (m *Map[K, V]) Set(key K, value V) (V, bool) {
 	if len(m.buckets) == 0 {
-		*m = *New[K, V](0)
+		*m = *newMap[K, V](0)
 	}
 	if m.length >= m.growAt {
 		m.resize(len(m.buckets) * 2)
