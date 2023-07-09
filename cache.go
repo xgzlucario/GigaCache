@@ -38,7 +38,7 @@ const (
 	probeCount        = 100
 	probeSpace        = 3
 	compressThreshold = 0.5
-	maxFailCount      = 3
+	maxFailCount      = 4
 )
 
 var (

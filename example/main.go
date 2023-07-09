@@ -49,13 +49,21 @@ func main() {
 	}
 
 	// Stat
+	var maxNum int
 	go func() {
-		for {
-			time.Sleep(time.Second * 3)
+		for i := 0; ; i++ {
+			time.Sleep(time.Second)
 			runtime.ReadMemStats(&mem)
 
-			fmt.Printf("[Cache] %.0fs\t count: %dk\t num: %dk\t avg: %.2f ns\n",
-				time.Since(a).Seconds(), count/1e3, bc.Len()/1e3, sum/float64(stat))
+			n := bc.Len() / 1e3
+			if n > maxNum {
+				maxNum = n
+			}
+
+			if i%10 == 0 {
+				fmt.Printf("[Cache] %.0fs\t count: %dk\t num: %dk\t maxNum: %dk\t avg: %.2f ns\n",
+					time.Since(a).Seconds(), count/1e3, n, maxNum, sum/float64(stat))
+			}
 		}
 	}()
 
