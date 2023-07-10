@@ -53,28 +53,30 @@ cpu: 13th Gen Intel(R) Core(TM) i5-13600KF
 
 Gigache Set operation has better performance than stdmap.
 
-| Benchmark                       | Iter    | time/op     | bytes/op | alloc/op    |
-| ------------------------------- | ------- | ----------- | -------- | ----------- |
-| BenchmarkSet/stdmap/Set-20      | 4432566 | 278.5 ns/op | 143 B/op | 1 allocs/op |
-| BenchmarkSet/gigacache/Set-20   | 5621235 | 251.9 ns/op | 123 B/op | 1 allocs/op |
-| BenchmarkSet/gigacache/SetTx-20 | 4691262 | 306.7 ns/op | 174 B/op | 1 allocs/op |
-| BenchmarkSet/ttlcache/Set-20    | 2810002 | 507.5 ns/op | 187 B/op | 2 allocs/op |
+| Benchmark           | Iter    | time/op     | bytes/op | alloc/op    |
+| ------------------- | ------- | ----------- | -------- | ----------- |
+| Set/stdmap-20       | 4059187 | 315.2 ns/op | 156 B/op | 1 allocs/op |
+| Set/syncmap-20      | 2632218 | 385.3 ns/op | 126 B/op | 5 allocs/op |
+| Set/gigacache-20    | 4897693 | 277.9 ns/op | 133 B/op | 1 allocs/op |
+| Set/gigacache/Tx-20 | 4355415 | 328.2 ns/op | 161 B/op | 1 allocs/op |
 
 **Get** from 100k entries.
 
-| Benchmark                 | Iter     | time/op     | bytes/op | alloc/op    |
-| ------------------------- | -------- | ----------- | -------- | ----------- |
-| BenchmarkGet/stdmap-20    | 10008024 | 135.0 ns/op | 7 B/op   | 0 allocs/op |
-| BenchmarkGet/gigacache-20 | 6685338  | 163.7 ns/op | 7 B/op   | 0 allocs/op |
-| BenchmarkGet/ttlcache-20  | 2045643  | 510.5 ns/op | 55 B/op  | 1 allocs/op |
+| Benchmark           | Iter    | time/op     | bytes/op | alloc/op    |
+| ------------------- | ------- | ----------- | -------- | ----------- |
+| Get/stdmap-20       | 8906018 | 150.1 ns/op | 7 B/op   | 0 allocs/op |
+| Get/syncmap-20      | 7723198 | 168.5 ns/op | 7 B/op   | 0 allocs/op |
+| Get/gigacache-20    | 7293346 | 167.1 ns/op | 7 B/op   | 0 allocs/op |
+| Get/gigacache/Tx-20 | 5621548 | 204.0 ns/op | 7 B/op   | 0 allocs/op |
 
 **Delete**
 
-| Benchmark                    | Iter     | time/op     | bytes/op | alloc/op    |
-| ---------------------------- | -------- | ----------- | -------- | ----------- |
-| BenchmarkDelete/stdmap-20    | 8512951  | 150.9 ns/op | 7 B/op   | 0 allocs/op |
-| BenchmarkDelete/gigacache-20 | 32437833 | 33.82 ns/op | 7 B/op   | 0 allocs/op |
-| BenchmarkDelete/ttlcache-20  | 2001484  | 510.7 ns/op | 55 B/op  | 1 allocs/op |
+| Benchmark              | Iter    | time/op     | bytes/op | alloc/op    |
+| ---------------------- | ------- | ----------- | -------- | ----------- |
+| Delete/stdmap-20       | 8321840 | 167.3 ns/op | 7 B/op   | 0 allocs/op |
+| Delete/syncmap-20      | 7192041 | 176.8 ns/op | 7 B/op   | 0 allocs/op |
+| Delete/gigacache-20    | 5177775 | 258.1 ns/op | 13 B/op  | 1 allocs/op |
+| Delete/gigacache/Tx-20 | 3510531 | 306.2 ns/op | 7 B/op   | 0 allocs/op |
 
 **GC pause time**（Reference to [allegro/bigcache-bench](https://github.com/allegro/bigcache-bench)）
 

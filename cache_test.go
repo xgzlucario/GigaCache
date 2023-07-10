@@ -2,12 +2,11 @@ package cache
 
 import (
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"golang.org/x/exp/rand"
-
-	"github.com/jellydator/ttlcache/v3"
 )
 
 const (
@@ -42,102 +41,120 @@ func TestIdx(b *testing.T) {
 	}
 }
 
+func getStdmap() map[string][]byte {
+	m := map[string][]byte{}
+	for i := 0; i < num; i++ {
+		m[strconv.Itoa(i)] = str
+	}
+	return m
+}
+
+func getSyncmap() sync.Map {
+	m := sync.Map{}
+	for i := 0; i < num; i++ {
+		m.Store(strconv.Itoa(i), str)
+	}
+	return m
+}
+
 func BenchmarkSet(b *testing.B) {
 	m1 := map[string][]byte{}
-	b.Run("stdmap/Set", func(b *testing.B) {
+	b.Run("stdmap", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m1[strconv.Itoa(i)] = str
 		}
 	})
 
+	m4 := sync.Map{}
+	b.Run("syncmap", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			m4.Store(strconv.Itoa(i), str)
+		}
+	})
+
 	m2 := NewGigaCache[string]()
-	b.Run("gigacache/Set", func(b *testing.B) {
+	b.Run("gigacache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m2.Set(strconv.Itoa(i), str)
 		}
 	})
 
 	m3 := NewGigaCache[string]()
-	b.Run("gigacache/SetTx", func(b *testing.B) {
+	b.Run("gigacache/Tx", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m3.SetEx(strconv.Itoa(i), str, time.Minute)
-		}
-	})
-
-	m4 := ttlcache.New[string, []byte]()
-	b.Run("ttlcache/Set", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m4.Set(strconv.Itoa(i), str, time.Minute)
 		}
 	})
 }
 
 func BenchmarkGet(b *testing.B) {
-	m1 := map[string][]byte{}
-	for i := 0; i < num; i++ {
-		m1[strconv.Itoa(i)] = str
-	}
-	b.ResetTimer()
+	m1 := getStdmap()
 	b.Run("stdmap", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			_ = m1[strconv.Itoa(i)]
 		}
 	})
 
-	m2 := NewGigaCache[string]()
-	for i := 0; i < num; i++ {
-		m2.SetEx(strconv.Itoa(i), str, time.Minute)
-	}
-	b.ResetTimer()
-	b.Run("gigacache", func(b *testing.B) {
+	m2 := getSyncmap()
+	b.Run("syncmap", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			m2.Get(strconv.Itoa(i))
+			m2.Load(strconv.Itoa(i))
 		}
 	})
 
-	m3 := ttlcache.New[string, []byte]()
+	m3 := NewGigaCache[string]()
 	for i := 0; i < num; i++ {
-		m3.Set(strconv.Itoa(i), str, time.Minute)
+		m3.Set(strconv.Itoa(i), str)
 	}
-	b.ResetTimer()
-	b.Run("ttlcache", func(b *testing.B) {
+	b.Run("gigacache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m3.Get(strconv.Itoa(i))
+		}
+	})
+
+	m4 := NewGigaCache[string]()
+	for i := 0; i < num; i++ {
+		m4.SetEx(strconv.Itoa(i), str, time.Minute)
+	}
+	b.Run("gigacache/Tx", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			m4.Get(strconv.Itoa(i))
 		}
 	})
 }
 
 func BenchmarkDelete(b *testing.B) {
-	m1 := map[string][]byte{}
-	for i := 0; i < num; i++ {
-		m1[strconv.Itoa(i)] = str
-	}
-	b.ResetTimer()
+	m1 := getStdmap()
 	b.Run("stdmap", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			delete(m1, strconv.Itoa(i))
 		}
 	})
 
-	m2 := NewGigaCache[string]()
-	for i := 0; i < num; i++ {
-		m2.Delete(strconv.Itoa(i))
-	}
-	b.ResetTimer()
-	b.Run("gigacache", func(b *testing.B) {
+	m2 := getSyncmap()
+	b.Run("syncmap", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			m2.Get(strconv.Itoa(i))
+			m2.Delete(strconv.Itoa(i))
 		}
 	})
 
-	m3 := ttlcache.New[string, []byte]()
+	m3 := NewGigaCache[string]()
 	for i := 0; i < num; i++ {
-		m3.Set(strconv.Itoa(i), str, time.Minute)
+		m3.Set(strconv.Itoa(i), str)
 	}
-	b.ResetTimer()
-	b.Run("ttlcache", func(b *testing.B) {
+	b.Run("gigacache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			m3.Get(strconv.Itoa(i))
+			m3.Delete(strconv.Itoa(i))
+		}
+	})
+
+	m4 := NewGigaCache[string]()
+	for i := 0; i < num; i++ {
+		m4.SetEx(strconv.Itoa(i), str, time.Minute)
+	}
+	b.Run("gigacache/Tx", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			m4.Delete(strconv.Itoa(i))
 		}
 	})
 }

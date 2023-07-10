@@ -35,15 +35,16 @@ func main() {
 	bc := cache.NewGigaCache[string]()
 
 	// Test
-	for i := 0; i < 10; i++ {
-		bc.SetEx("xgz"+strconv.Itoa(i), []byte("1"), time.Second*time.Duration(i))
+	for i := 1; i < 10; i++ {
+		bc.SetEx("xgz"+strconv.Itoa(i), []byte(strconv.Itoa(i)), time.Second*time.Duration(i))
 	}
+	bc.SetTx("xgz2", []byte("haha"), time.Now().Add(time.Second*15))
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 11; i++ {
 		fmt.Println()
 		for i := 0; i < 10; i++ {
 			c, ts, ok := bc.GetTx("xgz" + strconv.Itoa(i))
-			fmt.Println(string(c), time.Unix(0, ts), ok)
+			fmt.Println("xgz"+strconv.Itoa(i), string(c), "ts:", ts.Format(time.DateTime), "ok:", ok)
 		}
 		time.Sleep(time.Second)
 	}
@@ -62,7 +63,7 @@ func main() {
 
 			if i%100 == 0 {
 				fmt.Printf("[Cache] %.0fs\t count: %dk\t num: %dk\t maxNum: %dk\t avg: %.2f ns\n",
-					time.Since(a).Seconds(), count/1e6, n, maxNum, sum/float64(stat))
+					time.Since(a).Seconds(), count/1e3, n, maxNum, sum/float64(stat))
 			}
 		}
 	}()
