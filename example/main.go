@@ -52,7 +52,7 @@ func main() {
 	var maxNum int
 	go func() {
 		for i := 0; ; i++ {
-			time.Sleep(time.Second)
+			time.Sleep(time.Second / 10)
 			runtime.ReadMemStats(&mem)
 
 			n := bc.Len() / 1e3
@@ -60,9 +60,9 @@ func main() {
 				maxNum = n
 			}
 
-			if i%10 == 0 {
+			if i%100 == 0 {
 				fmt.Printf("[Cache] %.0fs\t count: %dk\t num: %dk\t maxNum: %dk\t avg: %.2f ns\n",
-					time.Since(a).Seconds(), count/1e3, n, maxNum, sum/float64(stat))
+					time.Since(a).Seconds(), count/1e6, n, maxNum, sum/float64(stat))
 			}
 		}
 	}()
@@ -93,6 +93,6 @@ func main() {
 	for i := 0; ; i++ {
 		count++
 		v := strconv.Itoa(i)
-		bc.SetEx(v, S2B(&v), time.Second*10)
+		bc.SetEx(v, S2B(&v), time.Second)
 	}
 }
