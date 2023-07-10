@@ -49,8 +49,8 @@ func getStdmap() map[string][]byte {
 	return m
 }
 
-func getSyncmap() sync.Map {
-	m := sync.Map{}
+func getSyncmap() *sync.Map {
+	m := &sync.Map{}
 	for i := 0; i < num; i++ {
 		m.Store(strconv.Itoa(i), str)
 	}
