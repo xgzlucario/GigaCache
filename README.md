@@ -36,10 +36,6 @@ func main() {
 
 # Benchmark
 
-**Performance**
-
-GigaCache is compared to stdmap、[jellydator/ttlcache](https://github.com/jellydator/ttlcache).
-
 **Environment**
 
 ```
