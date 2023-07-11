@@ -28,11 +28,11 @@ const (
 	defaultShardsCount = 1024
 
 	// eliminate probing
-	probeInterval     = 2
+	probeInterval     = 3
 	probeCount        = 100
 	probeSpace        = 3
 	compressThreshold = 0.5
-	maxFailCount      = 3
+	maxFailCount      = 5
 )
 
 var (
