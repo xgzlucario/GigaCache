@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"strconv"
 	"sync"
 	"testing"
@@ -37,6 +38,43 @@ func TestIdx(b *testing.T) {
 			if idx.hasTTL() {
 				panic("c")
 			}
+		}
+	}
+}
+
+func TestCache(t *testing.T) {
+	m := NewGigaCache[string]()
+	vmap := make(map[string][]byte, num)
+	tmap := make(map[string]int64, num)
+
+	for i := 0; i < num/10; i++ {
+		si := strconv.Itoa(i)
+		t := time.Now().Add(time.Minute)
+
+		m.SetTx(si, []byte(si), t.UnixNano())
+		vmap[si] = []byte(si)
+		tmap[si] = t.Unix() * int64(timeCarry)
+	}
+
+	// check value
+	for k, v := range vmap {
+		vv, ok := m.Get(k)
+		if !ok {
+			t.Fatal("not found")
+		}
+		if !bytes.Equal(v, vv) {
+			t.Fatal("value not equal")
+		}
+	}
+
+	// check time
+	for k, v := range tmap {
+		_, ts, ok := m.GetTx(k)
+		if !ok {
+			t.Fatal("not found")
+		}
+		if v != ts {
+			t.Fatalf("time not equal: %v != %v", ts, v)
 		}
 	}
 }

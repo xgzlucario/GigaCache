@@ -38,13 +38,12 @@ func main() {
 	for i := 1; i < 10; i++ {
 		bc.SetEx("xgz"+strconv.Itoa(i), []byte(strconv.Itoa(i)), time.Second*time.Duration(i))
 	}
-	bc.SetTx("xgz2", []byte("haha"), time.Now().Add(time.Second*15))
 
-	for i := 0; i < 11; i++ {
+	for i := 0; i < 12; i++ {
 		fmt.Println()
 		for i := 0; i < 10; i++ {
 			c, ts, ok := bc.GetTx("xgz" + strconv.Itoa(i))
-			fmt.Println("xgz"+strconv.Itoa(i), string(c), "ts:", ts.Format(time.DateTime), "ok:", ok)
+			fmt.Println("xgz"+strconv.Itoa(i), string(c), time.Unix(0, ts).Format(time.DateTime), ok)
 		}
 		time.Sleep(time.Second)
 	}

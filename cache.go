@@ -20,7 +20,7 @@ const (
 
 	// for ttl
 	ttlBytes  = 4
-	timeCarry = time.Second
+	timeCarry = 1e9 // Second
 
 	offsetMask = math.MaxUint32
 
@@ -36,22 +36,26 @@ const (
 )
 
 var (
-	zeroTime, _ = time.Parse(time.DateOnly, "2023-07-01")
+	zeroUnix     int64
+	zeroUnixNano int64
 
 	// When using LittleEndian, byte slices can be converted to uint64 unsafely.
 	order = binary.LittleEndian
 
 	// now timer and offset clock since zeroTime
-	now   = time.Now()
-	clock = uint32(time.Since(zeroTime).Seconds())
+	clock uint32
 )
 
 func init() {
+	zt, _ := time.Parse(time.DateOnly, "2023-07-01")
+	zeroUnix = zt.Unix()
+	zeroUnixNano = zt.UnixNano()
+	clock = uint32(time.Now().Unix() - zeroUnix)
+
 	go func() {
 		ticker := time.NewTicker(time.Millisecond)
 		for t := range ticker.C {
-			now = t
-			clock = uint32(t.Sub(zeroTime).Seconds())
+			clock = uint32(t.Unix() - zeroUnix)
 		}
 	}()
 }
@@ -169,9 +173,10 @@ func (c *GigaCache[K]) Set(key K, val []byte) {
 }
 
 // SetEx set expiry time with key-value pairs.
+// dur should be unixnano.
 func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 	if dur < timeCarry {
-		panic("ttl must be greater than 1s")
+		panic("dur must be greater than 1s")
 	}
 
 	b := c.getShard(key)
@@ -180,7 +185,6 @@ func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 
 	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
 	b.buf = append(b.buf, val...)
-	// ttl
 	b.buf = order.AppendUint32(b.buf, clock+uint32(dur/timeCarry))
 
 	b.count++
@@ -188,8 +192,22 @@ func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 }
 
 // SetTx set deadline with key-value pairs.
-func (c *GigaCache[K]) SetTx(key K, val []byte, ts time.Time) {
-	c.SetEx(key, val, ts.Sub(now))
+// ts should be unixnano.
+func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
+	if ts < zeroUnixNano {
+		panic("ts must be greater than zeroUnixNano")
+	}
+
+	b := c.getShard(key)
+	b.Lock()
+	b.eliminate()
+
+	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
+	b.buf = append(b.buf, val...)
+	b.buf = order.AppendUint32(b.buf, uint32((ts-zeroUnixNano)/timeCarry))
+
+	b.count++
+	b.Unlock()
 }
 
 // Get
@@ -199,7 +217,7 @@ func (c *GigaCache[K]) Get(key K) ([]byte, bool) {
 }
 
 // GetTx
-func (c *GigaCache[K]) GetTx(key K) ([]byte, time.Time, bool) {
+func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 	b := c.getShard(key)
 	b.RLock()
 	defer b.RUnlock()
@@ -214,18 +232,18 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, time.Time, bool) {
 
 			// expired
 			if ttl < clock {
-				return nil, time.Time{}, false
+				return nil, 0, false
 
 			} else {
-				return b.buf[start:end], zeroTime.Add(timeCarry * time.Duration(ttl)), true
+				return b.buf[start:end], (zeroUnix + int64(ttl)) * timeCarry, true
 			}
 
 		} else {
-			return b.buf[start:end], time.Time{}, true
+			return b.buf[start:end], -1, true
 		}
 	}
 
-	return nil, time.Time{}, false
+	return nil, 0, false
 }
 
 // Delete
