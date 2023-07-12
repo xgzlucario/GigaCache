@@ -44,6 +44,7 @@ func TestIdx(t *testing.T) {
 
 func TestSetEx(t *testing.T) {
 	m := New[string](1)
+	m.Set("base", []byte("123"))
 
 	m.Set("foo", []byte("1234"))
 	l1 := m.bytesLen()
@@ -65,6 +66,25 @@ func TestSetEx(t *testing.T) {
 	l3 := m.bytesLen()
 	if l3 != l2+3 {
 		t.Fatal("4")
+	}
+
+	m = New[string](1)
+	m.Set("base", []byte("123"))
+
+	m.SetEx("foo", []byte("1234"), time.Second)
+	l1 = m.bytesLen()
+	m.Set("foo", []byte("012345"))
+	l2 = m.bytesLen()
+
+	buf, ok = m.Get("foo")
+	if !ok {
+		t.Fatal("5")
+	}
+	if !bytes.Equal(buf, []byte("012345")) {
+		t.Fatal("6")
+	}
+	if l1 != l2 {
+		t.Fatal("7")
 	}
 }
 

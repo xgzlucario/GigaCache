@@ -32,7 +32,7 @@ func main() {
 	var stat, count int64
 	var mem runtime.MemStats
 
-	bc := cache.NewGigaCache[string]()
+	bc := cache.New[string]()
 
 	// Test
 	for i := 1; i < 10; i++ {
