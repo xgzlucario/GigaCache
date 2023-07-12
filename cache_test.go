@@ -18,32 +18,58 @@ var (
 	str = []byte("0123456789")
 )
 
-func TestIdx(b *testing.T) {
+func TestIdx(t *testing.T) {
 	for i := 0; i < 1e8; i++ {
 		a, b := int(rand.Uint32()), int(rand.Uint32()>>1)
 		idx := newIdx(int(a), int(b), i%2 == 0)
 
 		if idx.start() != a {
-			panic("a")
+			t.Fatal("a")
 		}
 		if idx.offset() != b {
-			panic("b")
+			t.Fatal("b")
 		}
 
 		if i%2 == 0 {
 			if !idx.hasTTL() {
-				panic("c")
+				t.Fatal("c")
 			}
 		} else {
 			if idx.hasTTL() {
-				panic("c")
+				t.Fatal("c")
 			}
 		}
 	}
 }
 
+func TestSetEx(t *testing.T) {
+	m := New[string](1)
+
+	m.Set("foo", []byte("1234"))
+	l1 := m.bytesLen()
+	m.Set("foo", []byte("789"))
+	l2 := m.bytesLen()
+
+	buf, ok := m.Get("foo")
+	if !ok {
+		t.Fatal("1")
+	}
+	if !bytes.Equal(buf, []byte("789")) {
+		t.Fatal("2")
+	}
+	if l1 != l2 {
+		t.Fatal("3")
+	}
+
+	m.Set("bar", []byte("000"))
+	l3 := m.bytesLen()
+	if l3 != l2+3 {
+		t.Fatal("4")
+	}
+}
+
 func TestCache(t *testing.T) {
-	m := NewGigaCache[string]()
+	m := New[string]()
 	vmap := make(map[string][]byte, num)
 	tmap := make(map[string]int64, num)
 
@@ -110,14 +136,14 @@ func BenchmarkSet(b *testing.B) {
 		}
 	})
 
-	m2 := NewGigaCache[string]()
+	m2 := New[string]()
 	b.Run("gigacache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m2.Set(strconv.Itoa(i), str)
 		}
 	})
 
-	m3 := NewGigaCache[string]()
+	m3 := New[string]()
 	b.Run("gigacache/Tx", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m3.SetEx(strconv.Itoa(i), str, time.Minute)
@@ -140,7 +166,7 @@ func BenchmarkGet(b *testing.B) {
 		}
 	})
 
-	m3 := NewGigaCache[string]()
+	m3 := New[string]()
 	for i := 0; i < num; i++ {
 		m3.Set(strconv.Itoa(i), str)
 	}
@@ -150,7 +176,7 @@ func BenchmarkGet(b *testing.B) {
 		}
 	})
 
-	m4 := NewGigaCache[string]()
+	m4 := New[string]()
 	for i := 0; i < num; i++ {
 		m4.SetEx(strconv.Itoa(i), str, time.Minute)
 	}
@@ -176,7 +202,7 @@ func BenchmarkDelete(b *testing.B) {
 		}
 	})
 
-	m3 := NewGigaCache[string]()
+	m3 := New[string]()
 	for i := 0; i < num; i++ {
 		m3.Set(strconv.Itoa(i), str)
 	}
@@ -186,7 +212,7 @@ func BenchmarkDelete(b *testing.B) {
 		}
 	})
 
-	m4 := NewGigaCache[string]()
+	m4 := New[string]()
 	for i := 0; i < num; i++ {
 		m4.SetEx(strconv.Itoa(i), str, time.Minute)
 	}

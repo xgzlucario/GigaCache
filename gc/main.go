@@ -75,7 +75,7 @@ func stdMap(entries, valueSize int) {
 }
 
 func gigaCache(entries, valueSize int) {
-	c := cache.NewGigaCache[string](256)
+	c := cache.New[string](256)
 	for i := 0; i < entries; i++ {
 		key, val := generateKeyValue(i, valueSize)
 		c.Set(key, val)

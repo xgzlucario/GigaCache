@@ -12,7 +12,6 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/bytedance/sonic"
-	"github.com/klauspost/compress/s2"
 	"github.com/zeebo/xxh3"
 )
 
@@ -78,6 +77,10 @@ func (i Idx) hasTTL() bool {
 	return i&1 == 1
 }
 
+func (i Idx) hasTTLInt() int {
+	return int(i & 1)
+}
+
 func newIdx(start, offset int, hasTTL bool) Idx {
 	// bound check
 	if start > math.MaxUint32 || offset > math.MaxUint32>>1 {
@@ -107,8 +110,8 @@ type bucket[K comparable] struct {
 	sync.RWMutex
 }
 
-// NewGigaCache returns a new GigaCache.
-func NewGigaCache[K comparable](count ...int) *GigaCache[K] {
+// New returns a new GigaCache instance.
+func New[K comparable](count ...int) *GigaCache[K] {
 	var shards = defaultShardsCount
 	if len(count) > 0 {
 		shards = count[0]
@@ -169,17 +172,15 @@ func (c *GigaCache[K]) Set(key K, val []byte) {
 
 	b.eliminate()
 
+	// check if existed
 	idx, ok := b.idx.Get(key)
 	if ok {
-		start, offset := idx.start(), idx.offset()
-		if idx.hasTTL() {
-			offset += ttlBytes
-		}
+		start := idx.start()
+		offset := idx.offset() + idx.hasTTLInt()*ttlBytes
 
-		// update inplace
 		if len(val) <= offset {
 			b.idx.Set(key, newIdx(start, len(val), false))
-			b.buf = slices.Replace(b.buf, start, start+offset, val...)
+			b.buf = slices.Replace(b.buf, start, start+len(val), val...)
 			return
 		}
 	}
@@ -198,33 +199,37 @@ func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 
 	b := c.getShard(key)
 	b.Lock()
-	b.eliminate()
+	defer b.Unlock()
+	defer b.eliminate()
+
+	// check if existed
+	idx, ok := b.idx.Get(key)
+	if ok {
+		start := idx.start()
+		offset := idx.offset() + idx.hasTTLInt()*ttlBytes
+
+		// update inplace
+		if len(val)+ttlBytes <= offset {
+			b.idx.Set(key, newIdx(start, len(val), true))
+			end := start + len(val)
+
+			b.buf = slices.Replace(b.buf, start, end, val...)
+			order.PutUint32(b.buf[end:], clock+uint32(dur/timeCarry))
+			return
+		}
+	}
 
 	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
 	b.buf = append(b.buf, val...)
 	b.buf = order.AppendUint32(b.buf, clock+uint32(dur/timeCarry))
 
 	b.count++
-	b.Unlock()
 }
 
 // SetTx set deadline with key-value pairs.
 // ts should be unixnano.
 func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
-	if ts < zeroUnixNano {
-		panic("ts must be greater than zeroUnixNano")
-	}
-
-	b := c.getShard(key)
-	b.Lock()
-	b.eliminate()
-
-	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
-	b.buf = append(b.buf, val...)
-	b.buf = order.AppendUint32(b.buf, uint32((ts-zeroUnixNano)/timeCarry))
-
-	b.count++
-	b.Unlock()
+	c.SetEx(key, val, time.Duration(ts-zeroUnixNano))
 }
 
 // Get
@@ -278,6 +283,15 @@ func (c *GigaCache[K]) Len() (r int) {
 	for _, b := range c.buckets {
 		b.RLock()
 		r += b.idx.Len()
+		b.RUnlock()
+	}
+	return
+}
+
+func (c *GigaCache[K]) bytesLen() (r int) {
+	for _, b := range c.buckets {
+		b.RLock()
+		r += len(b.buf)
 		b.RUnlock()
 	}
 	return
@@ -374,25 +388,18 @@ func (c *GigaCache[K]) MarshalJSON() ([]byte, error) {
 
 	buf := make([]byte, 0, plen)
 
-	buf = append(buf, '[')
-
 	for i, b := range c.buckets {
-		buf = append(buf, '"')
-
 		b.RLock()
 		src, _ := b.MarshalJSON()
 		buf = append(buf, src...)
 		b.RUnlock()
 
-		buf = append(buf, '"')
-		if i != len(c.buckets)-1 {
-			buf = append(buf, ',')
+		if i < len(c.buckets)-1 {
+			buf = append(buf, '\n')
 		}
 	}
 
-	buf = append(buf, ']')
-
-	return s2.EncodeSnappy(nil, buf), nil
+	return buf, nil
 }
 
 type bucketJSON[K comparable] struct {
