@@ -6,7 +6,7 @@ require (
 	github.com/bytedance/sonic v1.9.2
 	github.com/klauspost/compress v1.16.7
 	github.com/zeebo/xxh3 v1.0.2
-	golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df
+	golang.org/x/exp v0.0.0-20230711153332-06a737ee72cb
 )
 
 require (

@@ -4,10 +4,12 @@ import (
 	"encoding/binary"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"golang.org/x/exp/rand"
+	"golang.org/x/exp/slices"
 
 	"github.com/bytedance/sonic"
 	"github.com/klauspost/compress/s2"
@@ -55,7 +57,7 @@ func init() {
 	go func() {
 		ticker := time.NewTicker(time.Millisecond)
 		for t := range ticker.C {
-			clock = uint32(t.Unix() - zeroUnix)
+			atomic.StoreUint32(&clock, uint32(t.Unix()-zeroUnix))
 		}
 	}()
 }
@@ -163,13 +165,28 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 func (c *GigaCache[K]) Set(key K, val []byte) {
 	b := c.getShard(key)
 	b.Lock()
+	defer b.Unlock()
+
 	b.eliminate()
+
+	idx, ok := b.idx.Get(key)
+	if ok {
+		start, offset := idx.start(), idx.offset()
+		if idx.hasTTL() {
+			offset += ttlBytes
+		}
+
+		// update inplace
+		if len(val) <= offset {
+			b.idx.Set(key, newIdx(start, len(val), false))
+			b.buf = slices.Replace(b.buf, start, start+offset, val...)
+			return
+		}
+	}
 
 	b.idx.Set(key, newIdx(len(b.buf), len(val), false))
 	b.buf = append(b.buf, val...)
-
 	b.count++
-	b.Unlock()
 }
 
 // SetEx set expiry time with key-value pairs.
@@ -309,7 +326,7 @@ func (b *bucket[K]) eliminate() {
 }
 
 // Compress migrates the unexpired data and save memory.
-// Trigger when the valid count (valid / total) in the cache is less than this value
+// Trigger when the valid count (valid / total) in the cache is less than this value.
 func (b *bucket[K]) compress(rate float64) {
 	b.count = 0
 
