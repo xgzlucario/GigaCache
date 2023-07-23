@@ -238,6 +238,27 @@ func (c *GigaCache[K]) Get(key K) ([]byte, bool) {
 	return val, ok
 }
 
+// getByIdx
+func (b *bucket[K]) getByIdx(idx Idx) ([]byte, int64, bool) {
+	start := idx.start()
+	end := start + idx.offset()
+
+	// has ttl
+	if idx.hasTTL() {
+		ttl := parseTTL(b.buf[end:])
+
+		// expired
+		if ttl < clock {
+			return nil, 0, false
+
+		} else {
+			return b.buf[start:end], (zeroUnix + int64(ttl)) * timeCarry, true
+		}
+	}
+
+	return b.buf[start:end], -1, true
+}
+
 // GetTx
 func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 	b := c.getShard(key)
@@ -245,24 +266,7 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 	defer b.RUnlock()
 
 	if idx, ok := b.idx.Get(key); ok {
-		start := idx.start()
-		end := start + idx.offset()
-
-		// has ttl
-		if idx.hasTTL() {
-			ttl := parseTTL(b.buf[end:])
-
-			// expired
-			if ttl < clock {
-				return nil, 0, false
-
-			} else {
-				return b.buf[start:end], (zeroUnix + int64(ttl)) * timeCarry, true
-			}
-
-		} else {
-			return b.buf[start:end], -1, true
-		}
+		return b.getByIdx(idx)
 	}
 
 	return nil, 0, false
@@ -276,6 +280,20 @@ func (c *GigaCache[K]) Delete(key K) (ok bool) {
 	b.eliminate()
 	b.Unlock()
 	return
+}
+
+// Scan
+func (c *GigaCache[K]) Scan(f func(K, []byte, int64)) {
+	for _, b := range c.buckets {
+		b.RLock()
+		b.idx.Scan(func(key K, idx Idx) {
+			val, ts, ok := b.getByIdx(idx)
+			if ok {
+				f(key, val, ts)
+			}
+		})
+		b.RUnlock()
+	}
 }
 
 // Len returns keys length. It returns not an exact value, it may contain expired keys.

@@ -39,12 +39,11 @@ func main() {
 		bc.SetEx("xgz"+strconv.Itoa(i), []byte(strconv.Itoa(i)), time.Second*time.Duration(i))
 	}
 
-	for i := 0; i < 12; i++ {
+	for i := 0; i < 11; i++ {
+		bc.Scan(func(key string, val []byte, ts int64) {
+			fmt.Println("xgz"+strconv.Itoa(i), string(val), time.Unix(0, ts).Format(time.DateTime))
+		})
 		fmt.Println()
-		for i := 0; i < 10; i++ {
-			c, ts, ok := bc.GetTx("xgz" + strconv.Itoa(i))
-			fmt.Println("xgz"+strconv.Itoa(i), string(c), time.Unix(0, ts).Format(time.DateTime), ok)
-		}
 		time.Sleep(time.Second)
 	}
 
