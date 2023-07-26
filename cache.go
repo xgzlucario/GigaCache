@@ -16,6 +16,9 @@ import (
 )
 
 const (
+	noTTL   = 0
+	expired = -1
+
 	startBits  = 32
 	offsetBits = 31
 
@@ -249,14 +252,14 @@ func (b *bucket[K]) getByIdx(idx Idx) ([]byte, int64, bool) {
 
 		// expired
 		if ttl < clock {
-			return nil, 0, false
+			return nil, expired, false
 
 		} else {
 			return b.buf[start:end], (zeroUnix + int64(ttl)) * timeCarry, true
 		}
 	}
 
-	return b.buf[start:end], -1, true
+	return b.buf[start:end], noTTL, true
 }
 
 // GetTx
@@ -288,7 +291,7 @@ func (c *GigaCache[K]) Scan(f func(K, []byte, int64)) {
 		b.RLock()
 		b.idx.Scan(func(key K, idx Idx) {
 			val, ts, ok := b.getByIdx(idx)
-			if ok {
+			if ok && ts != expired {
 				f(key, val, ts)
 			}
 		})
