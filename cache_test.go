@@ -20,23 +20,23 @@ var (
 
 func TestIdx(t *testing.T) {
 	for i := 0; i < 1e8; i++ {
-		a, b := int(rand.Uint32()), int(rand.Uint32()>>1)
-		idx := newIdx(int(a), int(b), i%2 == 0)
+		a, b := int(rand.Uint32()>>3), int(rand.Uint32()>>3)
+		idx := newIdx(a, b, i%2 == 0, false)
 
 		if idx.start() != a {
-			t.Fatal("a")
+			t.Fatalf("%v != %v", idx.start(), a)
 		}
 		if idx.offset() != b {
-			t.Fatal("b")
+			t.Fatalf("%v != %v", idx.offset(), b)
 		}
 
 		if i%2 == 0 {
 			if !idx.hasTTL() {
-				t.Fatal("c")
+				t.Fatal("a")
 			}
 		} else {
 			if idx.hasTTL() {
-				t.Fatal("c")
+				t.Fatal("b")
 			}
 		}
 	}
@@ -85,6 +85,19 @@ func TestSetEx(t *testing.T) {
 	}
 	if l1 != l2 {
 		t.Fatal("7")
+	}
+
+	for i := 0; i < 100; i++ {
+		m.SetAny("xgz"+strconv.Itoa(i), i)
+	}
+	for i := 0; i < 100; i++ {
+		v, ok := m.GetAny("xgz" + strconv.Itoa(i))
+		if !ok {
+			t.Fatal("8")
+		}
+		if v.(int) != i {
+			t.Fatal("9")
+		}
 	}
 }
 

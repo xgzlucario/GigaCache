@@ -35,17 +35,17 @@ func main() {
 	bc := cache.New[string]()
 
 	// Test
-	for i := 1; i < 10; i++ {
-		bc.SetEx("xgz"+strconv.Itoa(i), []byte(strconv.Itoa(i)), time.Second*time.Duration(i))
-	}
+	// for i := 1; i < 10; i++ {
+	// 	bc.SetEx("xgz"+strconv.Itoa(i), []byte(strconv.Itoa(i)), time.Second*time.Duration(i))
+	// }
 
-	for i := 0; i < 11; i++ {
-		bc.Scan(func(key string, val []byte, ts int64) {
-			fmt.Println("xgz"+strconv.Itoa(i), string(val), time.Unix(0, ts).Format(time.DateTime))
-		})
-		fmt.Println()
-		time.Sleep(time.Second)
-	}
+	// for i := 0; i < 11; i++ {
+	// 	bc.Scan(func(key string, val []byte, ts int64) {
+	// 		fmt.Println("xgz"+strconv.Itoa(i), string(val), time.Unix(0, ts).Format(time.DateTime))
+	// 	})
+	// 	fmt.Println()
+	// 	time.Sleep(time.Second)
+	// }
 
 	// Stat
 	var maxNum int

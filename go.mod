@@ -5,7 +5,7 @@ go 1.20
 require (
 	github.com/bytedance/sonic v1.10.0-rc3
 	github.com/zeebo/xxh3 v1.0.2
-	golang.org/x/exp v0.0.0-20230725093048-515e97ebf090
+	golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b
 )
 
 require (

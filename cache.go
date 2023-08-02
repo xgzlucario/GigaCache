@@ -2,7 +2,6 @@ package cache
 
 import (
 	"encoding/binary"
-	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,14 +18,9 @@ const (
 	noTTL   = 0
 	expired = -1
 
-	startBits  = 32
-	offsetBits = 31
-
 	// for ttl
 	ttlBytes  = 4
 	timeCarry = 1e9 // Second
-
-	offsetMask = math.MaxUint32
 
 	bufferSize         = 1024
 	defaultShardsCount = 1024
@@ -51,7 +45,7 @@ var (
 )
 
 func init() {
-	zt, _ := time.Parse(time.DateOnly, "2023-07-01")
+	zt, _ := time.Parse(time.DateOnly, "2023-08-01")
 	zeroUnix = zt.Unix()
 	zeroUnixNano = zt.UnixNano()
 	clock = uint32(time.Now().Unix() - zeroUnix)
@@ -64,39 +58,6 @@ func init() {
 	}()
 }
 
-// Idx is the index of BigCahce.
-// start(32)|offset(31)|hasTTL(1)
-type Idx uint64
-
-func (i Idx) start() int {
-	return int(i >> startBits)
-}
-
-func (i Idx) offset() int {
-	return int((i & offsetMask) >> 1)
-}
-
-func (i Idx) hasTTL() bool {
-	return i&1 == 1
-}
-
-func (i Idx) hasTTLInt() int {
-	return int(i & 1)
-}
-
-func newIdx(start, offset int, hasTTL bool) Idx {
-	// bound check
-	if start > math.MaxUint32 || offset > math.MaxUint32>>1 {
-		panic("index overflow")
-	}
-
-	idx := Idx(start<<startBits | offset<<1)
-	if hasTTL {
-		idx |= 1
-	}
-	return idx
-}
-
 // GigaCache
 type GigaCache[K comparable] struct {
 	kstr    bool
@@ -107,10 +68,16 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	count uint32
-	buf   []byte
-	idx   *Map[K, Idx]
+	count  uint32
+	buf    []byte
+	anyArr []anyItem
+	idx    *Map[K, Idx]
 	sync.RWMutex
+}
+
+type anyItem struct {
+	V any
+	T uint32
 }
 
 // New returns a new GigaCache instance.
@@ -128,8 +95,9 @@ func New[K comparable](count ...int) *GigaCache[K] {
 
 	for i := range cc.buckets {
 		cc.buckets[i] = &bucket[K]{
-			idx: newMap[K, Idx](0),
-			buf: make([]byte, 0, bufferSize),
+			idx:    newMap[K, Idx](0),
+			buf:    make([]byte, 0, bufferSize),
+			anyArr: make([]anyItem, 0, bufferSize),
 		}
 	}
 
@@ -182,15 +150,51 @@ func (c *GigaCache[K]) Set(key K, val []byte) {
 		offset := idx.offset() + idx.hasTTLInt()*ttlBytes
 
 		if len(val) <= offset {
-			b.idx.Set(key, newIdx(start, len(val), false))
+			b.idx.Set(key, newIdx(start, len(val), false, false))
 			b.buf = slices.Replace(b.buf, start, start+len(val), val...)
 			return
 		}
 	}
 
-	b.idx.Set(key, newIdx(len(b.buf), len(val), false))
+	b.idx.Set(key, newIdx(len(b.buf), len(val), false, false))
 	b.buf = append(b.buf, val...)
 	b.count++
+}
+
+// SetAny set key-value pairs.
+func (c *GigaCache[K]) SetAny(key K, val any) {
+	b := c.getShard(key)
+	b.Lock()
+	defer b.Unlock()
+
+	// check if existed
+	idx, ok := b.idx.Get(key)
+	if ok {
+		b.anyArr[idx.start()] = anyItem{V: val, T: noTTL}
+		return
+	}
+
+	b.idx.Set(key, newIdx(len(b.anyArr), 1, false, true))
+	b.anyArr = append(b.anyArr, anyItem{V: val, T: noTTL})
+	b.count++
+}
+
+// GetAny get value by key.
+func (c *GigaCache[K]) GetAny(key K) (any, bool) {
+	b := c.getShard(key)
+	b.RLock()
+	defer b.RUnlock()
+
+	idx, ok := b.idx.Get(key)
+	if !ok {
+		return nil, false
+	}
+
+	if idx.isAny() {
+		return b.anyArr[idx.start()].V, true
+	}
+
+	return nil, false
 }
 
 // SetEx set expiry time with key-value pairs.
@@ -213,7 +217,7 @@ func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 
 		// update inplace
 		if len(val)+ttlBytes <= offset {
-			b.idx.Set(key, newIdx(start, len(val), true))
+			b.idx.Set(key, newIdx(start, len(val), true, false))
 			end := start + len(val)
 
 			b.buf = slices.Replace(b.buf, start, end, val...)
@@ -222,7 +226,7 @@ func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 		}
 	}
 
-	b.idx.Set(key, newIdx(len(b.buf), len(val), true))
+	b.idx.Set(key, newIdx(len(b.buf), len(val), true, false))
 	b.buf = append(b.buf, val...)
 	b.buf = order.AppendUint32(b.buf, clock+uint32(dur/timeCarry))
 
@@ -386,7 +390,7 @@ func (b *bucket[K]) compress(rate float64) {
 		}
 
 		// reset
-		b.idx.Set(key, newIdx(len(nbuf), offset, has))
+		b.idx.Set(key, newIdx(len(nbuf), offset, has, false))
 		if has {
 			nbuf = append(nbuf, b.buf[start:end+ttlBytes]...)
 		} else {
