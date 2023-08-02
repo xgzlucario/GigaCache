@@ -11,6 +11,7 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/bytedance/sonic"
+	"github.com/tidwall/hashmap"
 	"github.com/zeebo/xxh3"
 )
 
@@ -71,10 +72,11 @@ type bucket[K comparable] struct {
 	count  uint32
 	buf    []byte
 	anyArr []anyItem
-	idx    *Map[K, Idx]
+	idx    *hashmap.Map[K, Idx]
 	sync.RWMutex
 }
 
+// anyItem
 type anyItem struct {
 	V any
 	T uint32
@@ -95,7 +97,7 @@ func New[K comparable](count ...int) *GigaCache[K] {
 
 	for i := range cc.buckets {
 		cc.buckets[i] = &bucket[K]{
-			idx:    newMap[K, Idx](0),
+			idx:    hashmap.New[K, Idx](0),
 			buf:    make([]byte, 0, bufferSize),
 			anyArr: make([]anyItem, 0, bufferSize),
 		}
@@ -293,11 +295,12 @@ func (c *GigaCache[K]) Delete(key K) (ok bool) {
 func (c *GigaCache[K]) Scan(f func(K, []byte, int64)) {
 	for _, b := range c.buckets {
 		b.RLock()
-		b.idx.Scan(func(key K, idx Idx) {
+		b.idx.Scan(func(key K, idx Idx) bool {
 			val, ts, ok := b.getByIdx(idx)
 			if ok && ts != expired {
 				f(key, val, ts)
 			}
+			return true
 		})
 		b.RUnlock()
 	}
@@ -374,7 +377,7 @@ func (b *bucket[K]) compress(rate float64) {
 
 	delKeys := make([]K, 0)
 
-	b.idx.Scan(func(key K, idx Idx) {
+	b.idx.Scan(func(key K, idx Idx) bool {
 		// offset only contains value, except ttl
 		start, offset, has := idx.start(), idx.offset(), idx.hasTTL()
 		end := start + offset
@@ -385,7 +388,7 @@ func (b *bucket[K]) compress(rate float64) {
 			// expired
 			if ttl < clock {
 				delKeys = append(delKeys, key)
-				return
+				return true
 			}
 		}
 
@@ -398,6 +401,7 @@ func (b *bucket[K]) compress(rate float64) {
 		}
 
 		b.count++
+		return true
 	})
 
 	for _, key := range delKeys {
@@ -437,9 +441,10 @@ func (b *bucket[K]) MarshalJSON() ([]byte, error) {
 	k := make([]K, 0, b.idx.Len())
 	i := make([]Idx, 0, b.idx.Len())
 
-	b.idx.Scan(func(key K, idx Idx) {
+	b.idx.Scan(func(key K, idx Idx) bool {
 		k = append(k, key)
 		i = append(i, idx)
+		return true
 	})
 
 	return sonic.Marshal(bucketJSON[K]{k, i, b.buf})
