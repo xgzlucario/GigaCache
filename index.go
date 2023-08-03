@@ -33,7 +33,7 @@ func (i Idx) isAny() bool {
 	return i&anyMask == anyMask
 }
 
-func (i Idx) hasTTLInt() int {
+func (i Idx) ttlInt() int {
 	if i.hasTTL() {
 		return 1
 	}

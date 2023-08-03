@@ -138,22 +138,38 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 	return c.buckets[c.hash(key)]
 }
 
-// SetAny set key-value pairs.
-func (c *GigaCache[K]) SetAny(key K, val any) {
-	b := c.getShard(key)
-	b.Lock()
-	defer b.Unlock()
+// getByIdx
+func (b *bucket[K]) getByIdx(idx Idx) ([]byte, int64, bool) {
+	start := idx.start()
+	end := start + idx.offset()
 
-	// check if existed
-	idx, ok := b.idx.Get(key)
-	if ok {
-		b.anyArr[idx.start()] = anyItem{V: val, T: noTTL}
-		return
+	// has ttl
+	if idx.hasTTL() {
+		ttl := parseTTL(b.byteArr[end:])
+
+		// expired
+		if ttl < clock {
+			return nil, expired, false
+
+		} else {
+			return b.byteArr[start:end], (zeroUnix + int64(ttl)) * timeCarry, true
+		}
 	}
 
-	b.idx.Set(key, newIdx(len(b.anyArr), 1, false, true))
-	b.anyArr = append(b.anyArr, anyItem{V: val, T: noTTL})
-	b.anyCount++
+	return b.byteArr[start:end], noTTL, true
+}
+
+// Get
+func (c *GigaCache[K]) Get(key K) ([]byte, int64, bool) {
+	b := c.getShard(key)
+	b.RLock()
+	defer b.RUnlock()
+
+	if idx, ok := b.idx.Get(key); ok {
+		return b.getByIdx(idx)
+	}
+
+	return nil, 0, false
 }
 
 // GetAny get value by key.
@@ -174,11 +190,15 @@ func (c *GigaCache[K]) GetAny(key K) (any, bool) {
 	return nil, false
 }
 
-// SetEx set expiry time with key-value pairs.
-// dur should be unixnano.
+// Set set bytes value with key-value pairs.
 func (c *GigaCache[K]) Set(key K, val []byte, dur ...time.Duration) {
 	d := sum(dur)
 	hasTTL := len(dur) > 0
+
+	var ttlInt int
+	if hasTTL {
+		ttlInt = 1
+	}
 
 	b := c.getShard(key)
 	b.Lock()
@@ -189,11 +209,10 @@ func (c *GigaCache[K]) Set(key K, val []byte, dur ...time.Duration) {
 	// check if existed
 	idx, ok := b.idx.Get(key)
 	if ok {
-		start := idx.start()
-		offset := idx.offset() + idx.hasTTLInt()*ttlBytes
+		start, offset := idx.start(), idx.offset()+idx.ttlInt()*ttlBytes
 
 		// update inplace
-		if len(val)+ttlBytes <= offset {
+		if len(val)+ttlInt*ttlBytes <= offset {
 			b.idx.Set(key, newIdx(start, len(val), hasTTL, false))
 			end := start + len(val)
 
@@ -214,43 +233,33 @@ func (c *GigaCache[K]) Set(key K, val []byte, dur ...time.Duration) {
 	b.byteCount++
 }
 
-// SetTx set deadline with key-value pairs, ts should be unixnano.
+// SetAny set any value with key-value pairs.
+func (c *GigaCache[K]) SetAny(key K, val any, dur ...time.Duration) {
+	d := sum(dur)
+
+	b := c.getShard(key)
+	b.Lock()
+	defer b.Unlock()
+
+	b.eliminate()
+
+	// check if existed
+	item := anyItem{V: val, T: clock + uint32(d/timeCarry)}
+	idx, ok := b.idx.Get(key)
+	if ok {
+		b.anyArr[idx.start()] = item
+		return
+	}
+
+	b.idx.Set(key, newIdx(len(b.anyArr), 0, d > 0, true))
+	b.anyArr = append(b.anyArr, item)
+
+	b.anyCount++
+}
+
+// SetDeadline set with key-value pairs. ts should be unixnano.
 func (c *GigaCache[K]) SetDeadline(key K, val []byte, ts int64) {
 	c.Set(key, val, time.Duration(ts-zeroUnixNano))
-}
-
-// Get
-func (c *GigaCache[K]) Get(key K) ([]byte, int64, bool) {
-	b := c.getShard(key)
-	b.RLock()
-	defer b.RUnlock()
-
-	if idx, ok := b.idx.Get(key); ok {
-		return b.getByIdx(idx)
-	}
-
-	return nil, 0, false
-}
-
-// getByIdx
-func (b *bucket[K]) getByIdx(idx Idx) ([]byte, int64, bool) {
-	start := idx.start()
-	end := start + idx.offset()
-
-	// has ttl
-	if idx.hasTTL() {
-		ttl := parseTTL(b.byteArr[end:])
-
-		// expired
-		if ttl < clock {
-			return nil, expired, false
-
-		} else {
-			return b.byteArr[start:end], (zeroUnix + int64(ttl)) * timeCarry, true
-		}
-	}
-
-	return b.byteArr[start:end], noTTL, true
 }
 
 // Delete

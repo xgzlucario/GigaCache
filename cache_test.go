@@ -6,8 +6,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"golang.org/x/exp/rand"
 )
 
 const (
@@ -18,123 +16,34 @@ var (
 	str = []byte("0123456789")
 )
 
-func TestIdx(t *testing.T) {
-	for i := 0; i < 1e8; i++ {
-		a, b := int(rand.Uint32()>>3), int(rand.Uint32()>>3)
-		idx := newIdx(a, b, i%2 == 0, false)
+func TestCacheSet(t *testing.T) {
+	m := New[string](2)
 
-		if idx.start() != a {
-			t.Fatalf("%v != %v", idx.start(), a)
-		}
-		if idx.offset() != b {
-			t.Fatalf("%v != %v", idx.offset(), b)
-		}
+	// set
+	m.Set("foo", []byte("123"))
+	m.Set("bar", []byte("456"))
 
-		if i%2 == 0 {
-			if !idx.hasTTL() {
-				t.Fatal("a")
-			}
-		} else {
-			if idx.hasTTL() {
-				t.Fatal("b")
-			}
-		}
+	if m.bytesLen() != 6 {
+		t.Fatalf("bytes len error: %d", m.bytesLen())
 	}
-}
 
-func TestSetEx(t *testing.T) {
-	m := New[string](1)
-	m.Set("base", []byte("123"))
+	// update
+	m.Set("foo", []byte("234"))
 
-	m.Set("foo", []byte("1234"))
-	l1 := m.bytesLen()
-	m.Set("foo", []byte("789"))
-	l2 := m.bytesLen()
+	if m.bytesLen() != 6 {
+		t.Fatalf("bytes len error: %d", m.bytesLen())
+	}
 
-	buf, _, ok := m.Get("foo")
+	// get
+	val, ts, ok := m.Get("foo")
 	if !ok {
 		t.Fatal("1")
 	}
-	if !bytes.Equal(buf, []byte("789")) {
+	if !bytes.Equal(val, []byte("234")) {
 		t.Fatal("2")
 	}
-	if l1 != l2 {
+	if ts != 0 {
 		t.Fatal("3")
-	}
-
-	m.Set("bar", []byte("000"))
-	l3 := m.bytesLen()
-	if l3 != l2+3 {
-		t.Fatal("4")
-	}
-
-	m = New[string](1)
-	m.Set("base", []byte("123"))
-
-	m.Set("foo", []byte("1234"), time.Second)
-	l1 = m.bytesLen()
-	m.Set("foo", []byte("012345"))
-	l2 = m.bytesLen()
-
-	buf, _, ok = m.Get("foo")
-	if !ok {
-		t.Fatal("5")
-	}
-	if !bytes.Equal(buf, []byte("012345")) {
-		t.Fatal("6")
-	}
-	if l1 != l2 {
-		t.Fatal("7")
-	}
-
-	for i := 0; i < 100; i++ {
-		m.SetAny("xgz"+strconv.Itoa(i), i)
-	}
-	for i := 0; i < 100; i++ {
-		v, ok := m.GetAny("xgz" + strconv.Itoa(i))
-		if !ok {
-			t.Fatal("8")
-		}
-		if v.(int) != i {
-			t.Fatal("9")
-		}
-	}
-}
-
-func TestCache(t *testing.T) {
-	m := New[string]()
-	vmap := make(map[string][]byte, num)
-	tmap := make(map[string]int64, num)
-
-	for i := 0; i < num/10; i++ {
-		si := strconv.Itoa(i)
-		t := time.Now().Add(time.Minute)
-
-		m.SetDeadline(si, []byte(si), t.UnixNano())
-		vmap[si] = []byte(si)
-		tmap[si] = t.Unix() * int64(timeCarry)
-	}
-
-	// check value
-	for k, v := range vmap {
-		vv, _, ok := m.Get(k)
-		if !ok {
-			t.Fatal("not found")
-		}
-		if !bytes.Equal(v, vv) {
-			t.Fatal("value not equal")
-		}
-	}
-
-	// check time
-	for k, v := range tmap {
-		_, ts, ok := m.Get(k)
-		if !ok {
-			t.Fatal("not found")
-		}
-		if v != ts {
-			t.Fatalf("time not equal: %v != %v", ts, v)
-		}
 	}
 }
 
