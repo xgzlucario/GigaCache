@@ -69,10 +69,11 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	count  uint32
-	buf    []byte
-	anyArr []anyItem
-	idx    *hashmap.Map[K, Idx]
+	idx       *hashmap.Map[K, Idx]
+	byteCount uint32
+	anyCount  uint32
+	byteArr   []byte
+	anyArr    []anyItem
 	sync.RWMutex
 }
 
@@ -97,9 +98,9 @@ func New[K comparable](count ...int) *GigaCache[K] {
 
 	for i := range cc.buckets {
 		cc.buckets[i] = &bucket[K]{
-			idx:    hashmap.New[K, Idx](0),
-			buf:    make([]byte, 0, bufferSize),
-			anyArr: make([]anyItem, 0, bufferSize),
+			idx:     hashmap.New[K, Idx](0),
+			byteArr: make([]byte, 0, bufferSize),
+			anyArr:  make([]anyItem, 0, bufferSize),
 		}
 	}
 
@@ -137,32 +138,6 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 	return c.buckets[c.hash(key)]
 }
 
-// Set set key-value pairs.
-func (c *GigaCache[K]) Set(key K, val []byte) {
-	b := c.getShard(key)
-	b.Lock()
-	defer b.Unlock()
-
-	b.eliminate()
-
-	// check if existed
-	idx, ok := b.idx.Get(key)
-	if ok {
-		start := idx.start()
-		offset := idx.offset() + idx.hasTTLInt()*ttlBytes
-
-		if len(val) <= offset {
-			b.idx.Set(key, newIdx(start, len(val), false, false))
-			b.buf = slices.Replace(b.buf, start, start+len(val), val...)
-			return
-		}
-	}
-
-	b.idx.Set(key, newIdx(len(b.buf), len(val), false, false))
-	b.buf = append(b.buf, val...)
-	b.count++
-}
-
 // SetAny set key-value pairs.
 func (c *GigaCache[K]) SetAny(key K, val any) {
 	b := c.getShard(key)
@@ -178,7 +153,7 @@ func (c *GigaCache[K]) SetAny(key K, val any) {
 
 	b.idx.Set(key, newIdx(len(b.anyArr), 1, false, true))
 	b.anyArr = append(b.anyArr, anyItem{V: val, T: noTTL})
-	b.count++
+	b.anyCount++
 }
 
 // GetAny get value by key.
@@ -201,15 +176,15 @@ func (c *GigaCache[K]) GetAny(key K) (any, bool) {
 
 // SetEx set expiry time with key-value pairs.
 // dur should be unixnano.
-func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
-	if dur < timeCarry {
-		panic("dur must be greater than 1s")
-	}
+func (c *GigaCache[K]) Set(key K, val []byte, dur ...time.Duration) {
+	d := sum(dur)
+	hasTTL := len(dur) > 0
 
 	b := c.getShard(key)
 	b.Lock()
 	defer b.Unlock()
-	defer b.eliminate()
+
+	b.eliminate()
 
 	// check if existed
 	idx, ok := b.idx.Get(key)
@@ -219,57 +194,33 @@ func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 
 		// update inplace
 		if len(val)+ttlBytes <= offset {
-			b.idx.Set(key, newIdx(start, len(val), true, false))
+			b.idx.Set(key, newIdx(start, len(val), hasTTL, false))
 			end := start + len(val)
 
-			b.buf = slices.Replace(b.buf, start, end, val...)
-			order.PutUint32(b.buf[end:], clock+uint32(dur/timeCarry))
+			b.byteArr = slices.Replace(b.byteArr, start, end, val...)
+			if hasTTL {
+				order.PutUint32(b.byteArr[end:], clock+uint32(d/timeCarry))
+			}
 			return
 		}
 	}
 
-	b.idx.Set(key, newIdx(len(b.buf), len(val), true, false))
-	b.buf = append(b.buf, val...)
-	b.buf = order.AppendUint32(b.buf, clock+uint32(dur/timeCarry))
+	b.idx.Set(key, newIdx(len(b.byteArr), len(val), hasTTL, false))
+	b.byteArr = append(b.byteArr, val...)
+	if hasTTL {
+		b.byteArr = order.AppendUint32(b.byteArr, clock+uint32(d/timeCarry))
+	}
 
-	b.count++
+	b.byteCount++
 }
 
-// SetTx set deadline with key-value pairs.
-// ts should be unixnano.
-func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
-	c.SetEx(key, val, time.Duration(ts-zeroUnixNano))
+// SetTx set deadline with key-value pairs, ts should be unixnano.
+func (c *GigaCache[K]) SetDeadline(key K, val []byte, ts int64) {
+	c.Set(key, val, time.Duration(ts-zeroUnixNano))
 }
 
 // Get
-func (c *GigaCache[K]) Get(key K) ([]byte, bool) {
-	val, _, ok := c.GetTx(key)
-	return val, ok
-}
-
-// getByIdx
-func (b *bucket[K]) getByIdx(idx Idx) ([]byte, int64, bool) {
-	start := idx.start()
-	end := start + idx.offset()
-
-	// has ttl
-	if idx.hasTTL() {
-		ttl := parseTTL(b.buf[end:])
-
-		// expired
-		if ttl < clock {
-			return nil, expired, false
-
-		} else {
-			return b.buf[start:end], (zeroUnix + int64(ttl)) * timeCarry, true
-		}
-	}
-
-	return b.buf[start:end], noTTL, true
-}
-
-// GetTx
-func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
+func (c *GigaCache[K]) Get(key K) ([]byte, int64, bool) {
 	b := c.getShard(key)
 	b.RLock()
 	defer b.RUnlock()
@@ -281,24 +232,63 @@ func (c *GigaCache[K]) GetTx(key K) ([]byte, int64, bool) {
 	return nil, 0, false
 }
 
+// getByIdx
+func (b *bucket[K]) getByIdx(idx Idx) ([]byte, int64, bool) {
+	start := idx.start()
+	end := start + idx.offset()
+
+	// has ttl
+	if idx.hasTTL() {
+		ttl := parseTTL(b.byteArr[end:])
+
+		// expired
+		if ttl < clock {
+			return nil, expired, false
+
+		} else {
+			return b.byteArr[start:end], (zeroUnix + int64(ttl)) * timeCarry, true
+		}
+	}
+
+	return b.byteArr[start:end], noTTL, true
+}
+
 // Delete
-func (c *GigaCache[K]) Delete(key K) (ok bool) {
+func (c *GigaCache[K]) Delete(key K) bool {
 	b := c.getShard(key)
 	b.Lock()
-	_, ok = b.idx.Delete(key)
+	defer b.Unlock()
+
+	idx, ok := b.idx.Delete(key)
+	if ok {
+		if idx.isAny() {
+			b.anyCount--
+		} else {
+			b.byteCount--
+		}
+	}
+
 	b.eliminate()
-	b.Unlock()
-	return
+
+	return ok
 }
 
 // Scan
-func (c *GigaCache[K]) Scan(f func(K, []byte, int64)) {
+func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	for _, b := range c.buckets {
 		b.RLock()
 		b.idx.Scan(func(key K, idx Idx) bool {
-			val, ts, ok := b.getByIdx(idx)
-			if ok && ts != expired {
-				f(key, val, ts)
+			if idx.isAny() {
+				val := b.anyArr[idx.start()]
+				if val.T < clock {
+					return f(key, val.V, int64(clock+val.T)*timeCarry)
+				}
+
+			} else {
+				val, ts, ok := b.getByIdx(idx)
+				if ok && ts != expired {
+					return f(key, val, ts)
+				}
 			}
 			return true
 		})
@@ -319,7 +309,7 @@ func (c *GigaCache[K]) Len() (r int) {
 func (c *GigaCache[K]) bytesLen() (r int) {
 	for _, b := range c.buckets {
 		b.RLock()
-		r += len(b.buf)
+		r += len(b.byteArr)
 		b.RUnlock()
 	}
 	return
@@ -332,7 +322,7 @@ func parseTTL(b []byte) uint32 {
 
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
-	if b.count%probeInterval != 0 {
+	if b.byteCount%probeInterval != 0 {
 		return
 	}
 
@@ -345,7 +335,7 @@ func (b *bucket[K]) eliminate() {
 
 		if ok && idx.hasTTL() {
 			end := idx.start() + idx.offset()
-			ttl := parseTTL(b.buf[end:])
+			ttl := parseTTL(b.byteArr[end:])
 
 			// expired
 			if ttl < clock {
@@ -362,7 +352,7 @@ func (b *bucket[K]) eliminate() {
 	}
 
 	// on compress threshold
-	if rate := float64(b.idx.Len()) / float64(b.count); rate < compressThreshold {
+	if rate := float64(b.idx.Len()) / float64(b.byteCount); rate < compressThreshold {
 		b.compress(rate)
 	}
 }
@@ -370,9 +360,9 @@ func (b *bucket[K]) eliminate() {
 // Compress migrates the unexpired data and save memory.
 // Trigger when the valid count (valid / total) in the cache is less than this value.
 func (b *bucket[K]) compress(rate float64) {
-	b.count = 0
+	b.byteCount = 0
 
-	newCap := float64(len(b.buf)) * rate
+	newCap := float64(len(b.byteArr)) * rate
 	nbuf := make([]byte, 0, int(newCap))
 
 	delKeys := make([]K, 0)
@@ -383,7 +373,7 @@ func (b *bucket[K]) compress(rate float64) {
 		end := start + offset
 
 		if has {
-			ttl := parseTTL(b.buf[end:])
+			ttl := parseTTL(b.byteArr[end:])
 
 			// expired
 			if ttl < clock {
@@ -395,12 +385,12 @@ func (b *bucket[K]) compress(rate float64) {
 		// reset
 		b.idx.Set(key, newIdx(len(nbuf), offset, has, false))
 		if has {
-			nbuf = append(nbuf, b.buf[start:end+ttlBytes]...)
+			nbuf = append(nbuf, b.byteArr[start:end+ttlBytes]...)
 		} else {
-			nbuf = append(nbuf, b.buf[start:end]...)
+			nbuf = append(nbuf, b.byteArr[start:end]...)
 		}
 
-		b.count++
+		b.byteCount++
 		return true
 	})
 
@@ -408,12 +398,12 @@ func (b *bucket[K]) compress(rate float64) {
 		b.idx.Delete(key)
 	}
 
-	b.buf = nbuf
+	b.byteArr = nbuf
 }
 
 // MarshalJSON
 func (c *GigaCache[K]) MarshalJSON() ([]byte, error) {
-	plen := len(c.buckets[0].buf) * len(c.buckets)
+	plen := len(c.buckets[0].byteArr) * len(c.buckets)
 
 	buf := make([]byte, 0, plen)
 
@@ -447,5 +437,5 @@ func (b *bucket[K]) MarshalJSON() ([]byte, error) {
 		return true
 	})
 
-	return sonic.Marshal(bucketJSON[K]{k, i, b.buf})
+	return sonic.Marshal(bucketJSON[K]{k, i, b.byteArr})
 }

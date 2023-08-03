@@ -72,7 +72,7 @@ func main() {
 			a := time.Now()
 			ph := strconv.Itoa(i)
 
-			val, _, ok := bc.GetTx(ph)
+			val, _, ok := bc.Get(ph)
 			if ok && !bytes.Equal(S2B(&ph), val) {
 				panic("key and value not equal")
 
@@ -92,6 +92,6 @@ func main() {
 	for i := 0; ; i++ {
 		count++
 		v := strconv.Itoa(i)
-		bc.SetEx(v, S2B(&v), time.Second)
+		bc.Set(v, S2B(&v), time.Second)
 	}
 }

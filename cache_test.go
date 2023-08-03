@@ -51,7 +51,7 @@ func TestSetEx(t *testing.T) {
 	m.Set("foo", []byte("789"))
 	l2 := m.bytesLen()
 
-	buf, ok := m.Get("foo")
+	buf, _, ok := m.Get("foo")
 	if !ok {
 		t.Fatal("1")
 	}
@@ -71,12 +71,12 @@ func TestSetEx(t *testing.T) {
 	m = New[string](1)
 	m.Set("base", []byte("123"))
 
-	m.SetEx("foo", []byte("1234"), time.Second)
+	m.Set("foo", []byte("1234"), time.Second)
 	l1 = m.bytesLen()
 	m.Set("foo", []byte("012345"))
 	l2 = m.bytesLen()
 
-	buf, ok = m.Get("foo")
+	buf, _, ok = m.Get("foo")
 	if !ok {
 		t.Fatal("5")
 	}
@@ -110,14 +110,14 @@ func TestCache(t *testing.T) {
 		si := strconv.Itoa(i)
 		t := time.Now().Add(time.Minute)
 
-		m.SetTx(si, []byte(si), t.UnixNano())
+		m.SetDeadline(si, []byte(si), t.UnixNano())
 		vmap[si] = []byte(si)
 		tmap[si] = t.Unix() * int64(timeCarry)
 	}
 
 	// check value
 	for k, v := range vmap {
-		vv, ok := m.Get(k)
+		vv, _, ok := m.Get(k)
 		if !ok {
 			t.Fatal("not found")
 		}
@@ -128,7 +128,7 @@ func TestCache(t *testing.T) {
 
 	// check time
 	for k, v := range tmap {
-		_, ts, ok := m.GetTx(k)
+		_, ts, ok := m.Get(k)
 		if !ok {
 			t.Fatal("not found")
 		}
@@ -179,7 +179,7 @@ func BenchmarkSet(b *testing.B) {
 	m3 := New[string]()
 	b.Run("gigacache/Tx", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			m3.SetEx(strconv.Itoa(i), str, time.Minute)
+			m3.Set(strconv.Itoa(i), str, time.Minute)
 		}
 	})
 }
@@ -211,7 +211,7 @@ func BenchmarkGet(b *testing.B) {
 
 	m4 := New[string]()
 	for i := 0; i < num; i++ {
-		m4.SetEx(strconv.Itoa(i), str, time.Minute)
+		m4.Set(strconv.Itoa(i), str, time.Minute)
 	}
 	b.Run("gigacache/Tx", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
@@ -247,7 +247,7 @@ func BenchmarkDelete(b *testing.B) {
 
 	m4 := New[string]()
 	for i := 0; i < num; i++ {
-		m4.SetEx(strconv.Itoa(i), str, time.Minute)
+		m4.Set(strconv.Itoa(i), str, time.Minute)
 	}
 	b.Run("gigacache/Tx", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {

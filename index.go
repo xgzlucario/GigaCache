@@ -1,6 +1,9 @@
 package cache
 
-import "math"
+import (
+	"math"
+	"time"
+)
 
 // Idx is the index of GigaCahce.
 // hasTTL(1)|isAny(1)|start(31)|offset(31)
@@ -55,4 +58,11 @@ func newIdx(start, offset int, hasTTL bool, isAny bool) Idx {
 	}
 
 	return idx
+}
+
+func sum[T time.Duration](arr []T) (sum T) {
+	for _, d := range arr {
+		sum += d
+	}
+	return
 }
