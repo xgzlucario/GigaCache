@@ -173,21 +173,34 @@ func (c *GigaCache[K]) Get(key K) ([]byte, int64, bool) {
 }
 
 // GetAny get value by key.
-func (c *GigaCache[K]) GetAny(key K) (any, bool) {
+func (c *GigaCache[K]) GetAny(key K) (any, int64, bool) {
 	b := c.getShard(key)
 	b.RLock()
 	defer b.RUnlock()
 
 	idx, ok := b.idx.Get(key)
 	if !ok {
-		return nil, false
+		return nil, 0, false
 	}
 
 	if idx.isAny() {
-		return b.anyArr[idx.start()].V, true
+		item := b.anyArr[idx.start()]
+
+		if idx.hasTTL() {
+			// is expired
+			if item.T >= clock {
+				return item.V, (zeroUnix + int64(item.T)) * timeCarry, true
+
+			} else {
+				return nil, expired, false
+			}
+
+		} else {
+			return item.V, noTTL, true
+		}
 	}
 
-	return nil, false
+	return nil, 0, false
 }
 
 // Set set bytes value with key-value pairs.
@@ -236,6 +249,7 @@ func (c *GigaCache[K]) Set(key K, val []byte, dur ...time.Duration) {
 // SetAny set any value with key-value pairs.
 func (c *GigaCache[K]) SetAny(key K, val any, dur ...time.Duration) {
 	d := sum(dur)
+	hasTTL := d > 0
 
 	b := c.getShard(key)
 	b.Lock()
@@ -243,15 +257,26 @@ func (c *GigaCache[K]) SetAny(key K, val any, dur ...time.Duration) {
 
 	b.eliminate()
 
-	// check if existed
-	item := anyItem{V: val, T: clock + uint32(d/timeCarry)}
-	idx, ok := b.idx.Get(key)
-	if ok {
-		b.anyArr[idx.start()] = item
-		return
+	// create item
+	item := anyItem{V: val, T: noTTL}
+	if hasTTL {
+		item.T = clock + uint32(d/timeCarry)
 	}
 
-	b.idx.Set(key, newIdx(len(b.anyArr), 0, d > 0, true))
+	// check if existed
+	idx, ok := b.idx.Get(key)
+	if ok {
+		if idx.isAny() {
+			b.anyArr[idx.start()] = item
+			return
+
+		} else {
+			b.idx.Delete(key)
+			b.byteCount--
+		}
+	}
+
+	b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
 	b.anyArr = append(b.anyArr, item)
 
 	b.anyCount++

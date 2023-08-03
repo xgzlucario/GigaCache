@@ -17,34 +17,61 @@ var (
 )
 
 func TestCacheSet(t *testing.T) {
-	m := New[string](2)
+	t.Run("case1", func(t *testing.T) {
+		m := New[string](2)
+		// set
+		m.Set("foo", []byte("123"))
+		m.Set("bar", []byte("456"))
 
-	// set
-	m.Set("foo", []byte("123"))
-	m.Set("bar", []byte("456"))
+		if m.bytesLen() != 6 {
+			t.Fatalf("bytes len error: %d", m.bytesLen())
+		}
+		// update
+		m.Set("foo", []byte("234"))
 
-	if m.bytesLen() != 6 {
-		t.Fatalf("bytes len error: %d", m.bytesLen())
-	}
+		if m.bytesLen() != 6 {
+			t.Fatalf("bytes len error: %d", m.bytesLen())
+		}
+		// get
+		val, ts, ok := m.Get("foo")
+		if !ok {
+			t.Fatal("1")
+		}
+		if !bytes.Equal(val, []byte("234")) {
+			t.Fatal("2")
+		}
+		if ts != 0 {
+			t.Fatal("3")
+		}
+		// expired
+		m.Set("test", []byte{1}, time.Second)
+		time.Sleep(time.Second * 2)
+		val, ts, ok = m.Get("test")
+		if val != nil || ts != -1 || ok {
+			t.Fatalf("%v %v %v", val, ts, ok)
+		}
+	})
 
-	// update
-	m.Set("foo", []byte("234"))
+	t.Run("case2", func(t *testing.T) {
+		m := New[string](2)
+		// setAny
+		m.SetAny("foo", 123)
+		m.SetAny("bar", 456)
 
-	if m.bytesLen() != 6 {
-		t.Fatalf("bytes len error: %d", m.bytesLen())
-	}
+		// getAny
+		v, ts, ok := m.GetAny("foo")
+		if v.(int) != 123 || ts != 0 || !ok {
+			t.Fatalf("%v %v %v", v, ts, ok)
+		}
 
-	// get
-	val, ts, ok := m.Get("foo")
-	if !ok {
-		t.Fatal("1")
-	}
-	if !bytes.Equal(val, []byte("234")) {
-		t.Fatal("2")
-	}
-	if ts != 0 {
-		t.Fatal("3")
-	}
+		// expired
+		m.SetAny("test", 1, time.Second)
+		time.Sleep(time.Second * 2)
+		v, ts, ok = m.GetAny("test")
+		if v != nil || ts != -1 || ok {
+			t.Fatalf("%v %v %v", v, ts, ok)
+		}
+	})
 }
 
 func getStdmap() map[string][]byte {
