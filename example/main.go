@@ -36,12 +36,13 @@ func main() {
 
 	// Test
 	for i := 1; i < 10; i++ {
-		bc.SetEx("xgz"+strconv.Itoa(i), []byte(strconv.Itoa(i)), time.Second*time.Duration(i))
+		bc.Set("xgz"+strconv.Itoa(i), []byte(strconv.Itoa(i)), time.Second*time.Duration(i))
 	}
 
 	for i := 0; i < 11; i++ {
-		bc.Scan(func(key string, val []byte, ts int64) {
-			fmt.Println("xgz"+strconv.Itoa(i), string(val), time.Unix(0, ts).Format(time.DateTime))
+		bc.Scan(func(key string, val any, ts int64) bool {
+			fmt.Println(key, string(val.([]byte)), time.Unix(0, ts).Format(time.DateTime))
+			return true
 		})
 		fmt.Println()
 		time.Sleep(time.Second)
@@ -72,7 +73,7 @@ func main() {
 			a := time.Now()
 			ph := strconv.Itoa(i)
 
-			val, _, ok := bc.GetTx(ph)
+			val, _, ok := bc.Get(ph)
 			if ok && !bytes.Equal(S2B(&ph), val) {
 				panic("key and value not equal")
 
@@ -92,6 +93,6 @@ func main() {
 	for i := 0; ; i++ {
 		count++
 		v := strconv.Itoa(i)
-		bc.SetEx(v, S2B(&v), time.Second)
+		bc.Set(v, S2B(&v), time.Second)
 	}
 }
