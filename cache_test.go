@@ -44,7 +44,7 @@ func TestCacheSet(t *testing.T) {
 			t.Fatal("3")
 		}
 		// expired
-		m.Set("test", []byte{1}, time.Second)
+		m.SetEx("test", []byte{1}, time.Second)
 		time.Sleep(time.Second * 2)
 		val, ts, ok = m.Get("test")
 		if val != nil || ts != -1 || ok {
@@ -65,7 +65,7 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		// expired
-		m.SetAny("test", 1, time.Second)
+		m.SetAnyEx("test", 1, time.Second)
 		time.Sleep(time.Second * 2)
 		v, ts, ok = m.GetAny("test")
 		if v != nil || ts != -1 || ok {
@@ -113,9 +113,9 @@ func BenchmarkSet(b *testing.B) {
 	})
 
 	m3 := New[string]()
-	b.Run("gigacache/Tx", func(b *testing.B) {
+	b.Run("gigacache/Ex", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			m3.Set(strconv.Itoa(i), str, time.Minute)
+			m3.SetEx(strconv.Itoa(i), str, time.Minute)
 		}
 	})
 }
@@ -147,9 +147,9 @@ func BenchmarkGet(b *testing.B) {
 
 	m4 := New[string]()
 	for i := 0; i < num; i++ {
-		m4.Set(strconv.Itoa(i), str, time.Minute)
+		m4.SetEx(strconv.Itoa(i), str, time.Minute)
 	}
-	b.Run("gigacache/Tx", func(b *testing.B) {
+	b.Run("gigacache/Ex", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m4.Get(strconv.Itoa(i))
 		}
@@ -183,9 +183,9 @@ func BenchmarkDelete(b *testing.B) {
 
 	m4 := New[string]()
 	for i := 0; i < num; i++ {
-		m4.Set(strconv.Itoa(i), str, time.Minute)
+		m4.SetEx(strconv.Itoa(i), str, time.Minute)
 	}
-	b.Run("gigacache/Tx", func(b *testing.B) {
+	b.Run("gigacache/Ex", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m4.Delete(strconv.Itoa(i))
 		}

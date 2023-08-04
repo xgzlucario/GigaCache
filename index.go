@@ -2,7 +2,6 @@ package cache
 
 import (
 	"math"
-	"time"
 )
 
 // Idx is the index of GigaCahce.
@@ -58,11 +57,4 @@ func newIdx(start, offset int, hasTTL bool, isAny bool) Idx {
 	}
 
 	return idx
-}
-
-func sum[T time.Duration](arr []T) (sum T) {
-	for _, d := range arr {
-		sum += d
-	}
-	return
 }

@@ -180,11 +180,9 @@ func (c *GigaCache[K]) GetAny(key K) (any, int64, bool) {
 	return nil, 0, false
 }
 
-// Set set bytes value with key-value pairs.
-func (c *GigaCache[K]) Set(key K, val []byte, dur ...time.Duration) {
-	d := sum(dur)
-	hasTTL := len(dur) > 0
-
+// SetTx
+func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
+	hasTTL := ts > noTTL
 	var ttlInt int
 	if hasTTL {
 		ttlInt = 1
@@ -208,7 +206,7 @@ func (c *GigaCache[K]) Set(key K, val []byte, dur ...time.Duration) {
 
 			b.byteArr = slices.Replace(b.byteArr, start, end, val...)
 			if hasTTL {
-				order.PutUint64(b.byteArr[end:], uint64(clock)+uint64(d))
+				order.PutUint64(b.byteArr[end:], uint64(ts))
 			}
 			return
 		}
@@ -217,16 +215,25 @@ func (c *GigaCache[K]) Set(key K, val []byte, dur ...time.Duration) {
 	b.idx.Set(key, newIdx(len(b.byteArr), len(val), hasTTL, false))
 	b.byteArr = append(b.byteArr, val...)
 	if hasTTL {
-		b.byteArr = order.AppendUint64(b.byteArr, uint64(clock)+uint64(d))
+		b.byteArr = order.AppendUint64(b.byteArr, uint64(ts))
 	}
 
 	b.byteCount++
 }
 
-// SetAny set any value with key-value pairs.
-func (c *GigaCache[K]) SetAny(key K, val any, dur ...time.Duration) {
-	d := sum(dur)
-	hasTTL := d > 0
+// Set
+func (c *GigaCache[K]) Set(key K, val []byte) {
+	c.SetTx(key, val, noTTL)
+}
+
+// SetEx
+func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
+	c.SetTx(key, val, clock+int64(dur))
+}
+
+// SetAnyTx
+func (c *GigaCache[K]) SetAnyTx(key K, val any, ts int64) {
+	hasTTL := ts > 0
 
 	b := c.getShard(key)
 	b.Lock()
@@ -235,10 +242,7 @@ func (c *GigaCache[K]) SetAny(key K, val any, dur ...time.Duration) {
 	b.eliminate()
 
 	// create item
-	item := anyItem{V: val, T: noTTL}
-	if hasTTL {
-		item.T = clock + int64(d)
-	}
+	item := anyItem{V: val, T: ts}
 
 	// check if existed
 	idx, ok := b.idx.Get(key)
@@ -259,9 +263,14 @@ func (c *GigaCache[K]) SetAny(key K, val any, dur ...time.Duration) {
 	b.anyCount++
 }
 
-// SetDeadline set with key-value pairs. ts should be unixnano.
-func (c *GigaCache[K]) SetDeadline(key K, val []byte, ts int64) {
-	c.Set(key, val, time.Duration(ts-clock))
+// SetAny
+func (c *GigaCache[K]) SetAny(key K, val any) {
+	c.SetAnyTx(key, val, noTTL)
+}
+
+// SetAnyEx
+func (c *GigaCache[K]) SetAnyEx(key K, val any, dur time.Duration) {
+	c.SetAnyTx(key, val, clock+int64(dur))
 }
 
 // Delete
