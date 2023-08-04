@@ -18,8 +18,7 @@ const (
 	expired = -1
 
 	// for ttl
-	ttlBytes  = 4
-	timeCarry = 1e9 // Second
+	ttlBytes = 8
 
 	bufferSize         = 1024
 	defaultShardsCount = 1024
@@ -58,7 +57,7 @@ type bucket[K comparable] struct {
 // anyItem
 type anyItem struct {
 	V any
-	T uint32
+	T int64
 }
 
 // New returns a new GigaCache instance.
@@ -130,7 +129,7 @@ func (b *bucket[K]) getByIdx(idx Idx) ([]byte, int64, bool) {
 			return nil, expired, false
 
 		} else {
-			return b.byteArr[start:end], (zeroUnix + int64(ttl)) * timeCarry, true
+			return b.byteArr[start:end], ttl, true
 		}
 	}
 
@@ -166,8 +165,8 @@ func (c *GigaCache[K]) GetAny(key K) (any, int64, bool) {
 
 		if idx.hasTTL() {
 			// is expired
-			if item.T >= clock {
-				return item.V, (zeroUnix + int64(item.T)) * timeCarry, true
+			if item.T > clock {
+				return item.V, item.T, true
 
 			} else {
 				return nil, expired, false
@@ -209,7 +208,7 @@ func (c *GigaCache[K]) Set(key K, val []byte, dur ...time.Duration) {
 
 			b.byteArr = slices.Replace(b.byteArr, start, end, val...)
 			if hasTTL {
-				order.PutUint32(b.byteArr[end:], clock+uint32(d/timeCarry))
+				order.PutUint64(b.byteArr[end:], uint64(clock)+uint64(d))
 			}
 			return
 		}
@@ -218,7 +217,7 @@ func (c *GigaCache[K]) Set(key K, val []byte, dur ...time.Duration) {
 	b.idx.Set(key, newIdx(len(b.byteArr), len(val), hasTTL, false))
 	b.byteArr = append(b.byteArr, val...)
 	if hasTTL {
-		b.byteArr = order.AppendUint32(b.byteArr, clock+uint32(d/timeCarry))
+		b.byteArr = order.AppendUint64(b.byteArr, uint64(clock)+uint64(d))
 	}
 
 	b.byteCount++
@@ -238,7 +237,7 @@ func (c *GigaCache[K]) SetAny(key K, val any, dur ...time.Duration) {
 	// create item
 	item := anyItem{V: val, T: noTTL}
 	if hasTTL {
-		item.T = clock + uint32(d/timeCarry)
+		item.T = clock + int64(d)
 	}
 
 	// check if existed
@@ -262,7 +261,7 @@ func (c *GigaCache[K]) SetAny(key K, val any, dur ...time.Duration) {
 
 // SetDeadline set with key-value pairs. ts should be unixnano.
 func (c *GigaCache[K]) SetDeadline(key K, val []byte, ts int64) {
-	c.Set(key, val, time.Duration(ts-zeroUnixNano))
+	c.Set(key, val, time.Duration(ts-clock))
 }
 
 // Delete
@@ -292,8 +291,8 @@ func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 		b.idx.Scan(func(key K, idx Idx) bool {
 			if idx.isAny() {
 				val := b.anyArr[idx.start()]
-				if val.T < clock {
-					return f(key, val.V, int64(clock+val.T)*timeCarry)
+				if val.T > clock {
+					return f(key, val.V, val.T)
 				}
 
 			} else {
@@ -327,9 +326,9 @@ func (c *GigaCache[K]) bytesLen() (r int) {
 	return
 }
 
-func parseTTL(b []byte) uint32 {
+func parseTTL(b []byte) int64 {
 	_ = b[ttlBytes-1]
-	return *(*uint32)(unsafe.Pointer(&b[0]))
+	return *(*int64)(unsafe.Pointer(&b[0]))
 }
 
 // eliminate the expired key-value pairs.
