@@ -3,14 +3,12 @@ package cache
 import (
 	"encoding/binary"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"golang.org/x/exp/rand"
 	"golang.org/x/exp/slices"
 
-	"github.com/bytedance/sonic"
 	"github.com/tidwall/hashmap"
 	"github.com/zeebo/xxh3"
 )
@@ -35,29 +33,9 @@ const (
 )
 
 var (
-	zeroUnix     int64
-	zeroUnixNano int64
-
 	// When using LittleEndian, byte slices can be converted to uint64 unsafely.
 	order = binary.LittleEndian
-
-	// now timer and offset clock since zeroTime
-	clock uint32
 )
-
-func init() {
-	zt, _ := time.Parse(time.DateOnly, "2023-08-01")
-	zeroUnix = zt.Unix()
-	zeroUnixNano = zt.UnixNano()
-	clock = uint32(time.Now().Unix() - zeroUnix)
-
-	go func() {
-		ticker := time.NewTicker(time.Millisecond)
-		for t := range ticker.C {
-			atomic.StoreUint32(&clock, uint32(t.Unix()-zeroUnix))
-		}
-	}()
-}
 
 // GigaCache
 type GigaCache[K comparable] struct {
@@ -433,43 +411,4 @@ func (b *bucket[K]) compress(rate float64) {
 	}
 
 	b.byteArr = nbuf
-}
-
-// MarshalJSON
-func (c *GigaCache[K]) MarshalJSON() ([]byte, error) {
-	plen := len(c.buckets[0].byteArr) * len(c.buckets)
-
-	buf := make([]byte, 0, plen)
-
-	for i, b := range c.buckets {
-		b.RLock()
-		src, _ := b.MarshalJSON()
-		buf = append(buf, src...)
-		b.RUnlock()
-
-		if i < len(c.buckets)-1 {
-			buf = append(buf, '\n')
-		}
-	}
-
-	return buf, nil
-}
-
-type bucketJSON[K comparable] struct {
-	K []K
-	I []Idx
-	B []byte
-}
-
-func (b *bucket[K]) MarshalJSON() ([]byte, error) {
-	k := make([]K, 0, b.idx.Len())
-	i := make([]Idx, 0, b.idx.Len())
-
-	b.idx.Scan(func(key K, idx Idx) bool {
-		k = append(k, key)
-		i = append(i, idx)
-		return true
-	})
-
-	return sonic.Marshal(bucketJSON[K]{k, i, b.byteArr})
 }
