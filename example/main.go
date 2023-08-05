@@ -23,8 +23,47 @@ func S2B(str *string) []byte {
 	return *(*[]byte)(unsafe.Pointer(&byteSliceHeader))
 }
 
+func testBytes() {
+	bc := cache.New[string]()
+
+	// Test
+	for i := 1; i < 20; i++ {
+		bc.SetEx("xgz"+strconv.Itoa(i), []byte(strconv.Itoa(i)), time.Second/10*time.Duration(i))
+	}
+
+	for i := 0; i < 25; i++ {
+		bc.Scan(func(key string, val any, ts int64) bool {
+			fmt.Println(key, string(val.([]byte)), time.Unix(0, ts).Format(time.DateTime))
+			return true
+		})
+		fmt.Println()
+		time.Sleep(time.Second / 10)
+	}
+}
+
+func testAny() {
+	bc := cache.New[string]()
+
+	// Test
+	for i := 1; i < 20; i++ {
+		bc.SetAnyEx("xgz-any"+strconv.Itoa(i), i, time.Second/10*time.Duration(i))
+	}
+
+	for i := 0; i < 25; i++ {
+		bc.Scan(func(key string, val any, ts int64) bool {
+			fmt.Println(key, val, time.Unix(0, ts).Format(time.DateTime))
+			return true
+		})
+		fmt.Println()
+		time.Sleep(time.Second / 10)
+	}
+}
+
 func main() {
 	go http.ListenAndServe("localhost:6060", nil)
+
+	testBytes()
+	testAny()
 
 	a := time.Now()
 
@@ -33,20 +72,6 @@ func main() {
 	var mem runtime.MemStats
 
 	bc := cache.New[string]()
-
-	// Test
-	for i := 1; i < 10; i++ {
-		bc.SetEx("xgz"+strconv.Itoa(i), []byte(strconv.Itoa(i)), time.Second*time.Duration(i))
-	}
-
-	for i := 0; i < 11; i++ {
-		bc.Scan(func(key string, val any, ts int64) bool {
-			fmt.Println(key, string(val.([]byte)), time.Unix(0, ts).Format(time.DateTime))
-			return true
-		})
-		fmt.Println()
-		time.Sleep(time.Second)
-	}
 
 	// Stat
 	var maxNum int
@@ -70,13 +95,20 @@ func main() {
 	// Get
 	go func() {
 		for i := 0; ; i++ {
-			a := time.Now()
-			ph := strconv.Itoa(i)
+			a = time.Now()
+			key := strconv.Itoa(i)
 
-			val, _, ok := bc.Get(ph)
-			if ok && !bytes.Equal(S2B(&ph), val) {
-				panic("key and value not equal")
+			if i%2 == 0 {
+				val, _, ok := bc.Get(key)
+				if ok && !bytes.Equal(S2B(&key), val) {
+					panic("key and value not equal")
+				}
 
+			} else {
+				val, _, ok := bc.GetAny(key)
+				if ok && !bytes.Equal(S2B(&key), val.([]byte)) {
+					panic("key and value not equal")
+				}
 			}
 
 			c := time.Since(a).Microseconds()
@@ -93,6 +125,10 @@ func main() {
 	for i := 0; ; i++ {
 		count++
 		v := strconv.Itoa(i)
-		bc.SetEx(v, S2B(&v), time.Second)
+		if i%2 == 0 {
+			bc.SetEx(v, S2B(&v), time.Second)
+		} else {
+			bc.SetAnyEx(v, S2B(&v), time.Second)
+		}
 	}
 }

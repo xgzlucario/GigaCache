@@ -14,7 +14,7 @@ func init() {
 	clock = time.Now().UnixNano()
 
 	go func() {
-		ticker := time.NewTicker(time.Millisecond)
+		ticker := time.NewTicker(time.Microsecond)
 		for t := range ticker.C {
 			atomic.StoreInt64(&clock, t.UnixNano())
 		}

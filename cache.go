@@ -46,11 +46,10 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	idx       *hashmap.Map[K, Idx]
-	byteCount uint32
-	anyCount  uint32
-	byteArr   []byte
-	anyArr    []anyItem
+	idx     *hashmap.Map[K, Idx]
+	count   uint32
+	byteArr []byte
+	anyArr  []*anyItem
 	sync.RWMutex
 }
 
@@ -67,32 +66,28 @@ func New[K comparable](count ...int) *GigaCache[K] {
 		shards = count[0]
 	}
 
-	cc := &GigaCache[K]{
+	cache := &GigaCache[K]{
 		mask:    uint64(shards - 1),
 		buckets: make([]*bucket[K], shards),
 	}
-	cc.detectHasher()
 
-	for i := range cc.buckets {
-		cc.buckets[i] = &bucket[K]{
-			idx:     hashmap.New[K, Idx](0),
-			byteArr: make([]byte, 0, bufferSize),
-			anyArr:  make([]anyItem, 0, bufferSize),
-		}
-	}
-
-	return cc
-}
-
-// detectHasher Detect the key type.
-func (c *GigaCache[K]) detectHasher() {
 	var k K
 	switch ((interface{})(k)).(type) {
 	case string:
-		c.kstr = true
+		cache.kstr = true
 	default:
-		c.ksize = int(unsafe.Sizeof(k))
+		cache.ksize = int(unsafe.Sizeof(k))
 	}
+
+	for i := range cache.buckets {
+		cache.buckets[i] = &bucket[K]{
+			idx:     hashmap.New[K, Idx](0),
+			byteArr: make([]byte, 0, bufferSize),
+			anyArr:  make([]*anyItem, 0, bufferSize),
+		}
+	}
+
+	return cache
 }
 
 // Hash is the real hash function.
@@ -119,6 +114,10 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 func (b *bucket[K]) getByIdx(idx Idx) ([]byte, int64, bool) {
 	start := idx.start()
 	end := start + idx.offset()
+
+	if idx.isAny() {
+		return nil, 0, false
+	}
 
 	// has ttl
 	if idx.hasTTL() {
@@ -218,7 +217,7 @@ func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
 		b.byteArr = order.AppendUint64(b.byteArr, uint64(ts))
 	}
 
-	b.byteCount++
+	b.count++
 }
 
 // Set
@@ -242,7 +241,7 @@ func (c *GigaCache[K]) SetAnyTx(key K, val any, ts int64) {
 	b.eliminate()
 
 	// create item
-	item := anyItem{V: val, T: ts}
+	item := &anyItem{V: val, T: ts}
 
 	// check if existed
 	idx, ok := b.idx.Get(key)
@@ -253,14 +252,14 @@ func (c *GigaCache[K]) SetAnyTx(key K, val any, ts int64) {
 
 		} else {
 			b.idx.Delete(key)
-			b.byteCount--
+			b.count--
 		}
 	}
 
 	b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
 	b.anyArr = append(b.anyArr, item)
 
-	b.anyCount++
+	b.count++
 }
 
 // SetAny
@@ -279,13 +278,9 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	b.Lock()
 	defer b.Unlock()
 
-	idx, ok := b.idx.Delete(key)
+	_, ok := b.idx.Delete(key)
 	if ok {
-		if idx.isAny() {
-			b.anyCount--
-		} else {
-			b.byteCount--
-		}
+		b.count--
 	}
 
 	b.eliminate()
@@ -342,7 +337,7 @@ func parseTTL(b []byte) int64 {
 
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
-	if b.byteCount%probeInterval != 0 {
+	if b.count%probeInterval != 0 {
 		return
 	}
 
@@ -354,14 +349,24 @@ func (b *bucket[K]) eliminate() {
 		k, idx, ok := b.idx.GetPos(rdm + i*probeSpace)
 
 		if ok && idx.hasTTL() {
-			end := idx.start() + idx.offset()
-			ttl := parseTTL(b.byteArr[end:])
+			if idx.isAny() {
+				item := b.anyArr[idx.start()]
+				if item.T < clock {
+					b.idx.Delete(k)
+					failCont = 0
+					continue
+				}
 
-			// expired
-			if ttl < clock {
-				b.idx.Delete(k)
-				failCont = 0
-				continue
+			} else {
+				end := idx.start() + idx.offset()
+				ttl := parseTTL(b.byteArr[end:])
+
+				// expired
+				if ttl < clock {
+					b.idx.Delete(k)
+					failCont = 0
+					continue
+				}
 			}
 		}
 
@@ -372,7 +377,7 @@ func (b *bucket[K]) eliminate() {
 	}
 
 	// on compress threshold
-	if rate := float64(b.idx.Len()) / float64(b.byteCount); rate < compressThreshold {
+	if rate := float64(b.idx.Len()) / float64(b.count); rate < compressThreshold {
 		b.compress(rate)
 	}
 }
@@ -380,43 +385,59 @@ func (b *bucket[K]) eliminate() {
 // Compress migrates the unexpired data and save memory.
 // Trigger when the valid count (valid / total) in the cache is less than this value.
 func (b *bucket[K]) compress(rate float64) {
-	b.byteCount = 0
+	b.count = 0
 
-	newCap := float64(len(b.byteArr)) * rate
-	nbuf := make([]byte, 0, int(newCap))
+	newBytesArr := make([]byte, 0, int(float64(len(b.byteArr))*rate))
+	newAnyArr := make([]*anyItem, 0, int(float64(len(b.anyArr))*rate))
 
 	delKeys := make([]K, 0)
 
 	b.idx.Scan(func(key K, idx Idx) bool {
-		// offset only contains value, except ttl
-		start, offset, has := idx.start(), idx.offset(), idx.hasTTL()
-		end := start + offset
+		start, has := idx.start(), idx.hasTTL()
 
-		if has {
-			ttl := parseTTL(b.byteArr[end:])
+		// is any item
+		if idx.isAny() {
+			item := b.anyArr[start]
 
 			// expired
-			if ttl < clock {
+			if has && item.T < clock {
 				delKeys = append(delKeys, key)
 				return true
 			}
-		}
 
-		// reset
-		b.idx.Set(key, newIdx(len(nbuf), offset, has, false))
-		if has {
-			nbuf = append(nbuf, b.byteArr[start:end+ttlBytes]...)
+			b.idx.Set(key, newIdx(len(newAnyArr), 0, has, true))
+			newAnyArr = append(newAnyArr, item)
+
+			b.count++
+			return true
+
 		} else {
-			nbuf = append(nbuf, b.byteArr[start:end]...)
-		}
+			offset := idx.offset()
+			end := start + offset
 
-		b.byteCount++
-		return true
+			// expired
+			if has && parseTTL(b.byteArr[end:]) < clock {
+				delKeys = append(delKeys, key)
+				return true
+			}
+
+			// reset
+			b.idx.Set(key, newIdx(len(newBytesArr), offset, has, false))
+			if has {
+				newBytesArr = append(newBytesArr, b.byteArr[start:end+ttlBytes]...)
+			} else {
+				newBytesArr = append(newBytesArr, b.byteArr[start:end]...)
+			}
+
+			b.count++
+			return true
+		}
 	})
 
 	for _, key := range delKeys {
 		b.idx.Delete(key)
 	}
 
-	b.byteArr = nbuf
+	b.byteArr = newBytesArr
+	b.anyArr = newAnyArr
 }

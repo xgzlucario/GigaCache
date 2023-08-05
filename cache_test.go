@@ -17,7 +17,7 @@ var (
 )
 
 func TestCacheSet(t *testing.T) {
-	t.Run("case1", func(t *testing.T) {
+	t.Run("case-bytes", func(t *testing.T) {
 		m := New[string](2)
 		// set
 		m.Set("foo", []byte("123"))
@@ -52,7 +52,7 @@ func TestCacheSet(t *testing.T) {
 		}
 	})
 
-	t.Run("case2", func(t *testing.T) {
+	t.Run("case-any", func(t *testing.T) {
 		m := New[string](2)
 		// setAny
 		m.SetAny("foo", 123)
@@ -70,6 +70,21 @@ func TestCacheSet(t *testing.T) {
 		v, ts, ok = m.GetAny("test")
 		if v != nil || ts != -1 || ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
+		}
+	})
+
+	t.Run("case-eliminate", func(t *testing.T) {
+		m := New[string](10)
+		for i := 0; i < 50; i++ {
+			m.Set(strconv.Itoa(i), str)
+			m.SetAny(strconv.Itoa(i), i)
+		}
+
+		if m.bytesLen() != 500 {
+			t.Fatalf("bytes len error: %d", m.bytesLen())
+		}
+		if m.Len() != 50 {
+			t.Fatalf("len != %d", m.Len())
 		}
 	})
 }
