@@ -23,14 +23,14 @@ func TestCacheSet(t *testing.T) {
 		m.Set("foo", []byte("123"))
 		m.Set("bar", []byte("456"))
 
-		if m.bytesLen() != 6 {
-			t.Fatalf("bytes len error: %d", m.bytesLen())
+		if m.Stat().BytesLen != 6 {
+			t.Fatalf("bytes len error: %d", m.Stat().BytesLen)
 		}
 		// update
 		m.Set("foo", []byte("234"))
 
-		if m.bytesLen() != 6 {
-			t.Fatalf("bytes len error: %d", m.bytesLen())
+		if m.Stat().BytesLen != 6 {
+			t.Fatalf("bytes len error: %d", m.Stat().BytesLen)
 		}
 		// get
 		val, ts, ok := m.Get("foo")
@@ -80,11 +80,13 @@ func TestCacheSet(t *testing.T) {
 			m.SetAny(strconv.Itoa(i), i)
 		}
 
-		if m.bytesLen() != 500 {
-			t.Fatalf("bytes len error: %d", m.bytesLen())
+		stat := m.Stat()
+
+		if stat.BytesLen != 500 {
+			t.Fatalf("bytes len error: %d", stat.BytesLen)
 		}
-		if m.Len() != 50 {
-			t.Fatalf("len != %d", m.Len())
+		if stat.Len != 50 {
+			t.Fatalf("len != %d", stat.Len)
 		}
 	})
 }

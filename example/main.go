@@ -65,29 +65,33 @@ func main() {
 	testBytes()
 	testAny()
 
-	a := time.Now()
+	start := time.Now()
 
 	var sum float64
-	var stat, count int64
+	var n1, count int64
 	var mem runtime.MemStats
 
 	bc := cache.New[string]()
 
 	// Stat
-	var maxNum int
 	go func() {
 		for i := 0; ; i++ {
 			time.Sleep(time.Second / 10)
 			runtime.ReadMemStats(&mem)
 
-			n := bc.Len() / 1e3
-			if n > maxNum {
-				maxNum = n
-			}
+			stat := bc.Stat()
 
-			if i%100 == 0 {
-				fmt.Printf("[Cache] %.0fs\t count: %dk\t num: %dk\t maxNum: %dk\t avg: %.2f ns\n",
-					time.Since(a).Seconds(), count/1e3, n, maxNum, sum/float64(stat))
+			if i%10 == 0 {
+				fmt.Printf("[Cache] %.0fs | count: %dw | len: %dw | alloc: %dw | bytes: %dw | any: %dw | rate: %.1f%% | ccount: %d | avg: %.2f ns\n",
+					time.Since(start).Seconds(),
+					count/1e4,
+					stat.Len/1e4,
+					stat.AllocLen/1e4,
+					stat.BytesLen/1e4,
+					stat.AnyLen/1e4,
+					stat.ExpRate(),
+					stat.CCount,
+					sum/float64(n1))
 			}
 		}
 	}()
@@ -95,7 +99,7 @@ func main() {
 	// Get
 	go func() {
 		for i := 0; ; i++ {
-			a = time.Now()
+			now := time.Now()
 			key := strconv.Itoa(i)
 
 			if i%2 == 0 {
@@ -111,9 +115,9 @@ func main() {
 				}
 			}
 
-			c := time.Since(a).Microseconds()
+			c := time.Since(now).Microseconds()
 			sum += float64(c)
-			stat++
+			n1++
 
 			time.Sleep(time.Microsecond)
 

@@ -47,7 +47,8 @@ type GigaCache[K comparable] struct {
 // bucket
 type bucket[K comparable] struct {
 	idx     *hashmap.Map[K, Idx]
-	count   uint32
+	count   int64
+	ccount  int64
 	byteArr []byte
 	anyArr  []*anyItem
 	sync.RWMutex
@@ -311,25 +312,6 @@ func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	}
 }
 
-// Len returns keys length. It returns not an exact value, it may contain expired keys.
-func (c *GigaCache[K]) Len() (r int) {
-	for _, b := range c.buckets {
-		b.RLock()
-		r += b.idx.Len()
-		b.RUnlock()
-	}
-	return
-}
-
-func (c *GigaCache[K]) bytesLen() (r int) {
-	for _, b := range c.buckets {
-		b.RLock()
-		r += len(b.byteArr)
-		b.RUnlock()
-	}
-	return
-}
-
 func parseTTL(b []byte) int64 {
 	_ = b[ttlBytes-1]
 	return *(*int64)(unsafe.Pointer(&b[0]))
@@ -386,6 +368,7 @@ func (b *bucket[K]) eliminate() {
 // Trigger when the valid count (valid / total) in the cache is less than this value.
 func (b *bucket[K]) compress(rate float64) {
 	b.count = 0
+	b.ccount++
 
 	newBytesArr := make([]byte, 0, int(float64(len(b.byteArr))*rate))
 	newAnyArr := make([]*anyItem, 0, int(float64(len(b.anyArr))*rate))
