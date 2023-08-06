@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/binary"
+	"math"
 	"sync"
 	"time"
 	"unsafe"
@@ -296,7 +297,7 @@ func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 		b.idx.Scan(func(key K, idx Idx) bool {
 			if idx.isAny() {
 				val := b.anyArr[idx.start()]
-				if val.T > clock {
+				if val.T > clock || !idx.hasTTL() {
 					return f(key, val.V, val.T)
 				}
 
@@ -364,9 +365,21 @@ func (b *bucket[K]) eliminate() {
 	}
 }
 
+// Compress
+func (c *GigaCache[K]) Compress() {
+	for _, b := range c.buckets {
+		b.Lock()
+		b.compress(float64(b.idx.Len()) / float64(b.count))
+		b.Unlock()
+	}
+}
+
 // Compress migrates the unexpired data and save memory.
 // Trigger when the valid count (valid / total) in the cache is less than this value.
 func (b *bucket[K]) compress(rate float64) {
+	if math.IsNaN(rate) {
+		return
+	}
 	b.count = 0
 	b.ccount++
 

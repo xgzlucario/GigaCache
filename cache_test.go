@@ -3,7 +3,6 @@ package cache
 import (
 	"bytes"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 )
@@ -44,8 +43,8 @@ func TestCacheSet(t *testing.T) {
 			t.Fatal("3")
 		}
 		// expired
-		m.SetEx("test", []byte{1}, time.Second)
-		time.Sleep(time.Second * 2)
+		m.SetEx("test", []byte{1}, time.Millisecond)
+		time.Sleep(time.Millisecond * 2)
 		val, ts, ok = m.Get("test")
 		if val != nil || ts != -1 || ok {
 			t.Fatalf("%v %v %v", val, ts, ok)
@@ -65,8 +64,8 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		// expired
-		m.SetAnyEx("test", 1, time.Second)
-		time.Sleep(time.Second * 2)
+		m.SetAnyEx("test", 1, time.Millisecond)
+		time.Sleep(time.Millisecond * 2)
 		v, ts, ok = m.GetAny("test")
 		if v != nil || ts != -1 || ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
@@ -89,122 +88,44 @@ func TestCacheSet(t *testing.T) {
 			t.Fatalf("len != %d", stat.Len)
 		}
 	})
-}
 
-func getStdmap() map[string][]byte {
-	m := map[string][]byte{}
-	for i := 0; i < num; i++ {
-		m[strconv.Itoa(i)] = str
-	}
-	return m
-}
+	t.Run("compress", func(t *testing.T) {
+		m := New[string]()
 
-func getSyncmap() *sync.Map {
-	m := &sync.Map{}
-	for i := 0; i < num; i++ {
-		m.Store(strconv.Itoa(i), str)
-	}
-	return m
-}
-
-func BenchmarkSet(b *testing.B) {
-	m1 := map[string][]byte{}
-	b.Run("stdmap", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m1[strconv.Itoa(i)] = str
+		for i := 0; i < 100; i++ {
+			m.Set("noexpired"+strconv.Itoa(i), []byte{1, 2, 3})
 		}
-	})
-
-	m4 := sync.Map{}
-	b.Run("syncmap", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m4.Store(strconv.Itoa(i), str)
+		for i := 0; i < 200; i++ {
+			m.SetEx("expired"+strconv.Itoa(i), []byte{1, 2, 3}, time.Millisecond)
 		}
-	})
-
-	m2 := New[string]()
-	b.Run("gigacache", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m2.Set(strconv.Itoa(i), str)
+		for i := 0; i < 300; i++ {
+			m.SetAny("noexpired-any"+strconv.Itoa(i), 123)
 		}
-	})
-
-	m3 := New[string]()
-	b.Run("gigacache/Ex", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m3.SetEx(strconv.Itoa(i), str, time.Minute)
+		for i := 0; i < 400; i++ {
+			m.SetAnyEx("expired-any"+strconv.Itoa(i), 123, time.Millisecond)
 		}
-	})
-}
 
-func BenchmarkGet(b *testing.B) {
-	m1 := getStdmap()
-	b.Run("stdmap", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			_ = m1[strconv.Itoa(i)]
+		// check
+		s := m.Stat()
+		if s.BytesLen != 2500 || s.Len != 1000 || s.AllocLen != 1000 || s.AnyLen != 700 {
+			t.Fatalf("%+v", s)
 		}
-	})
 
-	m2 := getSyncmap()
-	b.Run("syncmap", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m2.Load(strconv.Itoa(i))
-		}
-	})
+		time.Sleep(time.Millisecond * 2)
+		m.Compress()
 
-	m3 := New[string]()
-	for i := 0; i < num; i++ {
-		m3.Set(strconv.Itoa(i), str)
-	}
-	b.Run("gigacache", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m3.Get(strconv.Itoa(i))
+		// check2
+		s = m.Stat()
+		if s.BytesLen != 300 || s.Len != 400 || s.AllocLen != 400 || s.AnyLen != 300 {
+			t.Fatalf("%+v", s)
 		}
-	})
 
-	m4 := New[string]()
-	for i := 0; i < num; i++ {
-		m4.SetEx(strconv.Itoa(i), str, time.Minute)
-	}
-	b.Run("gigacache/Ex", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m4.Get(strconv.Itoa(i))
-		}
-	})
-}
-
-func BenchmarkDelete(b *testing.B) {
-	m1 := getStdmap()
-	b.Run("stdmap", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			delete(m1, strconv.Itoa(i))
-		}
-	})
-
-	m2 := getSyncmap()
-	b.Run("syncmap", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m2.Delete(strconv.Itoa(i))
-		}
-	})
-
-	m3 := New[string]()
-	for i := 0; i < num; i++ {
-		m3.Set(strconv.Itoa(i), str)
-	}
-	b.Run("gigacache", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m3.Delete(strconv.Itoa(i))
-		}
-	})
-
-	m4 := New[string]()
-	for i := 0; i < num; i++ {
-		m4.SetEx(strconv.Itoa(i), str, time.Minute)
-	}
-	b.Run("gigacache/Ex", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m4.Delete(strconv.Itoa(i))
-		}
+		// check3
+		m.Scan(func(k string, a any, i int64) bool {
+			if k[:3] == "exp" {
+				t.Fatal(k)
+			}
+			return true
+		})
 	})
 }
