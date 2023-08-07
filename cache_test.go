@@ -99,6 +99,20 @@ func TestCacheSet(t *testing.T) {
 			}
 			return true
 		})
+
+		m.Scan(func(k string, a any, i int64) bool {
+			if k == "xgz2" || k == "xgz4" {
+				t.Fatal(k, a)
+			}
+			return true
+		}, TypeByte)
+
+		m.Scan(func(k string, a any, i int64) bool {
+			if k == "xgz1" || k == "xgz3" {
+				t.Fatal(k, a)
+			}
+			return true
+		}, TypeAny)
 	})
 
 	t.Run("Compress", func(t *testing.T) {

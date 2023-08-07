@@ -112,14 +112,14 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 	return c.buckets[c.hash(key)]
 }
 
-// getByIdx
-func (b *bucket[K]) getByIdx(idx Idx) ([]byte, int64, bool) {
-	start := idx.start()
-	end := start + idx.offset()
-
+// get
+func (b *bucket[K]) get(idx Idx) ([]byte, int64, bool) {
 	if idx.isAny() {
 		return nil, 0, false
 	}
+
+	start := idx.start()
+	end := start + idx.offset()
 
 	// has ttl
 	if idx.hasTTL() {
@@ -137,6 +137,23 @@ func (b *bucket[K]) getByIdx(idx Idx) ([]byte, int64, bool) {
 	return b.byteArr[start:end], noTTL, true
 }
 
+// getAny
+func (b *bucket[K]) getAny(idx Idx) (any, int64, bool) {
+	if !idx.isAny() {
+		return nil, 0, false
+	}
+
+	item := b.anyArr[idx.start()]
+
+	if idx.hasTTL() {
+		if item.T > clock {
+			return item.V, item.T, true
+		}
+		return nil, expired, false
+	}
+	return item.V, noTTL, true
+}
+
 // Get
 func (c *GigaCache[K]) Get(key K) ([]byte, int64, bool) {
 	b := c.getShard(key)
@@ -144,7 +161,7 @@ func (c *GigaCache[K]) Get(key K) ([]byte, int64, bool) {
 	defer b.RUnlock()
 
 	if idx, ok := b.idx.Get(key); ok {
-		return b.getByIdx(idx)
+		return b.get(idx)
 	}
 
 	return nil, 0, false
@@ -156,26 +173,8 @@ func (c *GigaCache[K]) GetAny(key K) (any, int64, bool) {
 	b.RLock()
 	defer b.RUnlock()
 
-	idx, ok := b.idx.Get(key)
-	if !ok {
-		return nil, 0, false
-	}
-
-	if idx.isAny() {
-		item := b.anyArr[idx.start()]
-
-		if idx.hasTTL() {
-			// is expired
-			if item.T > clock {
-				return item.V, item.T, true
-
-			} else {
-				return nil, expired, false
-			}
-
-		} else {
-			return item.V, noTTL, true
-		}
+	if idx, ok := b.idx.Get(key); ok {
+		return b.getAny(idx)
 	}
 
 	return nil, 0, false
@@ -290,20 +289,40 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	return ok
 }
 
+type ScanType byte
+
+const (
+	TypeByte = iota + 1
+	TypeAny
+)
+
 // Scan
-func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
+func (c *GigaCache[K]) Scan(f func(K, any, int64) bool, types ...ScanType) {
+	filter := len(types) > 0
+	isByte := slices.Contains(types, TypeByte)
+	isAny := slices.Contains(types, TypeAny)
+
 	for _, b := range c.buckets {
 		b.RLock()
 		b.idx.Scan(func(key K, idx Idx) bool {
+			if filter {
+				if isByte && idx.isAny() {
+					return true
+				}
+				if isAny && !idx.isAny() {
+					return true
+				}
+			}
+
 			if idx.isAny() {
-				val := b.anyArr[idx.start()]
-				if val.T > clock || !idx.hasTTL() {
-					return f(key, val.V, val.T)
+				val, ts, ok := b.getAny(idx)
+				if ok {
+					return f(key, val, ts)
 				}
 
 			} else {
-				val, ts, ok := b.getByIdx(idx)
-				if ok && ts != expired {
+				val, ts, ok := b.get(idx)
+				if ok {
 					return f(key, val, ts)
 				}
 			}

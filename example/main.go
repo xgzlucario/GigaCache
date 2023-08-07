@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"runtime"
 	"strconv"
 	"time"
 	"unsafe"
@@ -69,7 +68,6 @@ func main() {
 
 	var sum float64
 	var n1, count int64
-	var mem runtime.MemStats
 
 	bc := cache.New[string]()
 
@@ -77,11 +75,9 @@ func main() {
 	go func() {
 		for i := 0; ; i++ {
 			time.Sleep(time.Second / 10)
-			runtime.ReadMemStats(&mem)
-
-			stat := bc.Stat()
 
 			if i%10 == 0 {
+				stat := bc.Stat()
 				fmt.Printf("[Cache] %.0fs | count: %dw | len: %dw | alloc: %dw | bytes: %dw | any: %dw | rate: %.1f%% | ccount: %d | avg: %.2f ns\n",
 					time.Since(start).Seconds(),
 					count/1e4,
