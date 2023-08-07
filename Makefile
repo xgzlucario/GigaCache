@@ -8,5 +8,11 @@ build-run:
 gc-trace-run:
 	GODEBUG=gctrace=1 go run example/*.go
 
+test:
+	go clean -testcache && go test .
+
+bench:
+	go test -bench .
+
 pprof:
 	go tool pprof -http=:18081 "http://localhost:6060/debug/pprof/profile?seconds=60"
