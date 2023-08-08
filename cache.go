@@ -10,6 +10,7 @@ import (
 	"golang.org/x/exp/rand"
 	"golang.org/x/exp/slices"
 
+	"github.com/bytedance/sonic"
 	"github.com/tidwall/hashmap"
 	"github.com/zeebo/xxh3"
 )
@@ -455,4 +456,38 @@ func (b *bucket[K]) compress(rate float64) {
 
 	b.byteArr = newBytesArr
 	b.anyArr = newAnyArr
+}
+
+type bucketJSON[K comparable] struct {
+	C int64
+	K []K
+	I []Idx
+	B []byte
+}
+
+// MarshalBytes
+func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
+	buckets := make([]bucketJSON[K], 0, len(c.buckets))
+
+	for _, b := range c.buckets {
+		b.RLock()
+		defer b.RUnlock()
+
+		k := make([]K, 0, b.idx.Len())
+		i := make([]Idx, 0, b.idx.Len())
+
+		b.idx.Scan(func(key K, idx Idx) bool {
+			if !idx.isAny() {
+				k = append(k, key)
+				i = append(i, idx)
+			}
+			return true
+		})
+
+		buckets = append(buckets, bucketJSON[K]{
+			b.count, k, i, b.byteArr,
+		})
+	}
+
+	return sonic.Marshal(buckets)
 }
