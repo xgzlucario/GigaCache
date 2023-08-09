@@ -467,7 +467,7 @@ type bucketJSON[K comparable] struct {
 
 // MarshalBytes
 func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
-	buckets := make([]bucketJSON[K], 0, len(c.buckets))
+	buckets := make([]*bucketJSON[K], 0, len(c.buckets))
 
 	for _, b := range c.buckets {
 		b.RLock()
@@ -484,10 +484,37 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 			return true
 		})
 
-		buckets = append(buckets, bucketJSON[K]{
+		buckets = append(buckets, &bucketJSON[K]{
 			b.count, k, i, b.byteArr,
 		})
 	}
 
 	return sonic.Marshal(buckets)
+}
+
+// UnmarshalBytes
+func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
+	var buckets []*bucketJSON[K]
+
+	if err := sonic.Unmarshal(src, &buckets); err != nil {
+		return err
+	}
+
+	c.buckets = make([]*bucket[K], 0, len(buckets))
+	for _, b := range buckets {
+		bc := &bucket[K]{
+			count:   b.C,
+			idx:     hashmap.New[K, Idx](len(b.K)),
+			byteArr: b.B,
+			anyArr:  make([]*anyItem, 0),
+		}
+		// set key
+		for i, k := range b.K {
+			bc.idx.Set(k, b.I[i])
+		}
+
+		c.buckets = append(c.buckets, bc)
+	}
+
+	return nil
 }
