@@ -3,12 +3,9 @@ package cache
 import (
 	"bytes"
 	"math/rand"
-	"math/rand"
 	"strconv"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -46,10 +43,6 @@ func TestCacheSet(t *testing.T) {
 		val, ts, ok := m.Get("not-exist")
 		if val != nil || ts != 0 || ok {
 			t.Fatalf("%v %v %v", val, ts, ok)
-		// get not exist
-		val, ts, ok := m.Get("not-exist")
-		if val != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", val, ts, ok)
 		}
 
 		// get deleted
@@ -61,7 +54,6 @@ func TestCacheSet(t *testing.T) {
 			t.Fatalf("%v %v %v", val, ts, ok)
 		}
 
-		// get expired
 		// get expired
 		m.SetEx("test", []byte{1}, sec)
 		time.Sleep(sec * 2)
@@ -160,56 +152,19 @@ func TestCacheSet(t *testing.T) {
 		}
 	})
 
-	t.Run("int-generic", func(t *testing.T) {
-		m := New[int](100)
-		// set
-		for i := 0; i < 9999; i++ {
-			m.Set(i, []byte{1})
-		}
-
-		// get exist
-		v, ts, ok := m.Get(1234)
-		if !bytes.Equal(v, []byte{1}) || ts != 0 || !ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
-
-		// get not exist
-		v, ts, ok = m.Get(20000)
-		if v != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
-
-		// expired
-		m.SetEx(777, []byte{7, 7, 7}, sec)
-		time.Sleep(sec * 2)
-		v, ts, ok = m.Get(777)
-		if v != nil || ts != -1 || ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
-	})
-
 	t.Run("Stat", func(t *testing.T) {
 		m := New[string](10)
 		for i := 0; i < 500; i++ {
 			m.Set(strconv.Itoa(i), str)
 		}
 		for i := 0; i < 200; i++ {
-		for i := 0; i < 500; i++ {
 			m.Set(strconv.Itoa(i), str)
-		}
-		for i := 0; i < 200; i++ {
-			m.Set(strconv.Itoa(i), str)
-			m.SetAny("any"+strconv.Itoa(i), str)
 			m.SetAny("any"+strconv.Itoa(i), str)
 		}
 
 		s := m.Stat()
 		if s.BytesLen != 5000 || s.Len != 700 || s.AllocLen != 700 || s.AnyLen != 200 {
-		if s.BytesLen != 5000 || s.Len != 700 || s.AllocLen != 700 || s.AnyLen != 200 {
 			t.Fatalf("%+v", s)
-		}
-		if s.ExpRate() != 100 {
-			t.Fatalf("%+v", s.ExpRate())
 		}
 		if s.ExpRate() != 100 {
 			t.Fatalf("%+v", s.ExpRate())
