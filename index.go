@@ -32,13 +32,6 @@ func (i Idx) IsAny() bool {
 	return i&anyMask == anyMask
 }
 
-func (i Idx) ttlInt() int {
-	if i.hasTTL() {
-		return 1
-	}
-	return 0
-}
-
 func newIdx(start, offset int, hasTTL bool, isAny bool) Idx {
 	// bound check
 	if start > offsetMask {

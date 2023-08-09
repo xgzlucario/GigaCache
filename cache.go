@@ -8,7 +8,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/exp/rand"
-	"golang.org/x/exp/slices"
 
 	"github.com/bytedance/sonic"
 	"github.com/tidwall/hashmap"
@@ -16,8 +15,7 @@ import (
 )
 
 const (
-	noTTL   = 0
-	expired = -1
+	noTTL = 0
 
 	// for ttl
 	ttlBytes = 8
@@ -126,7 +124,7 @@ func (b *bucket[K]) get(idx Idx) ([]byte, int64, bool) {
 		ttl := parseTTL(b.byteArr[end:])
 
 		if ttl < clock {
-			return nil, expired, false
+			return nil, 0, false
 		}
 		return b.byteArr[start:end], ttl, true
 	}
@@ -146,7 +144,7 @@ func (b *bucket[K]) getAny(idx Idx) (any, int64, bool) {
 		if n.T > clock {
 			return n.V, n.T, true
 		}
-		return nil, expired, false
+		return nil, 0, false
 	}
 	return n.V, noTTL, true
 }
@@ -179,34 +177,19 @@ func (c *GigaCache[K]) GetAny(key K) (any, int64, bool) {
 
 // SetTx
 func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
-	hasTTL := ts > noTTL
-	var ttlInt int
-	if hasTTL {
-		ttlInt = 1
+	if ts < 0 {
+		return
 	}
+	hasTTL := ts > noTTL
 
 	b := c.getShard(key)
 	b.Lock()
 	defer b.Unlock()
 
-	b.eliminate()
-
-	// check if existed
-	idx, ok := b.idx.Get(key)
+	// if existed
+	_, ok := b.idx.Get(key)
 	if ok {
-		start, offset := idx.start(), idx.offset()+idx.ttlInt()*ttlBytes
-
-		// update inplace
-		if len(val)+ttlInt*ttlBytes <= offset {
-			b.idx.Set(key, newIdx(start, len(val), hasTTL, false))
-			end := start + len(val)
-
-			b.byteArr = slices.Replace(b.byteArr, start, end, val...)
-			if hasTTL {
-				order.PutUint64(b.byteArr[end:], uint64(ts))
-			}
-			return
-		}
+		b.count--
 	}
 
 	b.idx.Set(key, newIdx(len(b.byteArr), len(val), hasTTL, false))
@@ -216,6 +199,7 @@ func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
 	}
 
 	b.count++
+	b.eliminate()
 }
 
 // Set

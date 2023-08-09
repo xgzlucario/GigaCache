@@ -58,16 +58,8 @@ func TestCacheSet(t *testing.T) {
 		m.SetEx("test", []byte{1}, sec)
 		time.Sleep(sec * 2)
 		val, ts, ok = m.Get("test")
-		if val != nil || ts != -1 || ok {
+		if val != nil || ts != 0 || ok {
 			t.Fatalf("%v %v %v", val, ts, ok)
-		}
-
-		// set after expired
-		s1 := m.Stat()
-		m.SetEx("test", []byte{1}, sec)
-		s2 := m.Stat()
-		if s1.BytesLen != s2.BytesLen {
-			t.Fatalf("%v %v", s1, s2)
 		}
 	})
 
@@ -98,7 +90,7 @@ func TestCacheSet(t *testing.T) {
 		m.SetAnyEx("foo", 1, sec)
 		time.Sleep(sec * 2)
 		v, ts, ok = m.GetAny("foo")
-		if v != nil || ts != -1 || ok {
+		if v != nil || ts != 0 || ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
@@ -147,7 +139,7 @@ func TestCacheSet(t *testing.T) {
 		m.SetEx(777, []byte{7, 7, 7}, sec)
 		time.Sleep(sec * 2)
 		v, ts, ok = m.Get(777)
-		if v != nil || ts != -1 || ok {
+		if v != nil || ts != 0 || ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 	})
@@ -163,7 +155,7 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		s := m.Stat()
-		if s.BytesLen != 5000 || s.Len != 700 || s.AllocLen != 700 || s.AnyLen != 200 {
+		if s.BytesLen != 7000 || s.Len != 700 || s.AllocLen != 700 || s.AnyLen != 200 {
 			t.Fatalf("%+v", s)
 		}
 		if s.ExpRate() != 100 {
@@ -335,6 +327,35 @@ func TestCacheSet(t *testing.T) {
 	t.Run("clock", func(t *testing.T) {
 		if GetUnixNano() != clock {
 			t.Fatalf("error: %v", GetUnixNano())
+		}
+	})
+}
+
+func FuzzSet(f *testing.F) {
+	m := New[string]()
+
+	f.Fuzz(func(t *testing.T, key string, val []byte, ts int64) {
+		expired := GetUnixNano() > ts
+		m.SetTx(key, val, ts)
+		v, ttl, ok := m.Get(key)
+
+		// error input
+		if ts < 0 {
+			if v != nil || ttl != 0 || ok {
+				t.Fatalf("input:%v %v %v output:%v %v %v", key, val, ts, v, ttl, ok)
+			}
+
+			// expired
+		} else if ts > 0 && expired {
+			if v != nil || ttl != 0 || ok {
+				t.Fatalf("input:%v %v %v output:%v %v %v", key, val, ts, v, ttl, ok)
+			}
+
+			// not expired
+		} else {
+			if !bytes.Equal(v, val) || ts != ttl || !ok {
+				t.Fatalf("input:%v %v %v output:%v %v %v", key, val, ts, v, ttl, ok)
+			}
 		}
 	})
 }
