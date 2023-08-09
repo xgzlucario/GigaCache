@@ -172,36 +172,69 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("Scan", func(t *testing.T) {
-		m := New[string](2)
-		m.Set("xgz1", []byte{1, 2, 3})
-		m.SetAny("xgz2", []byte{2, 3, 4})
-		m.SetEx("xgz3", []byte{3, 4, 5}, sec)
-		m.SetAnyEx("xgz4", []byte{4, 5, 6}, sec)
+		m := New[string](50)
+		for i := 0; i < 5000; i++ {
+			m.Set("a"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
+		}
+		for i := 0; i < 5000; i++ {
+			m.SetEx("b"+strconv.Itoa(i), []byte(strconv.Itoa(i)), sec)
+		}
+		for i := 0; i < 5000; i++ {
+			m.SetAny("c"+strconv.Itoa(i), i)
+		}
+		for i := 0; i < 5000; i++ {
+			m.SetAnyEx("d"+strconv.Itoa(i), i, sec)
+		}
 
 		m.Scan(func(k string, a any, i int64) bool {
-			if k == "xgz1" && bytes.Equal(a.([]byte), []byte{1, 2, 3}) {
-			} else if k == "xgz2" && bytes.Equal(a.([]byte), []byte{2, 3, 4}) {
-			} else if k == "xgz3" && bytes.Equal(a.([]byte), []byte{3, 4, 5}) {
-			} else if k == "xgz4" && bytes.Equal(a.([]byte), []byte{4, 5, 6}) {
-			} else {
-				t.Fatal(k, a)
+			id := k[1:]
+			switch k[0] {
+			case 'a':
+				if string(a.([]byte)) != id {
+					t.Fatalf("want %v, got %v", id, a)
+				}
+
+			case 'b':
+				if string(a.([]byte)) != id {
+					t.Fatalf("want %v, got %v", id, a)
+				}
+
+			case 'c':
+				n, _ := strconv.Atoi(id)
+				if a.(int) != n {
+					t.Fatalf("want %v, got %v", id, a)
+				}
+
+			case 'd':
+				n, _ := strconv.Atoi(id)
+				if a.(int) != n {
+					t.Fatalf("want %v, got %v", id, a)
+				}
 			}
 			return true
 		})
 
-		m.Scan(func(k string, a any, i int64) bool {
-			if k == "xgz2" || k == "xgz4" {
-				t.Fatal(k, a)
-			}
-			return true
-		}, TypeByte)
+		time.Sleep(sec * 2)
 
 		m.Scan(func(k string, a any, i int64) bool {
-			if k == "xgz1" || k == "xgz3" {
-				t.Fatal(k, a)
+			id := k[1:]
+			switch k[0] {
+			case 'a':
+				if string(a.([]byte)) != id {
+					t.Fatalf("want %v, got %v", id, a)
+				}
+
+			case 'c':
+				n, _ := strconv.Atoi(id)
+				if a.(int) != n {
+					t.Fatalf("want %v, got %v", id, a)
+				}
+
+			case 'b', 'd':
+				t.Fatalf("want expired, got %v", a)
 			}
 			return true
-		}, TypeAny)
+		})
 	})
 
 	t.Run("Compress", func(t *testing.T) {
@@ -226,7 +259,7 @@ func TestCacheSet(t *testing.T) {
 			t.Fatalf("%+v", s)
 		}
 
-		time.Sleep(sec)
+		time.Sleep(sec * 2)
 		m.Compress()
 
 		// check2
@@ -282,20 +315,26 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("eliminate", func(t *testing.T) {
-		m := New[string]()
-		m.Set("just-for-test", []byte{})
-
-		for i := 0; i < 100; i++ {
-			m.Set(strconv.Itoa(i), []byte{1})
+		m := New[string](100)
+		for i := 0; i < 3000; i++ {
+			m.SetAnyEx(strconv.Itoa(i), 1, sec)
 		}
-		for i := 0; i < 100; i++ {
+		for i := 0; i < 3000; i++ {
 			m.SetEx("t"+strconv.Itoa(i), []byte{1}, sec)
 		}
+		for i := 0; i < 3000; i++ {
+			m.SetEx("x"+strconv.Itoa(i), []byte{1}, sec*999)
+		}
 
-		time.Sleep(sec)
-		// trig compress
-		for i := 0; i < 10; i++ {
-			m.Set("just-for-test", []byte{})
+		time.Sleep(sec * 2)
+		for i := 0; i < 1000; i++ {
+			m.Set("just-for-trig", []byte{})
+		}
+	})
+
+	t.Run("clock", func(t *testing.T) {
+		if GetUnixNano() != clock {
+			t.Fatalf("error: %v", GetUnixNano())
 		}
 	})
 }

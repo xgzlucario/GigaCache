@@ -115,24 +115,20 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 
 // get
 func (b *bucket[K]) get(idx Idx) ([]byte, int64, bool) {
-	if idx.isAny() {
+	if idx.IsAny() {
 		return nil, 0, false
 	}
 
 	start := idx.start()
 	end := start + idx.offset()
 
-	// has ttl
 	if idx.hasTTL() {
 		ttl := parseTTL(b.byteArr[end:])
 
-		// expired
 		if ttl < clock {
 			return nil, expired, false
-
-		} else {
-			return b.byteArr[start:end], ttl, true
 		}
+		return b.byteArr[start:end], ttl, true
 	}
 
 	return b.byteArr[start:end], noTTL, true
@@ -140,19 +136,19 @@ func (b *bucket[K]) get(idx Idx) ([]byte, int64, bool) {
 
 // getAny
 func (b *bucket[K]) getAny(idx Idx) (any, int64, bool) {
-	if !idx.isAny() {
+	if !idx.IsAny() {
 		return nil, 0, false
 	}
 
-	item := b.anyArr[idx.start()]
+	n := b.anyArr[idx.start()]
 
 	if idx.hasTTL() {
-		if item.T > clock {
-			return item.V, item.T, true
+		if n.T > clock {
+			return n.V, n.T, true
 		}
 		return nil, expired, false
 	}
-	return item.V, noTTL, true
+	return n.V, noTTL, true
 }
 
 // Get
@@ -245,7 +241,7 @@ func (c *GigaCache[K]) SetAnyTx(key K, val any, ts int64) {
 	idx, ok := b.idx.Get(key)
 	// exist
 	if ok {
-		if idx.isAny() {
+		if idx.IsAny() {
 			start := idx.start()
 			b.anyArr[start].T = ts
 			b.anyArr[start].V = val
@@ -295,34 +291,19 @@ const (
 )
 
 // Scan
-func (c *GigaCache[K]) Scan(f func(K, any, int64) bool, types ...ScanType) {
-	filter := len(types) > 0
-	isByte := slices.Contains(types, TypeByte)
-	isAny := slices.Contains(types, TypeAny)
-
+func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	for _, b := range c.buckets {
 		b.RLock()
 		b.idx.Scan(func(key K, idx Idx) bool {
-			if filter {
-				if isByte && idx.isAny() {
-					return true
-				}
-				if isAny && !idx.isAny() {
-					return true
-				}
-			}
-
-			if idx.isAny() {
+			if idx.IsAny() {
 				val, ts, ok := b.getAny(idx)
 				if ok {
 					return f(key, val, ts)
 				}
-
-			} else {
-				val, ts, ok := b.get(idx)
-				if ok {
-					return f(key, val, ts)
-				}
+			}
+			val, ts, ok := b.get(idx)
+			if ok {
+				return f(key, val, ts)
 			}
 			return true
 		})
@@ -349,7 +330,7 @@ func (b *bucket[K]) eliminate() {
 		k, idx, ok := b.idx.GetPos(rdm + i*probeSpace)
 
 		if ok && idx.hasTTL() {
-			if idx.isAny() {
+			if idx.IsAny() {
 				item := b.anyArr[idx.start()]
 				if item.T < clock {
 					b.idx.Delete(k)
@@ -408,8 +389,7 @@ func (b *bucket[K]) compress(rate float64) {
 	b.idx.Scan(func(key K, idx Idx) bool {
 		start, has := idx.start(), idx.hasTTL()
 
-		// is any item
-		if idx.isAny() {
+		if idx.IsAny() {
 			item := b.anyArr[start]
 
 			// expired
@@ -474,7 +454,7 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 		i := make([]Idx, 0, b.idx.Len())
 
 		b.idx.Scan(func(key K, idx Idx) bool {
-			if !idx.isAny() {
+			if !idx.IsAny() {
 				k = append(k, key)
 				i = append(i, idx)
 			}
