@@ -28,7 +28,7 @@ func (i Idx) hasTTL() bool {
 	return i&ttlMask == ttlMask
 }
 
-func (i Idx) isAny() bool {
+func (i Idx) IsAny() bool {
 	return i&anyMask == anyMask
 }
 
