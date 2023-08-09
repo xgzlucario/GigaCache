@@ -45,6 +45,12 @@ func TestCacheSet(t *testing.T) {
 			t.Fatalf("%v %v %v", val, ts, ok)
 		}
 
+		// set negetive number
+		m.SetTx("no", []byte{1}, -9)
+		if val, ts, ok := m.Get("no"); val != nil || ts != 0 || ok {
+			t.Fatalf("%v %v %v", val, ts, ok)
+		}
+
 		// get deleted
 		ok = m.Delete("foo5")
 		assert.Equal(ok, true, "delete error")
@@ -335,26 +341,26 @@ func FuzzSet(f *testing.F) {
 	m := New[string]()
 
 	f.Fuzz(func(t *testing.T, key string, val []byte, ts int64) {
-		expired := GetUnixNano() > ts
+		now := GetUnixNano()
 		m.SetTx(key, val, ts)
 		v, ttl, ok := m.Get(key)
 
-		// error input
-		if ts < 0 {
-			if v != nil || ttl != 0 || ok {
-				t.Fatalf("input:%v %v %v output:%v %v %v", key, val, ts, v, ttl, ok)
+		// no ttl
+		if ts == 0 {
+			if v == nil || ttl != 0 || !ok {
+				t.Fatalf("[0] set: %v %s %v get: %s %v %v", key, val, ts, v, ttl, ok)
 			}
 
 			// expired
-		} else if ts > 0 && expired {
+		} else if ts < now {
 			if v != nil || ttl != 0 || ok {
-				t.Fatalf("input:%v %v %v output:%v %v %v", key, val, ts, v, ttl, ok)
+				t.Fatalf("[1] set: %v %s %v get: %s %v %v", key, val, ts, v, ttl, ok)
 			}
 
 			// not expired
-		} else {
+		} else if ts > now {
 			if !bytes.Equal(v, val) || ts != ttl || !ok {
-				t.Fatalf("input:%v %v %v output:%v %v %v", key, val, ts, v, ttl, ok)
+				t.Fatalf("[2] set: %v %s %v get: %s %v %v", key, val, ts, v, ttl, ok)
 			}
 		}
 	})

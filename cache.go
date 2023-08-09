@@ -177,10 +177,7 @@ func (c *GigaCache[K]) GetAny(key K) (any, int64, bool) {
 
 // SetTx
 func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
-	if ts < 0 {
-		return
-	}
-	hasTTL := ts > noTTL
+	hasTTL := (ts != noTTL)
 
 	b := c.getShard(key)
 	b.Lock()
