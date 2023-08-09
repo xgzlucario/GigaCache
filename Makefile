@@ -11,6 +11,11 @@ gc-trace-run:
 test:
 	go clean -testcache && go test .
 
+# 生成 html 覆盖率文件
+test-cover:
+	go test -coverprofile=coverage.out
+	go tool cover -html=coverage.out
+
 bench:
 	go test -bench .
 
