@@ -23,18 +23,19 @@ func TestCacheSet(t *testing.T) {
 	t.Run("Set/Get", func(t *testing.T) {
 		assert := assert.New(t)
 
-		m := New[string](1)
-		m.Set("foo", []byte("123"))
-		m.Set("bar", []byte("456"))
+		m := New[string](100)
+		for i := 0; i < 10000; i++ {
+			m.Set("foo"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
+		}
 
 		// get any
-		if v, ts, ok := m.GetAny("foo"); v != nil || ts != 0 || ok {
+		if v, ts, ok := m.GetAny("foo123"); v != nil || ts != 0 || ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
 		// update get
-		m.Set("foo", []byte("234"))
-		if v, ts, ok := m.Get("foo"); !bytes.Equal(v, []byte("234")) || !ok || ts != 0 {
+		m.Set("foo100", []byte("200"))
+		if v, ts, ok := m.Get("foo100"); !bytes.Equal(v, []byte("200")) || !ok || ts != 0 {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
@@ -45,10 +46,10 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		// get deleted
-		ok = m.Delete("foo")
+		ok = m.Delete("foo5")
 		assert.Equal(ok, true, "delete error")
 
-		val, ts, ok = m.Get("foo")
+		val, ts, ok = m.Get("foo5")
 		if val != nil || ts != 0 || ok {
 			t.Fatalf("%v %v %v", val, ts, ok)
 		}
@@ -60,30 +61,65 @@ func TestCacheSet(t *testing.T) {
 		if val != nil || ts != -1 || ok {
 			t.Fatalf("%v %v %v", val, ts, ok)
 		}
+
+		// set after expired
+		s1 := m.Stat()
+		m.SetEx("test", []byte{1}, sec)
+		s2 := m.Stat()
+		if s1.BytesLen != s2.BytesLen {
+			t.Fatalf("%v %v", s1, s2)
+		}
 	})
 
 	t.Run("SetAny/GetAny", func(t *testing.T) {
 		m := New[string](100)
-		// setAny
-		m.SetAny("foo", 123)
-		m.SetAny("bar", 456)
+		for i := 0; i < 10000; i++ {
+			m.SetAny("foo"+strconv.Itoa(i), i)
+		}
 
-		// get
-		if v, ts, ok := m.Get("foo"); v != nil || ts != 0 || ok {
+		// get bytes
+		if v, ts, ok := m.Get("foo123"); v != nil || ts != 0 || ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
-		// getAny
-		v, ts, ok := m.GetAny("foo")
+		// get any
+		v, ts, ok := m.GetAny("foo123")
 		if v.(int) != 123 || ts != 0 || !ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
+		// get not exist
+		v, ts, ok = m.GetAny("not-exist")
+		if v != nil || ts != 0 || ok {
+			t.Fatalf("%v %v %v", v, ts, ok)
+		}
+
 		// expired
-		m.SetAnyEx("test", 1, sec)
+		m.SetAnyEx("foo", 1, sec)
 		time.Sleep(sec * 2)
-		v, ts, ok = m.GetAny("test")
+		v, ts, ok = m.GetAny("foo")
 		if v != nil || ts != -1 || ok {
+			t.Fatalf("%v %v %v", v, ts, ok)
+		}
+
+		// bytes to any
+		m.Set("test1", []byte{1, 2, 3})
+		m.SetAny("test1", 123)
+		if v, ts, ok = m.GetAny("test1"); v.(int) != 123 || ts != 0 || !ok {
+			t.Fatalf("%v %v %v", v, ts, ok)
+		}
+
+		// any to bytes
+		m.SetAny("test2", 123)
+		m.Set("test2", []byte{1, 2, 3})
+		if v, ts, ok := m.Get("test2"); !bytes.Equal(v, []byte{1, 2, 3}) || ts != 0 || !ok {
+			t.Fatalf("%v %v %v", v, ts, ok)
+		}
+
+		// anyTx to anyTx
+		m.SetAnyEx("test3", 123, time.Hour)
+		m.SetAnyEx("test3", 234, time.Hour)
+		if v, ts, ok := m.GetAny("test3"); v.(int) != 234 || ts == 0 || !ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 	})
@@ -236,6 +272,30 @@ func TestCacheSet(t *testing.T) {
 		})
 		if count != testNum {
 			t.Fatalf("error: %v", count)
+		}
+
+		// unmarshal error
+		err = m.UnmarshalBytes([]byte("fake news"))
+		if err == nil {
+			t.Fatalf("error: %v", err)
+		}
+	})
+
+	t.Run("eliminate", func(t *testing.T) {
+		m := New[string]()
+		m.Set("just-for-test", []byte{})
+
+		for i := 0; i < 100; i++ {
+			m.Set(strconv.Itoa(i), []byte{1})
+		}
+		for i := 0; i < 100; i++ {
+			m.SetEx("t"+strconv.Itoa(i), []byte{1}, sec)
+		}
+
+		time.Sleep(sec)
+		// trig compress
+		for i := 0; i < 10; i++ {
+			m.Set("just-for-test", []byte{})
 		}
 	})
 }

@@ -242,24 +242,21 @@ func (c *GigaCache[K]) SetAnyTx(key K, val any, ts int64) {
 
 	b.eliminate()
 
-	// create item
-	item := &anyItem{V: val, T: ts}
-
-	// check if existed
 	idx, ok := b.idx.Get(key)
+	// exist
 	if ok {
 		if idx.isAny() {
-			b.anyArr[idx.start()] = item
+			start := idx.start()
+			b.anyArr[start].T = ts
+			b.anyArr[start].V = val
+			b.idx.Set(key, newIdx(start, 0, hasTTL, true))
 			return
-
-		} else {
-			b.idx.Delete(key)
-			b.count--
 		}
+		b.count--
 	}
 
 	b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
-	b.anyArr = append(b.anyArr, item)
+	b.anyArr = append(b.anyArr, &anyItem{V: val, T: ts})
 
 	b.count++
 }
