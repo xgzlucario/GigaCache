@@ -211,7 +211,7 @@ func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
 
 // SetAnyTx
 func (c *GigaCache[K]) SetAnyTx(key K, val any, ts int64) {
-	hasTTL := ts > 0
+	hasTTL := (ts != noTTL)
 
 	b := c.getShard(key)
 	b.Lock()

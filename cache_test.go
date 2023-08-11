@@ -365,3 +365,32 @@ func FuzzSet(f *testing.F) {
 		}
 	})
 }
+
+func FuzzSetAny(f *testing.F) {
+	m := New[string]()
+
+	f.Fuzz(func(t *testing.T, key string, val int, ts int64) {
+		now := GetUnixNano()
+		m.SetAnyTx(key, val, ts)
+		v, ttl, ok := m.GetAny(key)
+
+		// no ttl
+		if ts == 0 {
+			if v == nil || ttl != 0 || !ok {
+				t.Fatalf("[0] set: %v %v %v get: %v %v %v", key, val, ts, v, ttl, ok)
+			}
+
+			// expired
+		} else if ts < now {
+			if v != nil || ttl != 0 || ok {
+				t.Fatalf("[1] set: %v %v %v get: %v %v %v", key, val, ts, v, ttl, ok)
+			}
+
+			// not expired
+		} else if ts > now {
+			if v.(int) != val || ts != ttl || !ok {
+				t.Fatalf("[2] set: %v %v %v get: %v %v %v", key, val, ts, v, ttl, ok)
+			}
+		}
+	})
+}
