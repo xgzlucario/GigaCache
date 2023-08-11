@@ -76,7 +76,8 @@ func main() {
 		for i := 0; ; i++ {
 			time.Sleep(time.Second / 10)
 
-			if i%10 == 0 {
+			// benchmark test
+			if i > 0 && i%10 == 0 {
 				stat := bc.Stat()
 				fmt.Printf("[Cache] %.0fs | count: %dw | len: %dw | alloc: %dw | bytes: %dw | any: %dw | rate: %.1f%% | ccount: %d | avg: %.2f ns\n",
 					time.Since(start).Seconds(),
@@ -88,6 +89,20 @@ func main() {
 					stat.ExpRate(),
 					stat.CCount,
 					sum/float64(n1))
+			}
+
+			// marshal test
+			if i > 0 && i%100 == 0 {
+				stat := bc.Stat()
+				before := time.Now()
+				data, err := bc.MarshalBytes()
+				if err != nil {
+					panic(err)
+				}
+				fmt.Printf("[Marshal] len: %vw | cost: %v | len: %.2fM\n",
+					stat.Len/1e4,
+					time.Since(before),
+					float64(len(data))/1024/1024/8)
 			}
 		}
 	}()
@@ -125,10 +140,6 @@ func main() {
 	for i := 0; ; i++ {
 		count++
 		v := strconv.Itoa(i)
-		if i%2 == 0 {
-			bc.SetEx(v, S2B(&v), time.Second)
-		} else {
-			bc.SetAnyEx(v, S2B(&v), time.Second)
-		}
+		bc.SetEx(v, S2B(&v), time.Second)
 	}
 }
