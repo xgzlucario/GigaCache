@@ -3,6 +3,7 @@ package cache
 import (
 	"encoding/binary"
 	"math"
+	"strconv"
 	"sync"
 	"time"
 	"unsafe"
@@ -419,7 +420,7 @@ func (b *bucket[K]) compress(rate float64) {
 type bucketJSON[K comparable] struct {
 	C int64
 	K []K
-	I []Idx
+	I []string
 	B []byte
 }
 
@@ -432,12 +433,12 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 		defer b.RUnlock()
 
 		k := make([]K, 0, b.idx.Len())
-		i := make([]Idx, 0, b.idx.Len())
+		i := make([]string, 0, b.idx.Len())
 
 		b.idx.Scan(func(key K, idx Idx) bool {
 			if !idx.IsAny() {
 				k = append(k, key)
-				i = append(i, idx)
+				i = append(i, strconv.FormatUint(uint64(idx), 36))
 			}
 			return true
 		})
@@ -468,7 +469,8 @@ func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
 		}
 		// set key
 		for i, k := range b.K {
-			bc.idx.Set(k, b.I[i])
+			idx, _ := strconv.ParseUint(b.I[i], 36, 64)
+			bc.idx.Set(k, Idx(idx))
 		}
 
 		c.buckets = append(c.buckets, bc)

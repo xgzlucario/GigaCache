@@ -3,11 +3,11 @@ module github.com/xgzlucario/GigaCache
 go 1.20
 
 require (
-	github.com/bytedance/sonic v1.10.0-rc3
+	github.com/bytedance/sonic v1.10.0
 	github.com/stretchr/testify v1.8.4
 	github.com/tidwall/hashmap v1.8.1
 	github.com/zeebo/xxh3 v1.0.2
-	golang.org/x/exp v0.0.0-20230807204917-050eac23e9de
+	golang.org/x/exp v0.0.0-20230810033253-352e893a4cad
 )
 
 require (
