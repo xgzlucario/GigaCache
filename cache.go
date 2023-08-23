@@ -1,9 +1,9 @@
 package cache
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
-	"strconv"
 	"sync"
 	"time"
 	"unsafe"
@@ -265,13 +265,6 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	return ok
 }
 
-type ScanType byte
-
-const (
-	TypeByte = iota + 1
-	TypeAny
-)
-
 // Scan
 func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	for _, b := range c.buckets {
@@ -420,11 +413,11 @@ func (b *bucket[K]) compress(rate float64) {
 type bucketJSON[K comparable] struct {
 	C int64
 	K []K
-	I []string
+	I []byte
 	B []byte
 }
 
-// MarshalBytes
+// MarshalBytes only marshal bytes data ignore any data.
 func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 	buckets := make([]*bucketJSON[K], 0, len(c.buckets))
 
@@ -433,12 +426,13 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 		defer b.RUnlock()
 
 		k := make([]K, 0, b.idx.Len())
-		i := make([]string, 0, b.idx.Len())
+		i := make([]byte, 0, b.idx.Len())
 
 		b.idx.Scan(func(key K, idx Idx) bool {
 			if !idx.IsAny() {
 				k = append(k, key)
-				i = append(i, strconv.FormatUint(uint64(idx), 36))
+				i = append(i, FormatNumber(idx)...)
+				i = append(i, byte(255))
 			}
 			return true
 		})
@@ -467,10 +461,12 @@ func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
 			byteArr: b.B,
 			anyArr:  make([]*anyItem, 0),
 		}
+
+		idxSlice := bytes.Split(b.I, []byte{VALID})
 		// set key
 		for i, k := range b.K {
-			idx, _ := strconv.ParseUint(b.I[i], 36, 64)
-			bc.idx.Set(k, Idx(idx))
+			idx := ParseNumber[Idx](idxSlice[i])
+			bc.idx.Set(k, idx)
 		}
 
 		c.buckets = append(c.buckets, bc)
