@@ -277,10 +277,14 @@ func TestCacheSet(t *testing.T) {
 
 	t.Run("marshal", func(t *testing.T) {
 		m := New[string]()
-		testNum := 500
+		valid := map[string][]byte{}
 
-		for i := 0; i < testNum; i++ {
-			m.SetEx(strconv.Itoa(rand.Int()), []byte{1, 2, 3}, time.Hour)
+		for i := 0; i < 10*10000; i++ {
+			key := strconv.Itoa(rand.Int())
+			value := []byte(key)
+
+			m.SetEx(key, value, time.Hour)
+			valid[key] = value
 		}
 
 		src, err := m.MarshalBytes()
@@ -293,16 +297,17 @@ func TestCacheSet(t *testing.T) {
 			t.Fatalf("error: %v", err)
 		}
 
-		count := 0
-		m1.Scan(func(k string, a any, i int64) bool {
-			if !bytes.Equal(a.([]byte), []byte{1, 2, 3}) {
-				t.Fatalf("error: %v", a)
+		// check items
+		for k, v := range valid {
+			res, ts, ok := m1.Get(k)
+			if !bytes.Equal(res, v) || ts == 0 || !ok {
+				t.Fatalf("error: %v %v %v", res, ts, ok)
 			}
-			count++
-			return true
-		})
-		if count != testNum {
-			t.Fatalf("error: %v", count)
+		}
+
+		// check count
+		if len(valid) != int(m.Stat().Len) {
+			t.Fatalf("error: %v", m.Stat())
 		}
 
 		// unmarshal error
