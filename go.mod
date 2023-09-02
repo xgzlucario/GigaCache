@@ -1,6 +1,6 @@
 module github.com/xgzlucario/GigaCache
 
-go 1.20
+go 1.21
 
 require (
 	github.com/bytedance/sonic v1.10.0
@@ -18,7 +18,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/zeebo/assert v1.3.1 // indirect
-	golang.org/x/arch v0.4.0 // indirect
-	golang.org/x/sys v0.11.0 // indirect
+	golang.org/x/arch v0.5.0 // indirect
+	golang.org/x/sys v0.12.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
