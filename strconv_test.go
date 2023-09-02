@@ -2,6 +2,7 @@ package cache
 
 import (
 	"bytes"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -26,4 +27,24 @@ func TestConv(t *testing.T) {
 		}
 	}()
 	FormatNumber(-1)
+}
+
+func BenchmarkConv(b *testing.B) {
+	num := time.Now().UnixNano()
+
+	b.Run("std/10", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			strconv.FormatInt(num, 10)
+		}
+	})
+	b.Run("std/36", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			strconv.FormatInt(num, 36)
+		}
+	})
+	b.Run("formatNumber", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			FormatNumber(num)
+		}
+	})
 }
