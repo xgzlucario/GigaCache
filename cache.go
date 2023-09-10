@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"bytes"
 	"encoding/binary"
 	"math"
 	"sync"
@@ -85,7 +84,7 @@ func New[K comparable](count ...int) *GigaCache[K] {
 		cache.buckets[i] = &bucket[K]{
 			idx:     hashmap.New[K, Idx](0),
 			byteArr: make([]byte, 0, bufferSize),
-			anyArr:  make([]*anyItem, 0, bufferSize),
+			anyArr:  make([]*anyItem, 0),
 		}
 	}
 
@@ -113,45 +112,37 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 }
 
 // get
-func (b *bucket[K]) get(idx Idx) ([]byte, int64, bool) {
+func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
 	if idx.IsAny() {
-		return nil, 0, false
-	}
+		n := b.anyArr[idx.start()]
 
-	start := idx.start()
-	end := start + idx.offset()
-
-	if idx.hasTTL() {
-		ttl := parseTTL(b.byteArr[end:])
-
-		if ttl < clock {
+		if idx.hasTTL() {
+			if n.T > clock {
+				return n.V, n.T, true
+			}
 			return nil, 0, false
 		}
-		return b.byteArr[start:end], ttl, true
-	}
+		return n.V, noTTL, true
 
-	return b.byteArr[start:end], noTTL, true
-}
+	} else {
+		start := idx.start()
+		end := start + idx.offset()
 
-// getAny
-func (b *bucket[K]) getAny(idx Idx) (any, int64, bool) {
-	if !idx.IsAny() {
-		return nil, 0, false
-	}
+		if idx.hasTTL() {
+			ttl := parseTTL(b.byteArr[end:])
 
-	n := b.anyArr[idx.start()]
-
-	if idx.hasTTL() {
-		if n.T > clock {
-			return n.V, n.T, true
+			if ttl < clock {
+				return nil, 0, false
+			}
+			return b.byteArr[start:end], ttl, true
 		}
-		return nil, 0, false
+
+		return b.byteArr[start:end], noTTL, true
 	}
-	return n.V, noTTL, true
 }
 
-// Get
-func (c *GigaCache[K]) Get(key K) ([]byte, int64, bool) {
+// Get return bytes value by key.
+func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 	b := c.getShard(key)
 	b.RLock()
 	defer b.RUnlock()
@@ -163,90 +154,62 @@ func (c *GigaCache[K]) Get(key K) ([]byte, int64, bool) {
 	return nil, 0, false
 }
 
-// GetAny get value by key.
-func (c *GigaCache[K]) GetAny(key K) (any, int64, bool) {
-	b := c.getShard(key)
-	b.RLock()
-	defer b.RUnlock()
-
-	if idx, ok := b.idx.Get(key); ok {
-		return b.getAny(idx)
+// SetTx
+func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
+	// check
+	hasTTL := (ts != noTTL)
+	if hasTTL && ts < clock {
+		return
 	}
 
-	return nil, 0, false
-}
-
-// SetTx
-func (c *GigaCache[K]) SetTx(key K, val []byte, ts int64) {
-	hasTTL := (ts != noTTL)
+	// if bytes
+	bytes, ok := val.([]byte)
 
 	b := c.getShard(key)
 	b.Lock()
 	defer b.Unlock()
+	defer b.eliminate()
 
 	// if existed
-	_, ok := b.idx.Get(key)
-	if ok {
-		b.count--
-	}
-
-	b.idx.Set(key, newIdx(len(b.byteArr), len(val), hasTTL, false))
-	b.byteArr = append(b.byteArr, val...)
-	if hasTTL {
-		b.byteArr = order.AppendUint64(b.byteArr, uint64(ts))
-	}
-
-	b.count++
-	b.eliminate()
-}
-
-// Set
-func (c *GigaCache[K]) Set(key K, val []byte) {
-	c.SetTx(key, val, noTTL)
-}
-
-// SetEx
-func (c *GigaCache[K]) SetEx(key K, val []byte, dur time.Duration) {
-	c.SetTx(key, val, clock+int64(dur))
-}
-
-// SetAnyTx
-func (c *GigaCache[K]) SetAnyTx(key K, val any, ts int64) {
-	hasTTL := (ts != noTTL)
-
-	b := c.getShard(key)
-	b.Lock()
-	defer b.Unlock()
-
-	b.eliminate()
-
-	idx, ok := b.idx.Get(key)
-	// exist
-	if ok {
-		if idx.IsAny() {
+	idx, exist := b.idx.Get(key)
+	if exist {
+		// update inplace
+		if !ok && idx.IsAny() {
 			start := idx.start()
 			b.anyArr[start].T = ts
 			b.anyArr[start].V = val
 			b.idx.Set(key, newIdx(start, 0, hasTTL, true))
 			return
+
+		} else {
+			b.count--
 		}
-		b.count--
 	}
 
-	b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
-	b.anyArr = append(b.anyArr, &anyItem{V: val, T: ts})
+	// is bytes
+	if ok {
+		b.idx.Set(key, newIdx(len(b.byteArr), len(bytes), hasTTL, false))
+		b.byteArr = append(b.byteArr, bytes...)
+		if hasTTL {
+			b.byteArr = order.AppendUint64(b.byteArr, uint64(ts))
+		}
+		b.count++
 
-	b.count++
+	} else {
+		b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
+		b.anyArr = append(b.anyArr, &anyItem{V: val, T: ts})
+		b.count++
+	}
 }
 
-// SetAny
-func (c *GigaCache[K]) SetAny(key K, val any) {
-	c.SetAnyTx(key, val, noTTL)
+// Set
+func (c *GigaCache[K]) Set(key K, val any) {
+	c.SetTx(key, val, noTTL)
 }
 
-// SetAnyEx
-func (c *GigaCache[K]) SetAnyEx(key K, val any, dur time.Duration) {
-	c.SetAnyTx(key, val, clock+int64(dur))
+// SetEx
+func (c *GigaCache[K]) SetEx(key K, val any, dur time.Duration) {
+	c.SetTx(key, val, clock+int64(dur))
 }
 
 // Delete
@@ -270,12 +233,6 @@ func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	for _, b := range c.buckets {
 		b.RLock()
 		b.idx.Scan(func(key K, idx Idx) bool {
-			if idx.IsAny() {
-				val, ts, ok := b.getAny(idx)
-				if ok {
-					return f(key, val, ts)
-				}
-			}
 			val, ts, ok := b.get(idx)
 			if ok {
 				return f(key, val, ts)
@@ -364,6 +321,7 @@ func (b *bucket[K]) compress(rate float64) {
 	b.idx.Scan(func(key K, idx Idx) bool {
 		start, has := idx.start(), idx.hasTTL()
 
+		// is any
 		if idx.IsAny() {
 			item := b.anyArr[start]
 
@@ -411,10 +369,9 @@ func (b *bucket[K]) compress(rate float64) {
 }
 
 type bucketJSON[K comparable] struct {
-	C int64
-	K []K
-	I []byte
-	B []byte
+	C    int64
+	K    []K
+	I, B []byte
 }
 
 // MarshalBytes only marshal bytes data ignore any data.
@@ -431,8 +388,7 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 		b.idx.Scan(func(key K, idx Idx) bool {
 			if !idx.IsAny() {
 				k = append(k, key)
-				i = append(i, FormatNumber(idx)...)
-				i = append(i, byte(255))
+				i = order.AppendUint64(i, uint64(idx))
 			}
 			return true
 		})
@@ -462,11 +418,10 @@ func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
 			anyArr:  make([]*anyItem, 0),
 		}
 
-		idxSlice := bytes.Split(b.I, []byte{VALID})
 		// set key
 		for i, k := range b.K {
-			idx := ParseNumber[Idx](idxSlice[i])
-			bc.idx.Set(k, idx)
+			idx := order.Uint64(b.I[i*8 : (i+1)*8])
+			bc.idx.Set(k, Idx(idx))
 		}
 
 		c.buckets = append(c.buckets, bc)

@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"bytes"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -28,14 +27,14 @@ func TestCacheSet(t *testing.T) {
 			m.Set("foo"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
 		}
 
-		// get any
-		if v, ts, ok := m.GetAny("foo123"); v != nil || ts != 0 || ok {
+		// get exist
+		if v, ts, ok := m.Get("foo123"); v == nil || ts != 0 || !ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
 		// update get
 		m.Set("foo100", []byte("200"))
-		if v, ts, ok := m.Get("foo100"); !bytes.Equal(v, []byte("200")) || !ok || ts != 0 {
+		if v, ts, ok := m.Get("foo100"); !assert.Equal([]byte("200"), v, "error1") || !ok || ts != 0 {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
@@ -70,54 +69,56 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("SetAny/GetAny", func(t *testing.T) {
+		assert := assert.New(t)
+
 		m := New[string](100)
 		for i := 0; i < 10000; i++ {
-			m.SetAny("foo"+strconv.Itoa(i), i)
+			m.Set("foo"+strconv.Itoa(i), i)
 		}
 
-		// get bytes
-		if v, ts, ok := m.Get("foo123"); v != nil || ts != 0 || ok {
+		// get
+		if v, ts, ok := m.Get("foo123"); v == nil || ts != 0 || !ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
 		// get any
-		v, ts, ok := m.GetAny("foo123")
+		v, ts, ok := m.Get("foo123")
 		if v.(int) != 123 || ts != 0 || !ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
 		// get not exist
-		v, ts, ok = m.GetAny("not-exist")
+		v, ts, ok = m.Get("not-exist")
 		if v != nil || ts != 0 || ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
 		// expired
-		m.SetAnyEx("foo", 1, sec)
+		m.SetEx("foo", 1, sec)
 		time.Sleep(sec * 2)
-		v, ts, ok = m.GetAny("foo")
+		v, ts, ok = m.Get("foo")
 		if v != nil || ts != 0 || ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
 		// bytes to any
 		m.Set("test1", []byte{1, 2, 3})
-		m.SetAny("test1", 123)
-		if v, ts, ok = m.GetAny("test1"); v.(int) != 123 || ts != 0 || !ok {
+		m.Set("test1", 123)
+		if v, ts, ok = m.Get("test1"); v.(int) != 123 || ts != 0 || !ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
 		// any to bytes
-		m.SetAny("test2", 123)
+		m.Set("test2", 123)
 		m.Set("test2", []byte{1, 2, 3})
-		if v, ts, ok := m.Get("test2"); !bytes.Equal(v, []byte{1, 2, 3}) || ts != 0 || !ok {
+		if v, ts, ok := m.Get("test2"); !assert.Equal([]byte{1, 2, 3}, v) || ts != 0 || !ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
 		// anyTx to anyTx
-		m.SetAnyEx("test3", 123, time.Hour)
-		m.SetAnyEx("test3", 234, time.Hour)
-		if v, ts, ok := m.GetAny("test3"); v.(int) != 234 || ts == 0 || !ok {
+		m.SetEx("test3", 123, time.Hour)
+		m.SetEx("test3", 234, time.Hour)
+		if v, ts, ok := m.Get("test3"); v.(int) != 234 || ts == 0 || !ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 	})
@@ -131,7 +132,7 @@ func TestCacheSet(t *testing.T) {
 
 		// get exist
 		v, ts, ok := m.Get(1234)
-		if !bytes.Equal(v, []byte{1}) || ts != 0 || !ok {
+		if !assert.Equal(t, []byte{1}, v) || ts != 0 || !ok {
 			t.Fatalf("%v %v %v", v, ts, ok)
 		}
 
@@ -152,16 +153,16 @@ func TestCacheSet(t *testing.T) {
 
 	t.Run("Stat", func(t *testing.T) {
 		m := New[string](10)
-		for i := 0; i < 500; i++ {
+		for i := 0; i < 500; i++ { // 500 bytes value
 			m.Set(strconv.Itoa(i), str)
 		}
-		for i := 0; i < 200; i++ {
-			m.Set(strconv.Itoa(i), str)
-			m.SetAny("any"+strconv.Itoa(i), str)
+		for i := 0; i < 200; i++ { // 200 any value
+			m.Set(strconv.Itoa(i), i)
+			m.Set("any"+strconv.Itoa(i), i)
 		}
 
 		s := m.Stat()
-		if s.BytesLen != 7000 || s.Len != 700 || s.AllocLen != 700 || s.AnyLen != 200 {
+		if s.BytesLen != 5000 || s.Len != 700 || s.AllocLen != 700 || s.AnyLen != 400 {
 			t.Fatalf("%+v", s)
 		}
 		if s.ExpRate() != 100 {
@@ -178,10 +179,10 @@ func TestCacheSet(t *testing.T) {
 			m.SetEx("b"+strconv.Itoa(i), []byte(strconv.Itoa(i)), sec)
 		}
 		for i := 0; i < 5000; i++ {
-			m.SetAny("c"+strconv.Itoa(i), i)
+			m.Set("c"+strconv.Itoa(i), i)
 		}
 		for i := 0; i < 5000; i++ {
-			m.SetAnyEx("d"+strconv.Itoa(i), i, sec)
+			m.SetEx("d"+strconv.Itoa(i), i, sec)
 		}
 
 		m.Scan(func(k string, a any, i int64) bool {
@@ -245,10 +246,10 @@ func TestCacheSet(t *testing.T) {
 			m.SetEx("expired"+strconv.Itoa(i), []byte{1, 2, 3}, sec)
 		}
 		for i := 0; i < 300; i++ {
-			m.SetAny("noexpired-any"+strconv.Itoa(i), 123)
+			m.Set("noexpired-any"+strconv.Itoa(i), 123)
 		}
 		for i := 0; i < 400; i++ {
-			m.SetAnyEx("expired-any"+strconv.Itoa(i), 123, sec)
+			m.SetEx("expired-any"+strconv.Itoa(i), 123, sec)
 		}
 
 		// check
@@ -300,7 +301,7 @@ func TestCacheSet(t *testing.T) {
 		// check items
 		for k, v := range valid {
 			res, ts, ok := m1.Get(k)
-			if !bytes.Equal(res, v) || ts == 0 || !ok {
+			if !assert.Equal(t, res, v) || ts == 0 || !ok {
 				t.Fatalf("error: %v %v %v", res, ts, ok)
 			}
 		}
@@ -320,7 +321,7 @@ func TestCacheSet(t *testing.T) {
 	t.Run("eliminate", func(t *testing.T) {
 		m := New[string](100)
 		for i := 0; i < 3000; i++ {
-			m.SetAnyEx(strconv.Itoa(i), 1, sec)
+			m.SetEx(strconv.Itoa(i), 1, sec)
 		}
 		for i := 0; i < 3000; i++ {
 			m.SetEx("t"+strconv.Itoa(i), []byte{1}, sec)
@@ -364,7 +365,7 @@ func FuzzSet(f *testing.F) {
 
 			// not expired
 		} else if ts > now {
-			if !bytes.Equal(v, val) || ts != ttl || !ok {
+			if !assert.Equal(t, v, val) || ts != ttl || !ok {
 				t.Fatalf("[2] set: %v %s %v get: %s %v %v", key, val, ts, v, ttl, ok)
 			}
 		}
@@ -376,8 +377,8 @@ func FuzzSetAny(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, key string, val int, ts int64) {
 		now := GetUnixNano()
-		m.SetAnyTx(key, val, ts)
-		v, ttl, ok := m.GetAny(key)
+		m.SetTx(key, val, ts)
+		v, ttl, ok := m.Get(key)
 
 		// no ttl
 		if ts == 0 {

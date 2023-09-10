@@ -45,7 +45,7 @@ func testAny() {
 
 	// Test
 	for i := 1; i < 20; i++ {
-		bc.SetAnyEx("xgz-any"+strconv.Itoa(i), i, time.Second/10*time.Duration(i))
+		bc.SetEx("xgz-any"+strconv.Itoa(i), i, time.Second/10*time.Duration(i))
 	}
 
 	for i := 0; i < 25; i++ {
@@ -115,12 +115,12 @@ func main() {
 
 			if i%2 == 0 {
 				val, _, ok := bc.Get(key)
-				if ok && !bytes.Equal(S2B(&key), val) {
+				if ok && !bytes.Equal(S2B(&key), val.([]byte)) {
 					panic("key and value not equal")
 				}
 
 			} else {
-				val, _, ok := bc.GetAny(key)
+				val, _, ok := bc.Get(key)
 				if ok && !bytes.Equal(S2B(&key), val.([]byte)) {
 					panic("key and value not equal")
 				}
