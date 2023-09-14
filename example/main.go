@@ -61,8 +61,8 @@ func testAny() {
 func main() {
 	go http.ListenAndServe("localhost:6060", nil)
 
-	testBytes()
-	testAny()
+	// testBytes()
+	// testAny()
 
 	start := time.Now()
 

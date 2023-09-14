@@ -27,7 +27,7 @@ const (
 	probeInterval     = 3
 	probeCount        = 100
 	probeSpace        = 3
-	compressThreshold = 0.5
+	compressThreshold = 0.6
 	maxFailCount      = 5
 )
 
@@ -222,7 +222,6 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	if ok {
 		b.count--
 	}
-
 	b.eliminate()
 
 	return ok

@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	num = 1000 * 10000
+	num = 100 * 10000
 )
 
 var (
