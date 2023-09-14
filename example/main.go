@@ -77,7 +77,7 @@ func main() {
 			time.Sleep(time.Second / 10)
 
 			// benchmark test
-			if i > 0 && i%10 == 0 {
+			if i > 0 && i%100 == 0 {
 				stat := bc.Stat()
 				fmt.Printf("[Cache] %.0fs | count: %dw | len: %dw | alloc: %dw | bytes: %dw | any: %dw | rate: %.1f%% | ccount: %d | avg: %.2f ns\n",
 					time.Since(start).Seconds(),
@@ -92,18 +92,18 @@ func main() {
 			}
 
 			// marshal test
-			if i > 0 && i%100 == 0 {
-				stat := bc.Stat()
-				before := time.Now()
-				data, err := bc.MarshalBytes()
-				if err != nil {
-					panic(err)
-				}
-				fmt.Printf("[Marshal] len: %vw | cost: %v | len: %.2fM\n",
-					stat.Len/1e4,
-					time.Since(before),
-					float64(len(data))/1024/1024/8)
-			}
+			// if i > 0 && i%100 == 0 {
+			// 	stat := bc.Stat()
+			// 	before := time.Now()
+			// 	data, err := bc.MarshalBytes()
+			// 	if err != nil {
+			// 		panic(err)
+			// 	}
+			// 	fmt.Printf("[Marshal] len: %vw | cost: %v | len: %.2fM\n",
+			// 		stat.Len/1e4,
+			// 		time.Since(before),
+			// 		float64(len(data))/1024/1024/8)
+			// }
 		}
 	}()
 

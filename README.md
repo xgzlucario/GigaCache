@@ -102,3 +102,15 @@ Value size:         100
 Heap Objects Total: 471
 GC pause for startup:  10.828795ms
 ```
+
+**Eliminate Bench**
+
+compressThreshold with 130s test.
+
+| compressThreshold | count  | bytes | ccount | rate  | avg    |
+| ----------------- | ------ | ----- | ------ | ----- | ------ |
+| 0.5               | 25243w | 8420w | 69635  | 61.8% | 0.11ns |
+| 0.6               | 24840w | 5207w | 107273 | 77.2% | 0.13ns |
+| 0.7               | 25438w | 4949w | 146692 | 85.6% | 0.12ns |
+| 0.8               | 24386w | 4077w | 209311 | 91.1% | 0.17ns |
+| 0.9               | 23112w | 3359w | 334392 | 96.4% | 0.18ns |
