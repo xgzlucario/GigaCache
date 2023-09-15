@@ -114,3 +114,5 @@ compressThreshold with 200s test.
 | 0.7               | 37757w | 4578w | 225590 | 83.6% | 0.16ns |
 | 0.8               | 37623w | 4150w | 325649 | 90.9% | 0.17ns |
 | 0.9               | 36276w | 3564w | 517681 | 96.2% | 0.17ns |
+
+![p1](https://github.com/xgzlucario/GigaCache/blob/master/p1.png)
