@@ -2,7 +2,6 @@ package cache
 
 import (
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 )
@@ -15,26 +14,11 @@ func getStdmap() map[string][]byte {
 	return m
 }
 
-func getSyncmap() *sync.Map {
-	m := &sync.Map{}
-	for i := 0; i < num; i++ {
-		m.Store(strconv.Itoa(i), str)
-	}
-	return m
-}
-
 func BenchmarkSet(b *testing.B) {
 	m1 := map[string][]byte{}
 	b.Run("stdmap", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m1[strconv.Itoa(i)] = str
-		}
-	})
-
-	m4 := sync.Map{}
-	b.Run("syncmap", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m4.Store(strconv.Itoa(i), str)
 		}
 	})
 
@@ -58,13 +42,6 @@ func BenchmarkGet(b *testing.B) {
 	b.Run("stdmap", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			_ = m1[strconv.Itoa(i)]
-		}
-	})
-
-	m2 := getSyncmap()
-	b.Run("syncmap", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m2.Load(strconv.Itoa(i))
 		}
 	})
 
@@ -94,13 +71,6 @@ func BenchmarkDelete(b *testing.B) {
 	b.Run("stdmap", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			delete(m1, strconv.Itoa(i))
-		}
-	})
-
-	m2 := getSyncmap()
-	b.Run("syncmap", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m2.Delete(strconv.Itoa(i))
 		}
 	})
 

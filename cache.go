@@ -24,11 +24,15 @@ const (
 	defaultShardsCount = 1024
 
 	// eliminate probing
-	probeInterval     = 3
-	probeCount        = 100
-	probeSpace        = 3
-	compressThreshold = 0.5
-	maxFailCount      = 5
+	probeInterval = 3
+	probeCount    = 100
+	probeSpace    = 3
+
+	// compressThreshold Indicates how many effective bytes trigger the compression operation.
+	// Recommended between 0.6 and 0.7, see bench data for details.
+	compressThreshold = 0.6
+
+	maxFailCount = 5
 )
 
 var (
@@ -222,7 +226,6 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	if ok {
 		b.count--
 	}
-
 	b.eliminate()
 
 	return ok

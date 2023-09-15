@@ -102,3 +102,17 @@ Value size:         100
 Heap Objects Total: 471
 GC pause for startup:  10.828795ms
 ```
+
+**Eliminate Bench**
+
+compressThreshold with 200s test.
+
+| compressThreshold | count  | bytes | ccount | rate  | avg    |
+| ----------------- | ------ | ----- | ------ | ----- | ------ |
+| 0.5               | 40234w | 6413w | 107531 | 69.7% | 0.12ns |
+| 0.6               | 41032w | 5512w | 162890 | 78.5% | 0.11ns |
+| 0.7               | 37757w | 4578w | 225590 | 83.6% | 0.16ns |
+| 0.8               | 37623w | 4150w | 325649 | 90.9% | 0.17ns |
+| 0.9               | 36276w | 3564w | 517681 | 96.2% | 0.17ns |
+
+![p1](https://github.com/xgzlucario/GigaCache/blob/master/p1.png)
