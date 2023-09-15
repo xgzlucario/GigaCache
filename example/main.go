@@ -71,6 +71,9 @@ func main() {
 
 	bc := cache.New[string]()
 
+	var c float64
+	var sumRate, sumBytesLen float64
+
 	// Stat
 	go func() {
 		for i := 0; ; i++ {
@@ -79,31 +82,21 @@ func main() {
 			// benchmark test
 			if i > 0 && i%100 == 0 {
 				stat := bc.Stat()
-				fmt.Printf("[Cache] %.0fs | count: %dw | len: %dw | alloc: %dw | bytes: %dw | any: %dw | rate: %.1f%% | ccount: %d | avg: %.2f ns\n",
+
+				c++
+				sumRate += stat.ExpRate()
+				sumBytesLen += float64(stat.BytesLen)
+
+				fmt.Printf("[Cache] %.0fs | count: %dw | len: %dw | alloc: %dw | bytes: %.0fw | rate: %.1f%% | ccount: %d | avg: %.2f ns\n",
 					time.Since(start).Seconds(),
 					count/1e4,
 					stat.Len/1e4,
-					stat.AllocLen/1e4,
-					stat.BytesLen/1e4,
-					stat.AnyLen/1e4,
-					stat.ExpRate(),
+					stat.Count/1e4,
+					sumBytesLen/c/1e4,
+					sumRate/c,
 					stat.CCount,
 					sum/float64(n1))
 			}
-
-			// marshal test
-			// if i > 0 && i%100 == 0 {
-			// 	stat := bc.Stat()
-			// 	before := time.Now()
-			// 	data, err := bc.MarshalBytes()
-			// 	if err != nil {
-			// 		panic(err)
-			// 	}
-			// 	fmt.Printf("[Marshal] len: %vw | cost: %v | len: %.2fM\n",
-			// 		stat.Len/1e4,
-			// 		time.Since(before),
-			// 		float64(len(data))/1024/1024/8)
-			// }
 		}
 	}()
 
