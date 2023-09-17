@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"sync"
@@ -38,7 +39,26 @@ const (
 var (
 	// When using LittleEndian, byte slices can be converted to uint64 unsafely.
 	order = binary.LittleEndian
+
+	// Reuse buffer to reduce memory allocation.
+	// TODO: Use <channel> and <select> to limit the pool size.
+	bpool = sync.Pool{
+		New: func() any {
+			return bytes.NewBuffer(make([]byte, 0, bufferSize))
+		},
+	}
 )
+
+// GetBuffer returns a buffer from pool.
+func GetBuffer() *bytes.Buffer {
+	return bpool.Get().(*bytes.Buffer)
+}
+
+// PutBuffer puts a buffer to pool.
+func PutBuffer(buf *bytes.Buffer) {
+	buf.Reset()
+	bpool.Put(buf)
+}
 
 // GigaCache
 type GigaCache[K comparable] struct {
@@ -50,11 +70,11 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	idx     *hashmap.Map[K, Idx]
-	count   int64
-	ccount  int64
-	byteArr []byte
-	anyArr  []*anyItem
+	idx    *hashmap.Map[K, Idx]
+	count  int64
+	ccount int64
+	bytes  *bytes.Buffer
+	anyArr []*anyItem
 	sync.RWMutex
 }
 
@@ -86,9 +106,9 @@ func New[K comparable](count ...int) *GigaCache[K] {
 
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket[K]{
-			idx:     hashmap.New[K, Idx](0),
-			byteArr: make([]byte, 0, bufferSize),
-			anyArr:  make([]*anyItem, 0),
+			idx:    hashmap.New[K, Idx](0),
+			bytes:  GetBuffer(),
+			anyArr: make([]*anyItem, 0),
 		}
 	}
 
@@ -133,15 +153,15 @@ func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
 		end := start + idx.offset()
 
 		if idx.hasTTL() {
-			ttl := parseTTL(b.byteArr[end:])
+			ttl := parseTTL(b.bytes.Bytes()[end:])
 
 			if ttl < clock {
 				return nil, 0, false
 			}
-			return b.byteArr[start:end], ttl, true
+			return b.bytes.Bytes()[start:end], ttl, true
 		}
 
-		return b.byteArr[start:end], noTTL, true
+		return b.bytes.Bytes()[start:end], noTTL, true
 	}
 }
 
@@ -192,10 +212,10 @@ func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 
 	// is bytes
 	if ok {
-		b.idx.Set(key, newIdx(len(b.byteArr), len(bytes), hasTTL, false))
-		b.byteArr = append(b.byteArr, bytes...)
+		b.idx.Set(key, newIdx(b.bytes.Len(), len(bytes), hasTTL, false))
+		b.bytes.Write(bytes)
 		if hasTTL {
-			b.byteArr = order.AppendUint64(b.byteArr, uint64(ts))
+			b.bytes.Write(order.AppendUint64(nil, uint64(ts)))
 		}
 		b.count++
 
@@ -275,7 +295,7 @@ func (b *bucket[K]) eliminate() {
 
 			} else {
 				end := idx.start() + idx.offset()
-				ttl := parseTTL(b.byteArr[end:])
+				ttl := parseTTL(b.bytes.Bytes()[end:])
 
 				// expired
 				if ttl < clock {
@@ -316,7 +336,7 @@ func (b *bucket[K]) compress(rate float64) {
 	b.count = 0
 	b.ccount++
 
-	newBytesArr := make([]byte, 0, int(float64(len(b.byteArr))*rate))
+	newBytesArr := GetBuffer()
 	newAnyArr := make([]*anyItem, 0, int(float64(len(b.anyArr))*rate))
 
 	delKeys := make([]K, 0)
@@ -345,17 +365,17 @@ func (b *bucket[K]) compress(rate float64) {
 			end := start + offset
 
 			// expired
-			if has && parseTTL(b.byteArr[end:]) < clock {
+			if has && parseTTL(b.bytes.Bytes()[end:]) < clock {
 				delKeys = append(delKeys, key)
 				return true
 			}
 
 			// reset
-			b.idx.Set(key, newIdx(len(newBytesArr), offset, has, false))
+			b.idx.Set(key, newIdx(newBytesArr.Len(), offset, has, false))
 			if has {
-				newBytesArr = append(newBytesArr, b.byteArr[start:end+ttlBytes]...)
+				newBytesArr.Write(b.bytes.Bytes()[start : end+ttlBytes])
 			} else {
-				newBytesArr = append(newBytesArr, b.byteArr[start:end]...)
+				newBytesArr.Write(b.bytes.Bytes()[start:end])
 			}
 
 			b.count++
@@ -367,7 +387,8 @@ func (b *bucket[K]) compress(rate float64) {
 		b.idx.Delete(key)
 	}
 
-	b.byteArr = newBytesArr
+	PutBuffer(b.bytes)
+	b.bytes = newBytesArr
 	b.anyArr = newAnyArr
 }
 
@@ -397,7 +418,7 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 		})
 
 		buckets = append(buckets, &bucketJSON[K]{
-			b.count, k, i, b.byteArr,
+			b.count, k, i, b.bytes.Bytes(),
 		})
 	}
 
@@ -415,10 +436,10 @@ func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
 	c.buckets = make([]*bucket[K], 0, len(buckets))
 	for _, b := range buckets {
 		bc := &bucket[K]{
-			count:   b.C,
-			idx:     hashmap.New[K, Idx](len(b.K)),
-			byteArr: b.B,
-			anyArr:  make([]*anyItem, 0),
+			count:  b.C,
+			idx:    hashmap.New[K, Idx](len(b.K)),
+			bytes:  bytes.NewBuffer(b.B),
+			anyArr: make([]*anyItem, 0),
 		}
 
 		// set key
