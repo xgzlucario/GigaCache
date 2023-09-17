@@ -14,7 +14,7 @@ func (c *GigaCache[K]) Stat() (stat CacheStat) {
 		b.RLock()
 		stat.Count += uint64(b.count)
 		stat.Len += uint64(b.idx.Len())
-		stat.BytesLen += uint64(len(b.byteArr))
+		stat.BytesLen += uint64(b.bytes.Len())
 		stat.AnyLen += uint64(len(b.anyArr))
 		stat.CCount += uint64(b.ccount)
 		b.RUnlock()
