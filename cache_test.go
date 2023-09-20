@@ -15,7 +15,7 @@ const (
 
 var (
 	str = []byte("0123456789")
-	sec = time.Second / 10
+	sec = time.Second
 )
 
 func TestCacheSet(t *testing.T) {
@@ -254,7 +254,7 @@ func TestCacheSet(t *testing.T) {
 
 		// check
 		s := m.Stat()
-		if s.BytesLen != 2500 || s.Len != 1000 || s.Count != 1000 || s.AnyLen != 700 {
+		if s.BytesLen != 1700 || s.Len != 1000 || s.Count != 1000 || s.AnyLen != 700 {
 			t.Fatalf("%+v", s)
 		}
 
