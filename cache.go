@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"bytes"
 	"encoding/binary"
 	"math"
 	"sync"
@@ -19,7 +18,8 @@ const (
 	noTTL = 0
 
 	// for ttl
-	ttlBytes = 8
+	ttlBytes  = 4
+	timeCarry = 1e9
 
 	bufferSize         = 1024
 	defaultShardsCount = 1024
@@ -41,24 +41,8 @@ var (
 	order = binary.LittleEndian
 
 	// Reuse buffer to reduce memory allocation.
-	// TODO: Use <channel> and <select> to limit the pool size.
-	bpool = sync.Pool{
-		New: func() any {
-			return bytes.NewBuffer(make([]byte, 0, bufferSize))
-		},
-	}
+	bpool = NewBytePoolCap(defaultShardsCount, 0, bufferSize)
 )
-
-// GetBuffer returns a buffer from pool.
-func GetBuffer() *bytes.Buffer {
-	return bpool.Get().(*bytes.Buffer)
-}
-
-// PutBuffer puts a buffer to pool.
-func PutBuffer(buf *bytes.Buffer) {
-	buf.Reset()
-	bpool.Put(buf)
-}
 
 // GigaCache
 type GigaCache[K comparable] struct {
@@ -73,7 +57,7 @@ type bucket[K comparable] struct {
 	idx    *hashmap.Map[K, Idx]
 	count  int64
 	ccount int64
-	bytes  *bytes.Buffer
+	bytes  []byte
 	anyArr []*anyItem
 	sync.RWMutex
 }
@@ -107,7 +91,7 @@ func New[K comparable](count ...int) *GigaCache[K] {
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket[K]{
 			idx:    hashmap.New[K, Idx](0),
-			bytes:  GetBuffer(),
+			bytes:  bpool.Get(),
 			anyArr: make([]*anyItem, 0),
 		}
 	}
@@ -153,15 +137,15 @@ func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
 		end := start + idx.offset()
 
 		if idx.hasTTL() {
-			ttl := parseTTL(b.bytes.Bytes()[end:])
+			ttl := parseTTL(b.bytes[end:])
 
 			if ttl < clock {
 				return nil, 0, false
 			}
-			return b.bytes.Bytes()[start:end], ttl, true
+			return b.bytes[start:end], ttl, true
 		}
 
-		return b.bytes.Bytes()[start:end], noTTL, true
+		return b.bytes[start:end], noTTL, true
 	}
 }
 
@@ -212,10 +196,10 @@ func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 
 	// is bytes
 	if ok {
-		b.idx.Set(key, newIdx(b.bytes.Len(), len(bytes), hasTTL, false))
-		b.bytes.Write(bytes)
+		b.idx.Set(key, newIdx(len(b.bytes), len(bytes), hasTTL, false))
+		b.bytes = append(b.bytes, bytes...)
 		if hasTTL {
-			b.bytes.Write(order.AppendUint64(nil, uint64(ts)))
+			b.bytes = order.AppendUint32(b.bytes, uint32(ts/timeCarry))
 		}
 		b.count++
 
@@ -268,7 +252,7 @@ func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 
 func parseTTL(b []byte) int64 {
 	_ = b[ttlBytes-1]
-	return *(*int64)(unsafe.Pointer(&b[0]))
+	return int64(*(*uint32)(unsafe.Pointer(&b[0]))) * timeCarry
 }
 
 // eliminate the expired key-value pairs.
@@ -295,7 +279,7 @@ func (b *bucket[K]) eliminate() {
 
 			} else {
 				end := idx.start() + idx.offset()
-				ttl := parseTTL(b.bytes.Bytes()[end:])
+				ttl := parseTTL(b.bytes[end:])
 
 				// expired
 				if ttl < clock {
@@ -336,7 +320,7 @@ func (b *bucket[K]) compress(rate float64) {
 	b.count = 0
 	b.ccount++
 
-	newBytesArr := GetBuffer()
+	newBytes := bpool.Get()
 	newAnyArr := make([]*anyItem, 0, int(float64(len(b.anyArr))*rate))
 
 	delKeys := make([]K, 0)
@@ -365,17 +349,17 @@ func (b *bucket[K]) compress(rate float64) {
 			end := start + offset
 
 			// expired
-			if has && parseTTL(b.bytes.Bytes()[end:]) < clock {
+			if has && parseTTL(b.bytes[end:]) < clock {
 				delKeys = append(delKeys, key)
 				return true
 			}
 
 			// reset
-			b.idx.Set(key, newIdx(newBytesArr.Len(), offset, has, false))
+			b.idx.Set(key, newIdx(len(newBytes), offset, has, false))
 			if has {
-				newBytesArr.Write(b.bytes.Bytes()[start : end+ttlBytes])
+				newBytes = append(newBytes, b.bytes[start:end+ttlBytes]...)
 			} else {
-				newBytesArr.Write(b.bytes.Bytes()[start:end])
+				newBytes = append(newBytes, b.bytes[start:end]...)
 			}
 
 			b.count++
@@ -387,8 +371,10 @@ func (b *bucket[K]) compress(rate float64) {
 		b.idx.Delete(key)
 	}
 
-	PutBuffer(b.bytes)
-	b.bytes = newBytesArr
+	b.bytes = b.bytes[:0]
+	bpool.Put(b.bytes)
+
+	b.bytes = newBytes
 	b.anyArr = newAnyArr
 }
 
@@ -418,7 +404,7 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 		})
 
 		buckets = append(buckets, &bucketJSON[K]{
-			b.count, k, i, b.bytes.Bytes(),
+			b.count, k, i, b.bytes,
 		})
 	}
 
@@ -438,7 +424,7 @@ func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
 		bc := &bucket[K]{
 			count:  b.C,
 			idx:    hashmap.New[K, Idx](len(b.K)),
-			bytes:  bytes.NewBuffer(b.B),
+			bytes:  b.B,
 			anyArr: make([]*anyItem, 0),
 		}
 
