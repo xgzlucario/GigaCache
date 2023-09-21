@@ -1,7 +1,10 @@
 # GigaCache
+
+[![Go Report Card](https://goreportcard.com/badge/github.com/xgzlucario/GigaCache)](https://goreportcard.com/report/github.com/xgzlucario/GigaCache) [![Go Reference](https://pkg.go.dev/badge/github.com/xgzlucario/rotom.svg)](https://pkg.go.dev/github.com/xgzlucario/rotom) ![](https://img.shields.io/badge/go-1.21.0-orange.svg) ![](https://img.shields.io/github/languages/code-size/xgzlucario/GigaCache.svg) 
+
 Powerful, fast, expiration supported cache for managing Gigabytes of data.
 
-# Usage
+# 🚗Usage
 
 **Install**
 
@@ -34,7 +37,7 @@ func main() {
 }
 ```
 
-# Benchmark
+# 🚀Benchmark
 
 **Environment**
 
@@ -103,7 +106,7 @@ Heap Objects Total: 471
 GC pause for startup:  10.828795ms
 ```
 
-**Eliminate Bench**
+# 🛸Eliminate Bench
 
 compressThreshold with 200s test.
 
@@ -115,4 +118,4 @@ compressThreshold with 200s test.
 | 0.8               | 37623w | 4150w | 325649 | 90.9% | 0.17ns |
 | 0.9               | 36276w | 3564w | 517681 | 96.2% | 0.17ns |
 
-![p1](https://github.com/xgzlucario/GigaCache/blob/master/p1.png)
+![p1](p1.png)
