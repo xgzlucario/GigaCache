@@ -8,6 +8,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/exp/rand"
+	"golang.org/x/exp/slices"
 
 	"github.com/bytedance/sonic"
 	"github.com/tidwall/hashmap"
@@ -18,8 +19,7 @@ const (
 	noTTL = 0
 
 	// for ttl
-	ttlBytes  = 4
-	timeCarry = 1e9
+	ttlBytes = 8
 
 	bufferSize         = 1024
 	defaultShardsCount = 1024
@@ -138,14 +138,13 @@ func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
 
 		if idx.hasTTL() {
 			ttl := parseTTL(b.bytes[end:])
-
 			if ttl < clock {
 				return nil, 0, false
 			}
-			return b.bytes[start:end], ttl, true
+			return slices.Clone(b.bytes[start:end]), ttl, true
 		}
 
-		return b.bytes[start:end], noTTL, true
+		return slices.Clone(b.bytes[start:end]), noTTL, true
 	}
 }
 
@@ -164,11 +163,7 @@ func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 
 // SetTx
 func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
-	// check
 	hasTTL := (ts != noTTL)
-	if hasTTL && ts < clock {
-		return
-	}
 
 	// if bytes
 	bytes, ok := val.([]byte)
@@ -188,10 +183,8 @@ func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 			b.anyArr[start].V = val
 			b.idx.Set(key, newIdx(start, 0, hasTTL, true))
 			return
-
-		} else {
-			b.count--
 		}
+		b.count--
 	}
 
 	// is bytes
@@ -199,7 +192,7 @@ func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 		b.idx.Set(key, newIdx(len(b.bytes), len(bytes), hasTTL, false))
 		b.bytes = append(b.bytes, bytes...)
 		if hasTTL {
-			b.bytes = order.AppendUint32(b.bytes, uint32(ts/timeCarry))
+			b.bytes = order.AppendUint64(b.bytes, uint64(ts))
 		}
 		b.count++
 
@@ -252,7 +245,7 @@ func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 
 func parseTTL(b []byte) int64 {
 	_ = b[ttlBytes-1]
-	return int64(*(*uint32)(unsafe.Pointer(&b[0]))) * timeCarry
+	return *(*int64)(unsafe.Pointer(&b[0]))
 }
 
 // eliminate the expired key-value pairs.

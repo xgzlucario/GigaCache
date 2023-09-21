@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"math"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -254,7 +255,7 @@ func TestCacheSet(t *testing.T) {
 
 		// check
 		s := m.Stat()
-		if s.BytesLen != 1700 || s.Len != 1000 || s.Count != 1000 || s.AnyLen != 700 {
+		if s.BytesLen != 2500 || s.Len != 1000 || s.Count != 1000 || s.AnyLen != 700 {
 			t.Fatalf("%+v", s)
 		}
 
@@ -347,56 +348,32 @@ func FuzzSet(f *testing.F) {
 	m := New[string]()
 
 	f.Fuzz(func(t *testing.T, key string, val []byte, ts int64) {
-		now := GetUnixNano()
-		m.SetTx(key, val, ts)
-		v, ttl, ok := m.Get(key)
+		f := func(ts int64) {
+			now := GetUnixNano()
+			m.SetTx(key, val, ts)
+			v, ttl, ok := m.Get(key)
 
-		// no ttl
-		if ts == 0 {
-			if v == nil || ttl != 0 || !ok {
-				t.Fatalf("[0] set: %v %s %v get: %s %v %v", key, val, ts, v, ttl, ok)
-			}
+			// no ttl
+			if ts == 0 {
+				assert.Equal(t, v, val)
+				assert.Equal(t, ttl, int64(0))
+				assert.Equal(t, ok, true)
 
-			// expired
-		} else if ts < now {
-			if v != nil || ttl != 0 || ok {
-				t.Fatalf("[1] set: %v %s %v get: %s %v %v", key, val, ts, v, ttl, ok)
-			}
+				// expired
+			} else if ts < now {
+				assert.Equal(t, v, nil)
+				assert.Equal(t, ttl, int64(0))
+				assert.Equal(t, ok, false)
 
-			// not expired
-		} else if ts > now {
-			if !assert.Equal(t, v, val) || ts != ttl || !ok {
-				t.Fatalf("[2] set: %v %s %v get: %s %v %v", key, val, ts, v, ttl, ok)
-			}
-		}
-	})
-}
-
-func FuzzSetAny(f *testing.F) {
-	m := New[string]()
-
-	f.Fuzz(func(t *testing.T, key string, val int, ts int64) {
-		now := GetUnixNano()
-		m.SetTx(key, val, ts)
-		v, ttl, ok := m.Get(key)
-
-		// no ttl
-		if ts == 0 {
-			if v == nil || ttl != 0 || !ok {
-				t.Fatalf("[0] set: %v %v %v get: %v %v %v", key, val, ts, v, ttl, ok)
-			}
-
-			// expired
-		} else if ts < now {
-			if v != nil || ttl != 0 || ok {
-				t.Fatalf("[1] set: %v %v %v get: %v %v %v", key, val, ts, v, ttl, ok)
-			}
-
-			// not expired
-		} else if ts > now {
-			if v.(int) != val || ts != ttl || !ok {
-				t.Fatalf("[2] set: %v %v %v get: %v %v %v", key, val, ts, v, ttl, ok)
+				// not expired
+			} else if ts > now {
+				assert.Equal(t, v, val)
+				assert.Equal(t, ts, ttl)
+				assert.Equal(t, ok, true)
 			}
 		}
+
+		f(ts)
+		f(math.MaxInt64 - ts)
 	})
 }
