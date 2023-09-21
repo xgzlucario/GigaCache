@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"math"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -347,27 +348,32 @@ func FuzzSet(f *testing.F) {
 	m := New[string]()
 
 	f.Fuzz(func(t *testing.T, key string, val []byte, ts int64) {
-		now := GetUnixNano()
-		m.SetTx(key, val, ts)
-		v, ttl, ok := m.Get(key)
+		f := func(ts int64) {
+			now := GetUnixNano()
+			m.SetTx(key, val, ts)
+			v, ttl, ok := m.Get(key)
 
-		// no ttl
-		if ts == 0 {
-			assert.Equal(t, v, val)
-			assert.Equal(t, ttl, int64(0))
-			assert.Equal(t, ok, true)
+			// no ttl
+			if ts == 0 {
+				assert.Equal(t, v, val)
+				assert.Equal(t, ttl, int64(0))
+				assert.Equal(t, ok, true)
 
-			// expired
-		} else if ts < now {
-			assert.Equal(t, v, nil)
-			assert.Equal(t, ttl, int64(0))
-			assert.Equal(t, ok, false)
+				// expired
+			} else if ts < now {
+				assert.Equal(t, v, nil)
+				assert.Equal(t, ttl, int64(0))
+				assert.Equal(t, ok, false)
 
-			// not expired
-		} else if ts > now {
-			assert.Equal(t, v, val)
-			assert.Equal(t, ts, ttl)
-			assert.Equal(t, ok, true)
+				// not expired
+			} else if ts > now {
+				assert.Equal(t, v, val)
+				assert.Equal(t, ts, ttl)
+				assert.Equal(t, ok, true)
+			}
 		}
+
+		f(ts)
+		f(math.MaxInt64 - ts)
 	})
 }
