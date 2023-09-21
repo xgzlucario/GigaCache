@@ -184,7 +184,6 @@ func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 			b.idx.Set(key, newIdx(start, 0, hasTTL, true))
 			return
 		}
-		b.count--
 	}
 
 	// is bytes

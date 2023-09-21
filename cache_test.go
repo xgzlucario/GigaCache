@@ -16,7 +16,7 @@ const (
 
 var (
 	str = []byte("0123456789")
-	sec = time.Second
+	sec = time.Second / 10
 )
 
 func TestCacheSet(t *testing.T) {
@@ -153,26 +153,26 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("Stat", func(t *testing.T) {
-		m := New[string](10)
-		for i := 0; i < 500; i++ { // 500 bytes value
+		m := New[string](20)
+		for i := 0; i < 600; i++ {
 			m.Set(strconv.Itoa(i), str)
 		}
-		for i := 0; i < 200; i++ { // 200 any value
+		for i := 0; i < 200; i++ {
 			m.Set(strconv.Itoa(i), i)
 			m.Set("any"+strconv.Itoa(i), i)
 		}
 
 		s := m.Stat()
-		if s.BytesLen != 5000 || s.Len != 700 || s.Count != 700 || s.AnyLen != 400 {
+		if s.BytesLen != 6000 || s.Len != 800 || s.Count != 1000 || s.AnyLen != 400 {
 			t.Fatalf("%+v", s)
 		}
-		if s.ExpRate() != 100 {
+		if s.ExpRate() != 80 {
 			t.Fatalf("%+v", s.ExpRate())
 		}
 	})
 
 	t.Run("Scan", func(t *testing.T) {
-		m := New[string](50)
+		m := New[string](20)
 		for i := 0; i < 5000; i++ {
 			m.Set("a"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
 		}
