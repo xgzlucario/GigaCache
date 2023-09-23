@@ -239,6 +239,7 @@ func TestCacheSet(t *testing.T) {
 
 	t.Run("Compress", func(t *testing.T) {
 		m := New[string]()
+		m.buckets[0].eliminate()
 
 		for i := 0; i < 100; i++ {
 			m.Set("noexpired"+strconv.Itoa(i), []byte{1, 2, 3})

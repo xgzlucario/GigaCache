@@ -2,7 +2,6 @@ package cache
 
 import (
 	"encoding/binary"
-	"math"
 	"sync"
 	"time"
 	"unsafe"
@@ -161,17 +160,12 @@ func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 	return nil, 0, false
 }
 
-// SetTx
-func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
+// set
+func (b *bucket[K]) set(key K, val any, ts int64) {
 	hasTTL := (ts != noTTL)
 
 	// if bytes
 	bytes, ok := val.([]byte)
-
-	b := c.getShard(key)
-	b.Lock()
-
-	// is bytes
 	if ok {
 		b.idx.Set(key, newIdx(len(b.bytes), len(bytes), hasTTL, false))
 		b.bytes = append(b.bytes, bytes...)
@@ -195,7 +189,13 @@ func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 			b.count++
 		}
 	}
+}
 
+// SetTx
+func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
+	b := c.getShard(key)
+	b.Lock()
+	b.set(key, val, ts)
 	b.eliminate()
 	b.Unlock()
 }
@@ -221,22 +221,28 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	return ok
 }
 
+// scan
+func (b *bucket[K]) scan(f func(K, any, int64) bool) {
+	b.idx.Scan(func(key K, idx Idx) bool {
+		val, ts, ok := b.get(idx)
+		if ok {
+			return f(key, val, ts)
+		}
+		return true
+	})
+}
+
 // Scan
 func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	for _, b := range c.buckets {
 		b.RLock()
-		b.idx.Scan(func(key K, idx Idx) bool {
-			val, ts, ok := b.get(idx)
-			if ok {
-				return f(key, val, ts)
-			}
-			return true
-		})
+		b.scan(f)
 		b.RUnlock()
 	}
 }
 
 func parseTTL(b []byte) int64 {
+	// check bound
 	_ = b[ttlBytes-1]
 	return *(*int64)(unsafe.Pointer(&b[0]))
 }
@@ -247,35 +253,37 @@ func (b *bucket[K]) eliminate() {
 		return
 	}
 
-	var failCont int
+	if b.idx.Len() == 0 {
+		return
+	}
+
+	var failCont, ttl int64
 	rdm := rand.Uint64()
 
 	// probing
 	for i := uint64(0); i < probeCount; i++ {
-		k, idx, ok := b.idx.GetPos(rdm + i*probeSpace)
+		k, idx, _ := b.idx.GetPos(rdm + i*probeSpace)
 
-		if ok && idx.hasTTL() {
-			if idx.IsAny() {
-				item := b.anyArr[idx.start()]
-				if item.T < clock {
-					b.idx.Delete(k)
-					failCont = 0
-					continue
-				}
-
-			} else {
-				end := idx.start() + idx.offset()
-				ttl := parseTTL(b.bytes[end:])
-
-				// expired
-				if ttl < clock {
-					b.idx.Delete(k)
-					failCont = 0
-					continue
-				}
-			}
+		if !idx.hasTTL() {
+			goto FAILED
 		}
 
+		if idx.IsAny() {
+			ttl = b.anyArr[idx.start()].T
+
+		} else {
+			end := idx.start() + idx.offset()
+			ttl = parseTTL(b.bytes[end:])
+		}
+
+		// expired
+		if ttl < clock {
+			b.idx.Delete(k)
+			failCont = 0
+			continue
+		}
+
+	FAILED:
 		failCont++
 		if failCont > maxFailCount {
 			break
@@ -284,7 +292,7 @@ func (b *bucket[K]) eliminate() {
 
 	// on compress threshold
 	if rate := float64(b.idx.Len()) / float64(b.count); rate < compressThreshold {
-		b.compress(rate)
+		b.compress()
 	}
 }
 
@@ -292,22 +300,18 @@ func (b *bucket[K]) eliminate() {
 func (c *GigaCache[K]) Compress() {
 	for _, b := range c.buckets {
 		b.Lock()
-		b.compress(float64(b.idx.Len()) / float64(b.count))
+		b.compress()
 		b.Unlock()
 	}
 }
 
-// Compress migrates the unexpired data and save memory.
-// Trigger when the valid count (valid / total) in the cache is less than this value.
-func (b *bucket[K]) compress(rate float64) {
-	if math.IsNaN(rate) {
-		return
-	}
+// compress migrates valid key-value pairs to the new container to save memory.
+func (b *bucket[K]) compress() {
 	b.count = 0
 	b.ccount++
 
 	newBytes := bpool.Get()
-	newAnyArr := make([]*anyItem, 0, int(float64(len(b.anyArr))*rate))
+	newAnyArr := make([]*anyItem, 0)
 
 	delKeys := make([]K, 0)
 
@@ -343,10 +347,9 @@ func (b *bucket[K]) compress(rate float64) {
 			// reset
 			b.idx.Set(key, newIdx(len(newBytes), offset, has, false))
 			if has {
-				newBytes = append(newBytes, b.bytes[start:end+ttlBytes]...)
-			} else {
-				newBytes = append(newBytes, b.bytes[start:end]...)
+				end += ttlBytes
 			}
+			newBytes = append(newBytes, b.bytes[start:end]...)
 
 			b.count++
 			return true
