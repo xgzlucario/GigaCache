@@ -15,24 +15,24 @@ func getStdmap() map[string][]byte {
 }
 
 func BenchmarkSet(b *testing.B) {
-	m1 := map[string][]byte{}
 	b.Run("stdmap", func(b *testing.B) {
+		m := map[string][]byte{}
 		for i := 0; i < b.N; i++ {
-			m1[strconv.Itoa(i)] = str
+			m[strconv.Itoa(i)] = str
 		}
 	})
 
-	m2 := New[string]()
 	b.Run("gigacache", func(b *testing.B) {
+		m := New[string]()
 		for i := 0; i < b.N; i++ {
-			m2.Set(strconv.Itoa(i), str)
+			m.Set(strconv.Itoa(i), str)
 		}
 	})
 
-	m3 := New[string]()
 	b.Run("gigacache/Ex", func(b *testing.B) {
+		m := New[string]()
 		for i := 0; i < b.N; i++ {
-			m3.SetEx(strconv.Itoa(i), str, time.Minute)
+			m.SetEx(strconv.Itoa(i), str, time.Minute)
 		}
 	})
 }

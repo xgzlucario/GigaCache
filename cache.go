@@ -2,12 +2,12 @@ package cache
 
 import (
 	"encoding/binary"
+	"slices"
 	"sync"
 	"time"
 	"unsafe"
 
 	"golang.org/x/exp/rand"
-	"golang.org/x/exp/slices"
 
 	"github.com/bytedance/sonic"
 	"github.com/tidwall/hashmap"
@@ -118,8 +118,8 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 	return c.buckets[c.hash(key)]
 }
 
-// get
-func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
+// getNoCopy returns NoCopy value.
+func (b *bucket[K]) getNoCopy(idx Idx) (any, int64, bool) {
 	if idx.IsAny() {
 		n := b.anyArr[idx.start()]
 
@@ -140,11 +140,23 @@ func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
 			if ttl < clock {
 				return nil, 0, false
 			}
-			return slices.Clone(b.bytes[start:end]), ttl, true
+			return b.bytes[start:end], ttl, true
 		}
 
-		return slices.Clone(b.bytes[start:end]), noTTL, true
+		return b.bytes[start:end], noTTL, true
 	}
+}
+
+// get returns value.
+func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
+	val, ts, ok := b.getNoCopy(idx)
+	if ok {
+		if idx.IsAny() {
+			return val, ts, true
+		}
+		return slices.Clone(val.([]byte)), ts, true
+	}
+	return nil, 0, false
 }
 
 // Get return bytes value by key.
@@ -221,22 +233,17 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	return ok
 }
 
-// scan
-func (b *bucket[K]) scan(f func(K, any, int64) bool) {
-	b.idx.Scan(func(key K, idx Idx) bool {
-		val, ts, ok := b.get(idx)
-		if ok {
-			return f(key, val, ts)
-		}
-		return true
-	})
-}
-
 // Scan
 func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	for _, b := range c.buckets {
 		b.RLock()
-		b.scan(f)
+		b.idx.Scan(func(key K, idx Idx) bool {
+			val, ts, ok := b.get(idx)
+			if ok {
+				return f(key, val, ts)
+			}
+			return true
+		})
 		b.RUnlock()
 	}
 }
@@ -307,64 +314,30 @@ func (c *GigaCache[K]) Compress() {
 
 // compress migrates valid key-value pairs to the new container to save memory.
 func (b *bucket[K]) compress() {
-	b.count = 0
-	b.ccount++
-
-	newBytes := bpool.Get()
-	newAnyArr := make([]*anyItem, 0)
-
-	delKeys := make([]K, 0)
+	newBucket := &bucket[K]{
+		idx:    hashmap.New[K, Idx](b.idx.Len()),
+		bytes:  bpool.Get(),
+		anyArr: make([]*anyItem, 0),
+		ccount: b.ccount + 1,
+	}
 
 	b.idx.Scan(func(key K, idx Idx) bool {
-		start, has := idx.start(), idx.hasTTL()
-
-		// is any
-		if idx.IsAny() {
-			item := b.anyArr[start]
-
-			// expired
-			if has && item.T < clock {
-				delKeys = append(delKeys, key)
-				return true
-			}
-
-			b.idx.Set(key, newIdx(len(newAnyArr), 0, has, true))
-			newAnyArr = append(newAnyArr, item)
-
-			b.count++
-			return true
-
-		} else {
-			offset := idx.offset()
-			end := start + offset
-
-			// expired
-			if has && parseTTL(b.bytes[end:]) < clock {
-				delKeys = append(delKeys, key)
-				return true
-			}
-
-			// reset
-			b.idx.Set(key, newIdx(len(newBytes), offset, has, false))
-			if has {
-				end += ttlBytes
-			}
-			newBytes = append(newBytes, b.bytes[start:end]...)
-
-			b.count++
-			return true
+		// nocopy
+		val, ts, ok := b.getNoCopy(idx)
+		if ok {
+			newBucket.set(key, val, ts)
 		}
+		return true
 	})
-
-	for _, key := range delKeys {
-		b.idx.Delete(key)
-	}
 
 	b.bytes = b.bytes[:0]
 	bpool.Put(b.bytes)
 
-	b.bytes = newBytes
-	b.anyArr = newAnyArr
+	b.bytes = newBucket.bytes
+	b.anyArr = newBucket.anyArr
+	b.idx = newBucket.idx
+	b.ccount = newBucket.ccount
+	b.count = newBucket.count
 }
 
 type bucketJSON[K comparable] struct {
