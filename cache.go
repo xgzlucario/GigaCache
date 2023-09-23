@@ -2,13 +2,12 @@ package cache
 
 import (
 	"encoding/binary"
-	"math"
+	"slices"
 	"sync"
 	"time"
 	"unsafe"
 
 	"golang.org/x/exp/rand"
-	"golang.org/x/exp/slices"
 
 	"github.com/bytedance/sonic"
 	"github.com/tidwall/hashmap"
@@ -119,8 +118,8 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 	return c.buckets[c.hash(key)]
 }
 
-// get
-func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
+// getNoCopy returns NoCopy value.
+func (b *bucket[K]) getNoCopy(idx Idx) (any, int64, bool) {
 	if idx.IsAny() {
 		n := b.anyArr[idx.start()]
 
@@ -141,11 +140,23 @@ func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
 			if ttl < clock {
 				return nil, 0, false
 			}
-			return slices.Clone(b.bytes[start:end]), ttl, true
+			return b.bytes[start:end], ttl, true
 		}
 
-		return slices.Clone(b.bytes[start:end]), noTTL, true
+		return b.bytes[start:end], noTTL, true
 	}
+}
+
+// get returns value.
+func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
+	val, ts, ok := b.getNoCopy(idx)
+	if ok {
+		if idx.IsAny() {
+			return val, ts, true
+		}
+		return slices.Clone(val.([]byte)), ts, true
+	}
+	return nil, 0, false
 }
 
 // Get return bytes value by key.
@@ -161,32 +172,12 @@ func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 	return nil, 0, false
 }
 
-// SetTx
-func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
+// set
+func (b *bucket[K]) set(key K, val any, ts int64) {
 	hasTTL := (ts != noTTL)
 
 	// if bytes
 	bytes, ok := val.([]byte)
-
-	b := c.getShard(key)
-	b.Lock()
-	defer b.Unlock()
-	defer b.eliminate()
-
-	// if existed
-	idx, exist := b.idx.Get(key)
-	if exist {
-		// update inplace
-		if !ok && idx.IsAny() {
-			start := idx.start()
-			b.anyArr[start].T = ts
-			b.anyArr[start].V = val
-			b.idx.Set(key, newIdx(start, 0, hasTTL, true))
-			return
-		}
-	}
-
-	// is bytes
 	if ok {
 		b.idx.Set(key, newIdx(len(b.bytes), len(bytes), hasTTL, false))
 		b.bytes = append(b.bytes, bytes...)
@@ -196,10 +187,29 @@ func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 		b.count++
 
 	} else {
-		b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
-		b.anyArr = append(b.anyArr, &anyItem{V: val, T: ts})
-		b.count++
+		idx, exist := b.idx.Get(key)
+		// update inplace
+		if exist && idx.IsAny() {
+			start := idx.start()
+			b.anyArr[start].T = ts
+			b.anyArr[start].V = val
+			b.idx.Set(key, newIdx(start, 0, hasTTL, true))
+
+		} else {
+			b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
+			b.anyArr = append(b.anyArr, &anyItem{V: val, T: ts})
+			b.count++
+		}
 	}
+}
+
+// SetTx
+func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
+	b := c.getShard(key)
+	b.Lock()
+	b.set(key, val, ts)
+	b.eliminate()
+	b.Unlock()
 }
 
 // Set
@@ -216,13 +226,9 @@ func (c *GigaCache[K]) SetEx(key K, val any, dur time.Duration) {
 func (c *GigaCache[K]) Delete(key K) bool {
 	b := c.getShard(key)
 	b.Lock()
-	defer b.Unlock()
-
 	_, ok := b.idx.Delete(key)
-	if ok {
-		b.count--
-	}
 	b.eliminate()
+	b.Unlock()
 
 	return ok
 }
@@ -243,6 +249,7 @@ func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 }
 
 func parseTTL(b []byte) int64 {
+	// check bound
 	_ = b[ttlBytes-1]
 	return *(*int64)(unsafe.Pointer(&b[0]))
 }
@@ -253,35 +260,37 @@ func (b *bucket[K]) eliminate() {
 		return
 	}
 
-	var failCont int
+	if b.idx.Len() == 0 {
+		return
+	}
+
+	var failCont, ttl int64
 	rdm := rand.Uint64()
 
 	// probing
 	for i := uint64(0); i < probeCount; i++ {
-		k, idx, ok := b.idx.GetPos(rdm + i*probeSpace)
+		k, idx, _ := b.idx.GetPos(rdm + i*probeSpace)
 
-		if ok && idx.hasTTL() {
-			if idx.IsAny() {
-				item := b.anyArr[idx.start()]
-				if item.T < clock {
-					b.idx.Delete(k)
-					failCont = 0
-					continue
-				}
-
-			} else {
-				end := idx.start() + idx.offset()
-				ttl := parseTTL(b.bytes[end:])
-
-				// expired
-				if ttl < clock {
-					b.idx.Delete(k)
-					failCont = 0
-					continue
-				}
-			}
+		if !idx.hasTTL() {
+			goto FAILED
 		}
 
+		if idx.IsAny() {
+			ttl = b.anyArr[idx.start()].T
+
+		} else {
+			end := idx.start() + idx.offset()
+			ttl = parseTTL(b.bytes[end:])
+		}
+
+		// expired
+		if ttl < clock {
+			b.idx.Delete(k)
+			failCont = 0
+			continue
+		}
+
+	FAILED:
 		failCont++
 		if failCont > maxFailCount {
 			break
@@ -290,7 +299,7 @@ func (b *bucket[K]) eliminate() {
 
 	// on compress threshold
 	if rate := float64(b.idx.Len()) / float64(b.count); rate < compressThreshold {
-		b.compress(rate)
+		b.compress()
 	}
 }
 
@@ -298,76 +307,37 @@ func (b *bucket[K]) eliminate() {
 func (c *GigaCache[K]) Compress() {
 	for _, b := range c.buckets {
 		b.Lock()
-		b.compress(float64(b.idx.Len()) / float64(b.count))
+		b.compress()
 		b.Unlock()
 	}
 }
 
-// Compress migrates the unexpired data and save memory.
-// Trigger when the valid count (valid / total) in the cache is less than this value.
-func (b *bucket[K]) compress(rate float64) {
-	if math.IsNaN(rate) {
-		return
+// compress migrates valid key-value pairs to the new container to save memory.
+func (b *bucket[K]) compress() {
+	newBucket := &bucket[K]{
+		idx:    hashmap.New[K, Idx](b.idx.Len()),
+		bytes:  bpool.Get(),
+		anyArr: make([]*anyItem, 0),
+		ccount: b.ccount + 1,
 	}
-	b.count = 0
-	b.ccount++
-
-	newBytes := bpool.Get()
-	newAnyArr := make([]*anyItem, 0, int(float64(len(b.anyArr))*rate))
-
-	delKeys := make([]K, 0)
 
 	b.idx.Scan(func(key K, idx Idx) bool {
-		start, has := idx.start(), idx.hasTTL()
-
-		// is any
-		if idx.IsAny() {
-			item := b.anyArr[start]
-
-			// expired
-			if has && item.T < clock {
-				delKeys = append(delKeys, key)
-				return true
-			}
-
-			b.idx.Set(key, newIdx(len(newAnyArr), 0, has, true))
-			newAnyArr = append(newAnyArr, item)
-
-			b.count++
-			return true
-
-		} else {
-			offset := idx.offset()
-			end := start + offset
-
-			// expired
-			if has && parseTTL(b.bytes[end:]) < clock {
-				delKeys = append(delKeys, key)
-				return true
-			}
-
-			// reset
-			b.idx.Set(key, newIdx(len(newBytes), offset, has, false))
-			if has {
-				newBytes = append(newBytes, b.bytes[start:end+ttlBytes]...)
-			} else {
-				newBytes = append(newBytes, b.bytes[start:end]...)
-			}
-
-			b.count++
-			return true
+		// nocopy
+		val, ts, ok := b.getNoCopy(idx)
+		if ok {
+			newBucket.set(key, val, ts)
 		}
+		return true
 	})
-
-	for _, key := range delKeys {
-		b.idx.Delete(key)
-	}
 
 	b.bytes = b.bytes[:0]
 	bpool.Put(b.bytes)
 
-	b.bytes = newBytes
-	b.anyArr = newAnyArr
+	b.bytes = newBucket.bytes
+	b.anyArr = newBucket.anyArr
+	b.idx = newBucket.idx
+	b.ccount = newBucket.ccount
+	b.count = newBucket.count
 }
 
 type bucketJSON[K comparable] struct {
