@@ -170,21 +170,6 @@ func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 
 	b := c.getShard(key)
 	b.Lock()
-	defer b.Unlock()
-	defer b.eliminate()
-
-	// if existed
-	idx, exist := b.idx.Get(key)
-	if exist {
-		// update inplace
-		if !ok && idx.IsAny() {
-			start := idx.start()
-			b.anyArr[start].T = ts
-			b.anyArr[start].V = val
-			b.idx.Set(key, newIdx(start, 0, hasTTL, true))
-			return
-		}
-	}
 
 	// is bytes
 	if ok {
@@ -196,10 +181,23 @@ func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 		b.count++
 
 	} else {
-		b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
-		b.anyArr = append(b.anyArr, &anyItem{V: val, T: ts})
-		b.count++
+		idx, exist := b.idx.Get(key)
+		// update inplace
+		if exist && idx.IsAny() {
+			start := idx.start()
+			b.anyArr[start].T = ts
+			b.anyArr[start].V = val
+			b.idx.Set(key, newIdx(start, 0, hasTTL, true))
+
+		} else {
+			b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
+			b.anyArr = append(b.anyArr, &anyItem{V: val, T: ts})
+			b.count++
+		}
 	}
+
+	b.eliminate()
+	b.Unlock()
 }
 
 // Set
@@ -216,13 +214,9 @@ func (c *GigaCache[K]) SetEx(key K, val any, dur time.Duration) {
 func (c *GigaCache[K]) Delete(key K) bool {
 	b := c.getShard(key)
 	b.Lock()
-	defer b.Unlock()
-
 	_, ok := b.idx.Delete(key)
-	if ok {
-		b.count--
-	}
 	b.eliminate()
+	b.Unlock()
 
 	return ok
 }

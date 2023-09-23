@@ -22,3 +22,6 @@ bench:
 
 pprof:
 	go tool pprof -http=:18081 "http://localhost:6060/debug/pprof/profile?seconds=60"
+
+heap:
+	go tool pprof http://localhost:6060/debug/pprof/heap
