@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"strconv"
 	"time"
@@ -66,8 +65,8 @@ func main() {
 
 	start := time.Now()
 
-	var sum float64
-	var n1, count int64
+	delays := make([]float64, 0, 1e5)
+	var count int64
 
 	bc := cache.New[string]()
 
@@ -87,37 +86,28 @@ func main() {
 				sumRate += stat.ExpRate()
 				sumBytesLen += float64(stat.BytesLen)
 
-				fmt.Printf("[Cache] %.0fs | count: %dw | len: %dw | alloc: %dw | bytes: %.0fw | rate: %.1f%% | ccount: %d | avg: %.2f ns\n",
+				// Stats
+				fmt.Printf("[Cache] %.0fs | count: %dw | len: %dw | alloc: %dw | bytes: %.0fw | rate: %.1f%% | ccount: %d\n",
 					time.Since(start).Seconds(),
 					count/1e4,
 					stat.Len/1e4,
 					stat.Count/1e4,
 					sumBytesLen/c/1e4,
 					sumRate/c,
-					stat.CCount,
-					sum/float64(n1))
+					stat.CCount)
+
+				// P99
+				cache.Sort(delays)
+				fmt.Printf("[P99 SET] avg: %v | min: %v | p50: %v | p95: %v | p99: %v | max: %v\n",
+					time.Duration(cache.Avg(delays)),
+					time.Duration(cache.Min(delays)),
+					time.Duration(cache.CalculatePercentile(delays, 50)),
+					time.Duration(cache.CalculatePercentile(delays, 95)),
+					time.Duration(cache.CalculatePercentile(delays, 99)),
+					time.Duration(cache.Max(delays)))
+
+				fmt.Println()
 			}
-		}
-	}()
-
-	// Get
-	go func() {
-		for i := 0; ; i++ {
-			now := time.Now()
-			key := strconv.Itoa(i)
-
-			val, _, ok := bc.Get(key)
-			if ok && !bytes.Equal(S2B(&key), val.([]byte)) {
-				panic("key and value not equal")
-			}
-
-			c := time.Since(now).Microseconds()
-			sum += float64(c)
-			n1++
-
-			time.Sleep(time.Microsecond)
-
-			i %= 1e9
 		}
 	}()
 
@@ -125,6 +115,14 @@ func main() {
 	for i := 0; ; i++ {
 		count++
 		v := strconv.Itoa(i)
+		now := time.Now()
+
 		bc.SetEx(v, S2B(&v), time.Second)
+
+		if len(delays) >= 1e5 {
+			delays[i%1e5] = float64(time.Since(now))
+		} else {
+			delays = append(delays, float64(time.Since(now)))
+		}
 	}
 }
