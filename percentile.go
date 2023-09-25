@@ -1,30 +1,69 @@
 package cache
 
-import (
-	"slices"
-)
+import "slices"
 
-func Sort(data []float64) {
-	slices.Sort(data)
+const percentileSize = 100 * 10000
+
+// Percentile
+type Percentile struct {
+	data   []float64
+	sorted bool
+	pos    int
 }
 
-func CalculatePercentile(data []float64, percentile float64) float64 {
-	i := (percentile / 100) * float64(len(data))
-	return data[int(i)]
+// NewPercentile
+func NewPercentile(data ...float64) *Percentile {
+	p := &Percentile{
+		data: make([]float64, 0, percentileSize),
+	}
+	for _, d := range data {
+		p.Add(d)
+	}
+	return p
 }
 
-func Min(data []float64) float64 {
-	return data[0]
+// Add
+func (p *Percentile) Add(data float64) {
+	p.sorted = false
+	if len(p.data) == percentileSize {
+		p.pos = (p.pos + 1) % percentileSize
+		p.data[p.pos] = data
+
+	} else {
+		p.data = append(p.data, data)
+	}
 }
 
-func Max(data []float64) float64 {
-	return data[len(data)-1]
+func (p *Percentile) sort() {
+	if !p.sorted {
+		slices.Sort(p.data)
+	}
 }
 
-func Avg(data []float64) float64 {
+// Percentile
+func (p *Percentile) Percentile(percentile float64) float64 {
+	p.sort()
+	i := (percentile / 100) * float64(len(p.data))
+	return p.data[int(i)]
+}
+
+// Min
+func (p *Percentile) Min() float64 {
+	p.sort()
+	return p.data[0]
+}
+
+// Max
+func (p *Percentile) Max() float64 {
+	p.sort()
+	return p.data[len(p.data)-1]
+}
+
+// Avg
+func (p *Percentile) Avg() float64 {
 	var sum float64
-	for _, v := range data {
+	for _, v := range p.data {
 		sum += v
 	}
-	return sum / float64(len(data))
+	return sum / float64(len(p.data))
 }

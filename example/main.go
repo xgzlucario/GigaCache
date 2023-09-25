@@ -65,7 +65,7 @@ func main() {
 
 	start := time.Now()
 
-	delays := make([]float64, 0, 1e5)
+	p99 := cache.NewPercentile()
 	var count int64
 
 	bc := cache.New[string]()
@@ -97,14 +97,13 @@ func main() {
 					stat.CCount)
 
 				// P99
-				cache.Sort(delays)
-				fmt.Printf("[P99 SET] avg: %v | min: %v | p50: %v | p95: %v | p99: %v | max: %v\n",
-					time.Duration(cache.Avg(delays)),
-					time.Duration(cache.Min(delays)),
-					time.Duration(cache.CalculatePercentile(delays, 50)),
-					time.Duration(cache.CalculatePercentile(delays, 95)),
-					time.Duration(cache.CalculatePercentile(delays, 99)),
-					time.Duration(cache.Max(delays)))
+				fmt.Printf("[P99] avg: %v | min: %v | p50: %v | p95: %v | p99: %v | max: %v\n",
+					time.Duration(p99.Avg()),
+					time.Duration(p99.Min()),
+					time.Duration(p99.Percentile(50)),
+					time.Duration(p99.Percentile(95)),
+					time.Duration(p99.Percentile(99)),
+					time.Duration(p99.Max()))
 
 				fmt.Println()
 			}
@@ -119,10 +118,6 @@ func main() {
 
 		bc.SetEx(v, S2B(&v), time.Second)
 
-		if len(delays) >= 1e5 {
-			delays[i%1e5] = float64(time.Since(now))
-		} else {
-			delays = append(delays, float64(time.Since(now)))
-		}
+		p99.Add(float64(time.Since(now)))
 	}
 }
