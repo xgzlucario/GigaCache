@@ -260,6 +260,7 @@ func (b *bucket[K]) eliminate() {
 		return
 	}
 
+	// bucket is empty
 	if b.idx.Len() == 0 {
 		return
 	}
@@ -267,7 +268,7 @@ func (b *bucket[K]) eliminate() {
 	var failCont, ttl int64
 	rdm := rand.Uint64()
 
-	// probing
+	// probe expired entries
 	for i := uint64(0); i < probeCount; i++ {
 		k, idx, _ := b.idx.GetPos(rdm + i*probeSpace)
 
@@ -283,7 +284,7 @@ func (b *bucket[K]) eliminate() {
 			ttl = parseTTL(b.bytes[end:])
 		}
 
-		// expired
+		// delete expired
 		if ttl < clock {
 			b.idx.Delete(k)
 			failCont = 0
@@ -297,23 +298,23 @@ func (b *bucket[K]) eliminate() {
 		}
 	}
 
-	// on compress threshold
+	// migrate
 	if rate := float64(b.idx.Len()) / float64(b.allocTimes); rate < migrateThreshold {
-		b.compress()
+		b.migrate()
 	}
 }
 
-// Compress
-func (c *GigaCache[K]) Compress() {
+// Migrate
+func (c *GigaCache[K]) Migrate() {
 	for _, b := range c.buckets {
 		b.Lock()
-		b.compress()
+		b.migrate()
 		b.Unlock()
 	}
 }
 
-// compress migrates valid key-value pairs to the new container to save memory.
-func (b *bucket[K]) compress() {
+// migrate put valid key-value pairs to the new bucket.
+func (b *bucket[K]) migrate() {
 	newBucket := &bucket[K]{
 		idx:    hashmap.New[K, Idx](b.idx.Len()),
 		bytes:  bpool.Get(),
@@ -352,7 +353,6 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 
 	for _, b := range c.buckets {
 		b.RLock()
-		defer b.RUnlock()
 
 		k := make([]K, 0, b.idx.Len())
 		i := make([]byte, 0, b.idx.Len())
@@ -366,8 +366,10 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 		})
 
 		buckets = append(buckets, &bucketJSON[K]{
-			b.allocTimes, k, i, b.bytes,
+			b.allocTimes, k, i, slices.Clone(b.bytes),
 		})
+
+		b.RUnlock()
 	}
 
 	return sonic.Marshal(buckets)

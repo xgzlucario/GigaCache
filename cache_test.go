@@ -261,7 +261,7 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		time.Sleep(sec * 2)
-		m.Compress()
+		m.Migrate()
 
 		// check2
 		s = m.Stat()
