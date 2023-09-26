@@ -28,9 +28,9 @@ const (
 	probeCount    = 100
 	probeSpace    = 3
 
-	// compressThreshold Indicates how many effective bytes trigger the compression operation.
+	// migrateThreshold Indicates how many effective bytes trigger the migrate operation.
 	// Recommended between 0.6 and 0.7, see bench data for details.
-	compressThreshold = 0.6
+	migrateThreshold = 0.6
 
 	maxFailCount = 5
 )
@@ -53,11 +53,11 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	idx    *hashmap.Map[K, Idx]
-	count  int64
-	ccount int64
-	bytes  []byte
-	anyArr []*anyItem
+	allocTimes int64
+	mtimes     int64
+	idx        *hashmap.Map[K, Idx]
+	bytes      []byte
+	anyArr     []*anyItem
 	sync.RWMutex
 }
 
@@ -184,7 +184,7 @@ func (b *bucket[K]) set(key K, val any, ts int64) {
 		if hasTTL {
 			b.bytes = order.AppendUint64(b.bytes, uint64(ts))
 		}
-		b.count++
+		b.allocTimes++
 
 	} else {
 		idx, exist := b.idx.Get(key)
@@ -198,7 +198,7 @@ func (b *bucket[K]) set(key K, val any, ts int64) {
 		} else {
 			b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
 			b.anyArr = append(b.anyArr, &anyItem{V: val, T: ts})
-			b.count++
+			b.allocTimes++
 		}
 	}
 }
@@ -256,7 +256,7 @@ func parseTTL(b []byte) int64 {
 
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
-	if b.count%probeInterval != 0 {
+	if b.allocTimes%probeInterval != 0 {
 		return
 	}
 
@@ -298,7 +298,7 @@ func (b *bucket[K]) eliminate() {
 	}
 
 	// on compress threshold
-	if rate := float64(b.idx.Len()) / float64(b.count); rate < compressThreshold {
+	if rate := float64(b.idx.Len()) / float64(b.allocTimes); rate < migrateThreshold {
 		b.compress()
 	}
 }
@@ -318,7 +318,7 @@ func (b *bucket[K]) compress() {
 		idx:    hashmap.New[K, Idx](b.idx.Len()),
 		bytes:  bpool.Get(),
 		anyArr: make([]*anyItem, 0),
-		ccount: b.ccount + 1,
+		mtimes: b.mtimes + 1,
 	}
 
 	b.idx.Scan(func(key K, idx Idx) bool {
@@ -336,8 +336,8 @@ func (b *bucket[K]) compress() {
 	b.bytes = newBucket.bytes
 	b.anyArr = newBucket.anyArr
 	b.idx = newBucket.idx
-	b.ccount = newBucket.ccount
-	b.count = newBucket.count
+	b.mtimes = newBucket.mtimes
+	b.allocTimes = newBucket.allocTimes
 }
 
 type bucketJSON[K comparable] struct {
@@ -366,7 +366,7 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 		})
 
 		buckets = append(buckets, &bucketJSON[K]{
-			b.count, k, i, b.bytes,
+			b.allocTimes, k, i, b.bytes,
 		})
 	}
 
@@ -384,10 +384,10 @@ func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
 	c.buckets = make([]*bucket[K], 0, len(buckets))
 	for _, b := range buckets {
 		bc := &bucket[K]{
-			count:  b.C,
-			idx:    hashmap.New[K, Idx](len(b.K)),
-			bytes:  b.B,
-			anyArr: make([]*anyItem, 0),
+			allocTimes: b.C,
+			idx:        hashmap.New[K, Idx](len(b.K)),
+			bytes:      b.B,
+			anyArr:     make([]*anyItem, 0),
 		}
 
 		// set key
@@ -400,4 +400,32 @@ func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
 	}
 
 	return nil
+}
+
+// CacheStat is the runtime statistics of Gigacache.
+type CacheStat struct {
+	Len          uint64
+	AllocTimes   uint64
+	LenBytes     uint64
+	LenAny       uint64
+	MigrateTimes uint64
+}
+
+// Stat
+func (c *GigaCache[K]) Stat() (s CacheStat) {
+	for _, b := range c.buckets {
+		b.RLock()
+		s.Len += uint64(b.idx.Len())
+		s.AllocTimes += uint64(b.allocTimes)
+		s.LenBytes += uint64(len(b.bytes))
+		s.LenAny += uint64(len(b.anyArr))
+		s.MigrateTimes += uint64(b.mtimes)
+		b.RUnlock()
+	}
+	return
+}
+
+// ExpRate
+func (s CacheStat) ExpRate() float64 {
+	return float64(s.Len) / float64(s.AllocTimes) * 100
 }

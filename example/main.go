@@ -4,22 +4,12 @@ import (
 	"fmt"
 	"strconv"
 	"time"
-	"unsafe"
 
 	"net/http"
 	_ "net/http/pprof"
 
 	cache "github.com/xgzlucario/GigaCache"
 )
-
-// String convert to bytes unsafe
-func S2B(str *string) []byte {
-	strHeader := (*[2]uintptr)(unsafe.Pointer(str))
-	byteSliceHeader := [3]uintptr{
-		strHeader[0], strHeader[1], strHeader[1],
-	}
-	return *(*[]byte)(unsafe.Pointer(&byteSliceHeader))
-}
 
 func testBytes() {
 	bc := cache.New[string]()
@@ -65,13 +55,13 @@ func main() {
 
 	start := time.Now()
 
-	p99 := cache.NewPercentile()
+	pset := cache.NewPercentile()
+	prate := cache.NewPercentile()
+	pbytes := cache.NewPercentile()
+
 	var count int64
 
 	bc := cache.New[string]()
-
-	var c float64
-	var sumRate, sumBytesLen float64
 
 	// Stat
 	go func() {
@@ -79,31 +69,25 @@ func main() {
 			time.Sleep(time.Second / 10)
 
 			// benchmark test
-			if i > 0 && i%100 == 0 {
+			if i > 0 && i%20 == 0 {
 				stat := bc.Stat()
 
-				c++
-				sumRate += stat.ExpRate()
-				sumBytesLen += float64(stat.BytesLen)
+				prate.Add(stat.ExpRate())
+				pbytes.Add(float64(stat.LenBytes))
 
 				// Stats
-				fmt.Printf("[Cache] %.0fs | count: %dw | len: %dw | alloc: %dw | bytes: %.0fw | rate: %.1f%% | ccount: %d\n",
+				fmt.Printf("Cache [%.0fs] [%dw] | len: %dw | alloc: %dw | bytes: %.0fw | rate: %.1f%% | mtime: %d\n",
 					time.Since(start).Seconds(),
 					count/1e4,
 					stat.Len/1e4,
-					stat.Count/1e4,
-					sumBytesLen/c/1e4,
-					sumRate/c,
-					stat.CCount)
+					stat.AllocTimes/1e4,
+					pbytes.Avg()/1e4,
+					prate.Avg(),
+					stat.MigrateTimes)
 
-				// P99
-				fmt.Printf("[P99] avg: %v | min: %v | p50: %v | p95: %v | p99: %v | max: %v\n",
-					time.Duration(p99.Avg()),
-					time.Duration(p99.Min()),
-					time.Duration(p99.Percentile(50)),
-					time.Duration(p99.Percentile(95)),
-					time.Duration(p99.Percentile(99)),
-					time.Duration(p99.Max()))
+				// latency
+				fmt.Println("latency(micros)")
+				pset.Print()
 
 				fmt.Println()
 			}
@@ -116,8 +100,8 @@ func main() {
 		v := strconv.Itoa(i)
 		now := time.Now()
 
-		bc.SetEx(v, S2B(&v), time.Second)
+		bc.SetEx(v, []byte(v), time.Second)
 
-		p99.Add(float64(time.Since(now)))
+		pset.Add(float64(time.Since(now)) / float64(time.Microsecond))
 	}
 }

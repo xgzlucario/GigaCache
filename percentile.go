@@ -1,6 +1,9 @@
 package cache
 
-import "slices"
+import (
+	"fmt"
+	"slices"
+)
 
 const percentileSize = 100 * 10000
 
@@ -66,4 +69,10 @@ func (p *Percentile) Avg() float64 {
 		sum += v
 	}
 	return sum / float64(len(p.data))
+}
+
+// Print
+func (p *Percentile) Print(scale ...float64) {
+	fmt.Printf("avg: %.2f | min: %.2f | p50: %.2f | p95: %.2f | p99: %.2f | max: %.2f\n",
+		p.Avg(), p.Min(), p.Percentile(50), p.Percentile(95), p.Percentile(99), p.Max())
 }
