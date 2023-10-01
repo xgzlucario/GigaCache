@@ -28,12 +28,9 @@ const (
 	probeCount    = 100
 	probeSpace    = 3
 
-	// config for rehash
-	rehashCount = 100
-
-	// migrateThreshold Indicates how many effective bytes trigger the migrate operation.
+	// compressThreshold Indicates how many effective bytes trigger the compression operation.
 	// Recommended between 0.6 and 0.7, see bench data for details.
-	migrateThreshold = 0.6
+	compressThreshold = 0.6
 
 	maxFailCount = 5
 )
@@ -56,13 +53,11 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	rehashing  bool
-	allocTimes int64
-	mtimes     int64
-	idx        *hashmap.Map[K, Idx]
-	bytes      []byte
-	anyArr     []*anyItem
-	nb         *bucket[K] // new bucket for rehash.
+	idx    *hashmap.Map[K, Idx]
+	count  int64
+	ccount int64
+	bytes  []byte
+	anyArr []*anyItem
 	sync.RWMutex
 }
 
@@ -123,8 +118,8 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 	return c.buckets[c.hash(key)]
 }
 
-// getByIdx return values, make sure idx exist.
-func (b *bucket[K]) getByIdx(idx Idx) (any, int64, bool) {
+// getNoCopy returns NoCopy value.
+func (b *bucket[K]) getNoCopy(idx Idx) (any, int64, bool) {
 	if idx.IsAny() {
 		n := b.anyArr[idx.start()]
 
@@ -152,20 +147,15 @@ func (b *bucket[K]) getByIdx(idx Idx) (any, int64, bool) {
 	}
 }
 
-// getByKey return values by given key.
-func (b *bucket[K]) getByKey(key K) (any, int64, bool) {
-	// rehashing
-	if b.rehashing {
-		if idx, ok := b.nb.idx.Get(key); ok {
-			return b.nb.getByIdx(idx)
-		}
-	}
-
-	idx, ok := b.idx.Get(key)
+// get returns value.
+func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
+	val, ts, ok := b.getNoCopy(idx)
 	if ok {
-		return b.getByIdx(idx)
+		if idx.IsAny() {
+			return val, ts, true
+		}
+		return slices.Clone(val.([]byte)), ts, true
 	}
-
 	return nil, 0, false
 }
 
@@ -175,17 +165,15 @@ func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 	b.RLock()
 	defer b.RUnlock()
 
-	return b.getByKey(key)
+	if idx, ok := b.idx.Get(key); ok {
+		return b.get(idx)
+	}
+
+	return nil, 0, false
 }
 
 // set
 func (b *bucket[K]) set(key K, val any, ts int64) {
-	// rehashing
-	if b.rehashing {
-		b.nb.set(key, val, ts)
-		return
-	}
-
 	hasTTL := (ts != noTTL)
 
 	// if bytes
@@ -196,7 +184,7 @@ func (b *bucket[K]) set(key K, val any, ts int64) {
 		if hasTTL {
 			b.bytes = order.AppendUint64(b.bytes, uint64(ts))
 		}
-		b.allocTimes++
+		b.count++
 
 	} else {
 		idx, exist := b.idx.Get(key)
@@ -210,7 +198,7 @@ func (b *bucket[K]) set(key K, val any, ts int64) {
 		} else {
 			b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
 			b.anyArr = append(b.anyArr, &anyItem{V: val, T: ts})
-			b.allocTimes++
+			b.count++
 		}
 	}
 }
@@ -235,66 +223,28 @@ func (c *GigaCache[K]) SetEx(key K, val any, dur time.Duration) {
 }
 
 // Delete
-func (c *GigaCache[K]) Delete(key K) (ok bool) {
+func (c *GigaCache[K]) Delete(key K) bool {
 	b := c.getShard(key)
 	b.Lock()
-	if b.rehashing {
-		_, ok = b.nb.idx.Delete(key)
-		if !ok {
-			_, ok = b.idx.Delete(key)
-		}
-	} else {
-		_, ok = b.idx.Delete(key)
-	}
+	_, ok := b.idx.Delete(key)
+	b.eliminate()
 	b.Unlock()
 
-	return
+	return ok
 }
 
 // Scan
 func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	for _, b := range c.buckets {
 		b.RLock()
-		b.scan(f)
+		b.idx.Scan(func(key K, idx Idx) bool {
+			val, ts, ok := b.get(idx)
+			if ok {
+				return f(key, val, ts)
+			}
+			return true
+		})
 		b.RUnlock()
-	}
-}
-
-// scan
-func (b *bucket[K]) scan(f func(K, any, int64) bool) {
-	if b.rehashing {
-		has := make(map[K]struct{}, b.idx.Len())
-
-		// scan new idxmap
-		b.nb.idx.Scan(func(key K, idx Idx) bool {
-			val, ts, ok := b.nb.getByIdx(idx)
-			if ok {
-				has[key] = struct{}{}
-				return f(key, val, ts)
-			}
-			return true
-		})
-
-		// scan old idxmap
-		b.idx.Scan(func(key K, idx Idx) bool {
-			val, ts, ok := b.getByIdx(idx)
-			if ok {
-				_, exist := has[key]
-				if !exist {
-					return f(key, val, ts)
-				}
-			}
-			return true
-		})
-
-	} else {
-		b.idx.Scan(func(key K, idx Idx) bool {
-			val, ts, ok := b.getByIdx(idx)
-			if ok {
-				return f(key, val, ts)
-			}
-			return true
-		})
 	}
 }
 
@@ -306,20 +256,18 @@ func parseTTL(b []byte) int64 {
 
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
-	// if rehashing
-	if b.rehashing {
-		b.migrate()
+	if b.count%probeInterval != 0 {
 		return
 	}
 
-	if b.allocTimes%probeInterval != 0 {
+	if b.idx.Len() == 0 {
 		return
 	}
 
 	var failCont, ttl int64
 	rdm := rand.Uint64()
 
-	// probe expired entries
+	// probing
 	for i := uint64(0); i < probeCount; i++ {
 		k, idx, _ := b.idx.GetPos(rdm + i*probeSpace)
 
@@ -335,7 +283,7 @@ func (b *bucket[K]) eliminate() {
 			ttl = parseTTL(b.bytes[end:])
 		}
 
-		// delete expired
+		// expired
 		if ttl < clock {
 			b.idx.Delete(k)
 			failCont = 0
@@ -349,59 +297,47 @@ func (b *bucket[K]) eliminate() {
 		}
 	}
 
-	b.migrate()
+	// on compress threshold
+	if rate := float64(b.idx.Len()) / float64(b.count); rate < compressThreshold {
+		b.compress()
+	}
 }
 
-// migrate put valid key-value pairs to the new bucket.
-func (b *bucket[K]) migrate() {
-	if !b.rehashing {
-		if rate := float64(b.idx.Len()) / float64(b.allocTimes); rate > migrateThreshold {
-			return
-		}
+// Compress
+func (c *GigaCache[K]) Compress() {
+	for _, b := range c.buckets {
+		b.Lock()
+		b.compress()
+		b.Unlock()
+	}
+}
 
-		// start rehash
-		b.rehashing = true
-		b.nb = &bucket[K]{
-			idx:    hashmap.New[K, Idx](b.idx.Len()),
-			bytes:  bpool.Get(),
-			anyArr: make([]*anyItem, 0),
-		}
+// compress migrates valid key-value pairs to the new container to save memory.
+func (b *bucket[K]) compress() {
+	newBucket := &bucket[K]{
+		idx:    hashmap.New[K, Idx](b.idx.Len()),
+		bytes:  bpool.Get(),
+		anyArr: make([]*anyItem, 0),
+		ccount: b.ccount + 1,
 	}
 
-	// rehash
-	keys := make([]K, 0, rehashCount)
 	b.idx.Scan(func(key K, idx Idx) bool {
-		// migrate valid and not exist in new bucket key-pairs.
-		v, ts, ok := b.getByIdx(idx)
+		// nocopy
+		val, ts, ok := b.getNoCopy(idx)
 		if ok {
-			_, ok1 := b.nb.idx.Get(key)
-			if !ok1 {
-				b.nb.set(key, v, ts)
-			}
+			newBucket.set(key, val, ts)
 		}
-		keys = append(keys, key)
-
-		return len(keys) < rehashCount
+		return true
 	})
 
-	for _, key := range keys {
-		b.idx.Delete(key)
-	}
+	b.bytes = b.bytes[:0]
+	bpool.Put(b.bytes)
 
-	// rehash finished
-	if b.idx.Len() == 0 {
-		b.bytes = b.bytes[:0]
-		bpool.Put(b.bytes)
-
-		b.bytes = b.nb.bytes
-		b.anyArr = b.nb.anyArr
-		b.idx = b.nb.idx
-		b.allocTimes = b.nb.allocTimes
-		b.mtimes++
-
-		b.rehashing = false
-		b.nb = nil
-	}
+	b.bytes = newBucket.bytes
+	b.anyArr = newBucket.anyArr
+	b.idx = newBucket.idx
+	b.ccount = newBucket.ccount
+	b.count = newBucket.count
 }
 
 type bucketJSON[K comparable] struct {
@@ -416,6 +352,7 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 
 	for _, b := range c.buckets {
 		b.RLock()
+		defer b.RUnlock()
 
 		k := make([]K, 0, b.idx.Len())
 		i := make([]byte, 0, b.idx.Len())
@@ -429,10 +366,8 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 		})
 
 		buckets = append(buckets, &bucketJSON[K]{
-			b.allocTimes, k, i, slices.Clone(b.bytes),
+			b.count, k, i, b.bytes,
 		})
-
-		b.RUnlock()
 	}
 
 	return sonic.Marshal(buckets)
@@ -449,10 +384,10 @@ func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
 	c.buckets = make([]*bucket[K], 0, len(buckets))
 	for _, b := range buckets {
 		bc := &bucket[K]{
-			allocTimes: b.C,
-			idx:        hashmap.New[K, Idx](len(b.K)),
-			bytes:      b.B,
-			anyArr:     make([]*anyItem, 0),
+			count:  b.C,
+			idx:    hashmap.New[K, Idx](len(b.K)),
+			bytes:  b.B,
+			anyArr: make([]*anyItem, 0),
 		}
 
 		// set key
@@ -465,32 +400,4 @@ func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
 	}
 
 	return nil
-}
-
-// CacheStat is the runtime statistics of Gigacache.
-type CacheStat struct {
-	Len          uint64
-	AllocTimes   uint64
-	LenBytes     uint64
-	LenAny       uint64
-	MigrateTimes uint64
-}
-
-// Stat
-func (c *GigaCache[K]) Stat() (s CacheStat) {
-	for _, b := range c.buckets {
-		b.RLock()
-		s.Len += uint64(b.idx.Len())
-		s.AllocTimes += uint64(b.allocTimes)
-		s.LenBytes += uint64(len(b.bytes))
-		s.LenAny += uint64(len(b.anyArr))
-		s.MigrateTimes += uint64(b.mtimes)
-		b.RUnlock()
-	}
-	return
-}
-
-// ExpRate
-func (s CacheStat) ExpRate() float64 {
-	return float64(s.Len) / float64(s.AllocTimes) * 100
 }
