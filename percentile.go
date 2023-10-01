@@ -3,30 +3,31 @@ package cache
 import (
 	"fmt"
 	"slices"
+	"sync"
 )
 
 const percentileSize = 100 * 10000
 
 // Percentile
 type Percentile struct {
+	sync.Mutex
 	data   []float64
 	sorted bool
 	pos    int
 }
 
 // NewPercentile
-func NewPercentile(data ...float64) *Percentile {
-	p := &Percentile{
+func NewPercentile() *Percentile {
+	return &Percentile{
 		data: make([]float64, 0, percentileSize),
 	}
-	for _, d := range data {
-		p.Add(d)
-	}
-	return p
 }
 
 // Add
 func (p *Percentile) Add(data float64) {
+	p.Lock()
+	defer p.Unlock()
+
 	p.sorted = false
 	if len(p.data) == percentileSize {
 		p.pos = (p.pos + 1) % percentileSize
@@ -73,6 +74,9 @@ func (p *Percentile) Avg() float64 {
 
 // Print
 func (p *Percentile) Print(scale ...float64) {
+	p.Lock()
+	defer p.Unlock()
+
 	fmt.Printf("avg: %.2f | min: %.2f | p50: %.2f | p95: %.2f | p99: %.2f | max: %.2f\n",
 		p.Avg(), p.Min(), p.Percentile(50), p.Percentile(95), p.Percentile(99), p.Max())
 }

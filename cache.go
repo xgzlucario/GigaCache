@@ -28,6 +28,9 @@ const (
 	probeCount    = 100
 	probeSpace    = 3
 
+	// config for rehash
+	rehashCount = 100
+
 	// migrateThreshold Indicates how many effective bytes trigger the migrate operation.
 	// Recommended between 0.6 and 0.7, see bench data for details.
 	migrateThreshold = 0.6
@@ -53,11 +56,14 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
+	rehashing  bool
+	id         uint32
 	allocTimes int64
 	mtimes     int64
 	idx        *hashmap.Map[K, Idx]
 	bytes      []byte
 	anyArr     []*anyItem
+	nb         *bucket[K] // new bucket for rehash.
 	sync.RWMutex
 }
 
@@ -89,6 +95,7 @@ func New[K comparable](count ...int) *GigaCache[K] {
 
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket[K]{
+			id:     uint32(i),
 			idx:    hashmap.New[K, Idx](0),
 			bytes:  bpool.Get(),
 			anyArr: make([]*anyItem, 0),
@@ -174,6 +181,12 @@ func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 
 // set
 func (b *bucket[K]) set(key K, val any, ts int64) {
+	// rehashing
+	if b.rehashing {
+		b.nb.set(key, val, ts)
+		return
+	}
+
 	hasTTL := (ts != noTTL)
 
 	// if bytes
@@ -223,14 +236,20 @@ func (c *GigaCache[K]) SetEx(key K, val any, dur time.Duration) {
 }
 
 // Delete
-func (c *GigaCache[K]) Delete(key K) bool {
+func (c *GigaCache[K]) Delete(key K) (ok bool) {
 	b := c.getShard(key)
 	b.Lock()
-	_, ok := b.idx.Delete(key)
-	b.eliminate()
+	if b.rehashing {
+		_, ok = b.nb.idx.Delete(key)
+		if !ok {
+			_, ok = b.idx.Delete(key)
+		}
+	} else {
+		_, ok = b.idx.Delete(key)
+	}
 	b.Unlock()
 
-	return ok
+	return
 }
 
 // Scan
@@ -256,6 +275,12 @@ func parseTTL(b []byte) int64 {
 
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
+	// if rehashing
+	if b.rehashing {
+		b.migrate()
+		return
+	}
+
 	if b.allocTimes%probeInterval != 0 {
 		return
 	}
@@ -298,10 +323,7 @@ func (b *bucket[K]) eliminate() {
 		}
 	}
 
-	// migrate
-	if rate := float64(b.idx.Len()) / float64(b.allocTimes); rate < migrateThreshold {
-		b.migrate()
-	}
+	b.migrate()
 }
 
 // Migrate
@@ -315,30 +337,50 @@ func (c *GigaCache[K]) Migrate() {
 
 // migrate put valid key-value pairs to the new bucket.
 func (b *bucket[K]) migrate() {
-	newBucket := &bucket[K]{
-		idx:    hashmap.New[K, Idx](b.idx.Len()),
-		bytes:  bpool.Get(),
-		anyArr: make([]*anyItem, 0),
-		mtimes: b.mtimes + 1,
+	if !b.rehashing {
+		if rate := float64(b.idx.Len()) / float64(b.allocTimes); rate > migrateThreshold {
+			return
+		}
+
+		// start rehash
+		b.rehashing = true
+		b.nb = &bucket[K]{
+			idx:    hashmap.New[K, Idx](b.idx.Len()),
+			bytes:  bpool.Get(),
+			anyArr: make([]*anyItem, 0),
+		}
 	}
 
+	// rehash
+	keys := make([]K, 0, rehashCount)
 	b.idx.Scan(func(key K, idx Idx) bool {
-		// nocopy
-		val, ts, ok := b.getNoCopy(idx)
+		v, ts, ok := b.getNoCopy(idx)
 		if ok {
-			newBucket.set(key, val, ts)
+			b.nb.set(key, v, ts)
 		}
-		return true
+		keys = append(keys, key)
+
+		return len(keys) < rehashCount
 	})
 
-	b.bytes = b.bytes[:0]
-	bpool.Put(b.bytes)
+	for _, key := range keys {
+		b.idx.Delete(key)
+	}
 
-	b.bytes = newBucket.bytes
-	b.anyArr = newBucket.anyArr
-	b.idx = newBucket.idx
-	b.mtimes = newBucket.mtimes
-	b.allocTimes = newBucket.allocTimes
+	// rehash finished
+	if b.idx.Len() == 0 {
+		b.bytes = b.bytes[:0]
+		bpool.Put(b.bytes)
+
+		b.bytes = b.nb.bytes
+		b.anyArr = b.nb.anyArr
+		b.idx = b.nb.idx
+		b.mtimes++
+		b.allocTimes = b.nb.allocTimes
+
+		b.rehashing = false
+		b.nb = nil
+	}
 }
 
 type bucketJSON[K comparable] struct {

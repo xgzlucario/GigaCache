@@ -3,7 +3,7 @@ package cache
 import "testing"
 
 func TestPercentile(t *testing.T) {
-	p := NewPercentile(0)
+	p := NewPercentile()
 
 	for i := 1; i < 100; i++ {
 		p.Add(float64(i))

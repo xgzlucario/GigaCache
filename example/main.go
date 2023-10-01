@@ -5,61 +5,23 @@ import (
 	"strconv"
 	"time"
 
+	"golang.org/x/exp/rand"
+
 	"net/http"
 	_ "net/http/pprof"
 
 	cache "github.com/xgzlucario/GigaCache"
 )
 
-func testBytes() {
-	bc := cache.New[string]()
-
-	// Test
-	for i := 1; i < 20; i++ {
-		bc.SetEx("xgz"+strconv.Itoa(i), []byte(strconv.Itoa(i)), time.Second/10*time.Duration(i))
-	}
-
-	for i := 0; i < 25; i++ {
-		bc.Scan(func(key string, val any, ts int64) bool {
-			fmt.Println(key, string(val.([]byte)), time.Unix(0, ts).Format(time.DateTime))
-			return true
-		})
-		fmt.Println()
-		time.Sleep(time.Second / 10)
-	}
-}
-
-func testAny() {
-	bc := cache.New[string]()
-
-	// Test
-	for i := 1; i < 20; i++ {
-		bc.SetEx("xgz-any"+strconv.Itoa(i), i, time.Second/10*time.Duration(i))
-	}
-
-	for i := 0; i < 25; i++ {
-		bc.Scan(func(key string, val any, ts int64) bool {
-			fmt.Println(key, val, time.Unix(0, ts).Format(time.DateTime))
-			return true
-		})
-		fmt.Println()
-		time.Sleep(time.Second / 10)
-	}
-}
-
 func main() {
 	go http.ListenAndServe("localhost:6060", nil)
-
-	// testBytes()
-	// testAny()
 
 	start := time.Now()
 
 	pset := cache.NewPercentile()
-	prate := cache.NewPercentile()
-	pbytes := cache.NewPercentile()
 
 	var count int64
+	var avgRate, avgBytes, avgTime float64
 
 	bc := cache.New[string]()
 
@@ -72,17 +34,18 @@ func main() {
 			if i > 0 && i%20 == 0 {
 				stat := bc.Stat()
 
-				prate.Add(stat.ExpRate())
-				pbytes.Add(float64(stat.LenBytes))
+				avgRate += stat.ExpRate()
+				avgBytes += float64(stat.LenBytes)
+				avgTime++
 
 				// Stats
-				fmt.Printf("Cache [%.0fs] [%dw] | len: %dw | alloc: %dw | bytes: %.0fw | rate: %.1f%% | mtime: %d\n",
+				fmt.Printf("New Cache [%.0fs] [%dw] | len: %dw | alloc: %dw | bytes: %.0fw | rate: %.1f%% | mtime: %d\n",
 					time.Since(start).Seconds(),
 					count/1e4,
 					stat.Len/1e4,
 					stat.AllocTimes/1e4,
-					pbytes.Avg()/1e4,
-					prate.Avg(),
+					avgBytes/avgTime/1e4,
+					avgRate/avgTime,
 					stat.MigrateTimes)
 
 				// latency
@@ -94,14 +57,20 @@ func main() {
 		}
 	}()
 
-	// Set
-	for i := 0; ; i++ {
-		count++
-		v := strconv.Itoa(i)
-		now := time.Now()
+	// 8 clients set concurrent
+	for i := 0; i < 8; i++ {
+		go func() {
+			for {
+				k := strconv.Itoa(int(rand.Uint32()))
+				now := time.Now()
 
-		bc.SetEx(v, []byte(v), time.Second)
+				bc.SetEx(k, []byte(k), time.Second)
+				count++
 
-		pset.Add(float64(time.Since(now)) / float64(time.Microsecond))
+				pset.Add(float64(time.Since(now)) / float64(time.Microsecond))
+			}
+		}()
 	}
+
+	select {}
 }
