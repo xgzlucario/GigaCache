@@ -5,7 +5,7 @@ import "testing"
 func TestPercentile(t *testing.T) {
 	p := NewPercentile()
 
-	for i := 1; i < 100; i++ {
+	for i := 0; i < 100; i++ {
 		p.Add(float64(i))
 	}
 

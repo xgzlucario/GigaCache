@@ -57,7 +57,6 @@ type GigaCache[K comparable] struct {
 // bucket
 type bucket[K comparable] struct {
 	rehashing  bool
-	id         uint32
 	allocTimes int64
 	mtimes     int64
 	idx        *hashmap.Map[K, Idx]
@@ -95,7 +94,6 @@ func New[K comparable](count ...int) *GigaCache[K] {
 
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket[K]{
-			id:     uint32(i),
 			idx:    hashmap.New[K, Idx](0),
 			bytes:  bpool.Get(),
 			anyArr: make([]*anyItem, 0),
@@ -125,8 +123,8 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 	return c.buckets[c.hash(key)]
 }
 
-// getNoCopy returns NoCopy value.
-func (b *bucket[K]) getNoCopy(idx Idx) (any, int64, bool) {
+// getByIdx return values, make sure idx exist.
+func (b *bucket[K]) getByIdx(idx Idx) (any, int64, bool) {
 	if idx.IsAny() {
 		n := b.anyArr[idx.start()]
 
@@ -154,15 +152,20 @@ func (b *bucket[K]) getNoCopy(idx Idx) (any, int64, bool) {
 	}
 }
 
-// get returns value.
-func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
-	val, ts, ok := b.getNoCopy(idx)
-	if ok {
-		if idx.IsAny() {
-			return val, ts, true
+// getByKey return values by given key.
+func (b *bucket[K]) getByKey(key K) (any, int64, bool) {
+	// rehashing
+	if b.rehashing {
+		if idx, ok := b.nb.idx.Get(key); ok {
+			return b.nb.getByIdx(idx)
 		}
-		return slices.Clone(val.([]byte)), ts, true
 	}
+
+	idx, ok := b.idx.Get(key)
+	if ok {
+		return b.getByIdx(idx)
+	}
+
 	return nil, 0, false
 }
 
@@ -172,11 +175,7 @@ func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 	b.RLock()
 	defer b.RUnlock()
 
-	if idx, ok := b.idx.Get(key); ok {
-		return b.get(idx)
-	}
-
-	return nil, 0, false
+	return b.getByKey(key)
 }
 
 // set
@@ -256,14 +255,46 @@ func (c *GigaCache[K]) Delete(key K) (ok bool) {
 func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	for _, b := range c.buckets {
 		b.RLock()
+		b.scan(f)
+		b.RUnlock()
+	}
+}
+
+// scan
+func (b *bucket[K]) scan(f func(K, any, int64) bool) {
+	if b.rehashing {
+		has := make(map[K]struct{}, b.idx.Len())
+
+		// scan new idxmap
+		b.nb.idx.Scan(func(key K, idx Idx) bool {
+			val, ts, ok := b.nb.getByIdx(idx)
+			if ok {
+				has[key] = struct{}{}
+				return f(key, val, ts)
+			}
+			return true
+		})
+
+		// scan old idxmap
 		b.idx.Scan(func(key K, idx Idx) bool {
-			val, ts, ok := b.get(idx)
+			val, ts, ok := b.getByIdx(idx)
+			if ok {
+				_, exist := has[key]
+				if !exist {
+					return f(key, val, ts)
+				}
+			}
+			return true
+		})
+
+	} else {
+		b.idx.Scan(func(key K, idx Idx) bool {
+			val, ts, ok := b.getByIdx(idx)
 			if ok {
 				return f(key, val, ts)
 			}
 			return true
 		})
-		b.RUnlock()
 	}
 }
 
@@ -282,11 +313,6 @@ func (b *bucket[K]) eliminate() {
 	}
 
 	if b.allocTimes%probeInterval != 0 {
-		return
-	}
-
-	// bucket is empty
-	if b.idx.Len() == 0 {
 		return
 	}
 
@@ -326,15 +352,6 @@ func (b *bucket[K]) eliminate() {
 	b.migrate()
 }
 
-// Migrate
-func (c *GigaCache[K]) Migrate() {
-	for _, b := range c.buckets {
-		b.Lock()
-		b.migrate()
-		b.Unlock()
-	}
-}
-
 // migrate put valid key-value pairs to the new bucket.
 func (b *bucket[K]) migrate() {
 	if !b.rehashing {
@@ -354,9 +371,13 @@ func (b *bucket[K]) migrate() {
 	// rehash
 	keys := make([]K, 0, rehashCount)
 	b.idx.Scan(func(key K, idx Idx) bool {
-		v, ts, ok := b.getNoCopy(idx)
+		// migrate valid and not exist in new bucket key-pairs.
+		v, ts, ok := b.getByIdx(idx)
 		if ok {
-			b.nb.set(key, v, ts)
+			_, ok1 := b.nb.idx.Get(key)
+			if !ok1 {
+				b.nb.set(key, v, ts)
+			}
 		}
 		keys = append(keys, key)
 
@@ -375,8 +396,8 @@ func (b *bucket[K]) migrate() {
 		b.bytes = b.nb.bytes
 		b.anyArr = b.nb.anyArr
 		b.idx = b.nb.idx
-		b.mtimes++
 		b.allocTimes = b.nb.allocTimes
+		b.mtimes++
 
 		b.rehashing = false
 		b.nb = nil
