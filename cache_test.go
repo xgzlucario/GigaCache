@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/tidwall/hashmap"
 )
 
 const (
@@ -16,7 +17,7 @@ const (
 
 var (
 	str = []byte("0123456789")
-	sec = time.Second / 10
+	sec = time.Second / 20
 )
 
 func TestCacheSet(t *testing.T) {
@@ -29,15 +30,17 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		// get exist
-		if v, ts, ok := m.Get("foo123"); v == nil || ts != 0 || !ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
+		v, ts, ok := m.Get("foo123")
+		assert.Equal(v, []byte("123"))
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, true)
 
 		// update get
 		m.Set("foo100", []byte("200"))
-		if v, ts, ok := m.Get("foo100"); !assert.Equal([]byte("200"), v, "error1") || !ok || ts != 0 {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
+		v, ts, ok = m.Get("foo100")
+		assert.Equal(v, []byte("200"))
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, true)
 
 		// get not exist
 		val, ts, ok := m.Get("not-exist")
@@ -163,7 +166,7 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		s := m.Stat()
-		if s.BytesLen != 6000 || s.Len != 800 || s.Count != 1000 || s.AnyLen != 400 {
+		if s.LenBytes != 6000 || s.Len != 800 || s.AllocTimes != 1000 || s.LenAny != 400 {
 			t.Fatalf("%+v", s)
 		}
 		if s.ExpRate() != 80 {
@@ -237,47 +240,6 @@ func TestCacheSet(t *testing.T) {
 		})
 	})
 
-	t.Run("Compress", func(t *testing.T) {
-		m := New[string]()
-		m.buckets[0].eliminate()
-
-		for i := 0; i < 100; i++ {
-			m.Set("noexpired"+strconv.Itoa(i), []byte{1, 2, 3})
-		}
-		for i := 0; i < 200; i++ {
-			m.SetEx("expired"+strconv.Itoa(i), []byte{1, 2, 3}, sec)
-		}
-		for i := 0; i < 300; i++ {
-			m.Set("noexpired-any"+strconv.Itoa(i), 123)
-		}
-		for i := 0; i < 400; i++ {
-			m.SetEx("expired-any"+strconv.Itoa(i), 123, sec)
-		}
-
-		// check
-		s := m.Stat()
-		if s.BytesLen != 2500 || s.Len != 1000 || s.Count != 1000 || s.AnyLen != 700 {
-			t.Fatalf("%+v", s)
-		}
-
-		time.Sleep(sec * 2)
-		m.Compress()
-
-		// check2
-		s = m.Stat()
-		if s.BytesLen != 300 || s.Len != 400 || s.Count != 400 || s.AnyLen != 300 {
-			t.Fatalf("%+v", s)
-		}
-
-		// check3
-		m.Scan(func(k string, a any, i int64) bool {
-			if k[:3] == "exp" {
-				t.Fatal(k)
-			}
-			return true
-		})
-	})
-
 	t.Run("marshal", func(t *testing.T) {
 		m := New[string]()
 		valid := map[string][]byte{}
@@ -317,6 +279,110 @@ func TestCacheSet(t *testing.T) {
 		err = m.UnmarshalBytes([]byte("fake news"))
 		if err == nil {
 			t.Fatalf("error: %v", err)
+		}
+	})
+
+	t.Run("migrate", func(t *testing.T) {
+		const NUM = 1000
+
+		m := New[string](1)
+		assert := assert.New(t)
+
+		for i := 0; i < NUM; i++ {
+			m.Set(strconv.Itoa(i), []byte{byte(i)})
+			m.SetEx("t"+strconv.Itoa(i), []byte{byte(i)}, sec)
+			m.SetEx("x"+strconv.Itoa(i), []byte{byte(i)}, sec*999)
+		}
+
+		// valid
+		for i := 0; i < NUM; i++ {
+			// noTTL
+			v, ts, ok := m.Get(strconv.Itoa(i))
+			assert.Equal(v, []byte{byte(i)})
+			assert.Equal(ts, int64(0))
+			assert.Equal(ok, true)
+
+			// not expired
+			v, ts, ok = m.Get("t" + strconv.Itoa(i))
+			assert.Equal(v, []byte{byte(i)})
+			assert.GreaterOrEqual(GetUnixNano()+int64(sec), ts)
+			assert.Equal(ok, true)
+
+			// not expired
+			v, ts, ok = m.Get("x" + strconv.Itoa(i))
+			assert.Equal(v, []byte{byte(i)})
+			assert.GreaterOrEqual(GetUnixNano()+int64(sec*999), ts)
+			assert.Equal(ok, true)
+		}
+
+		time.Sleep(sec * 2)
+
+		// make some expired data to trigger migrate.
+		for i := 0; i < NUM*5; i++ {
+			m.SetEx("r"+strconv.Itoa(i), []byte{byte(i)}, 1)
+		}
+
+		// valid function
+		validFunc := func() {
+			for i := 0; i < NUM; i++ {
+				// noTTL
+				v, ts, ok := m.Get(strconv.Itoa(i))
+				assert.Equal(v, []byte{byte(i)})
+				assert.Equal(ts, int64(0))
+				assert.Equal(ok, true)
+
+				// expired
+				v, ts, ok = m.Get("t" + strconv.Itoa(i))
+				assert.Equal(v, nil)
+				assert.Equal(ts, int64(0))
+				assert.Equal(ok, false)
+
+				// not expired
+				v, ts, ok = m.Get("x" + strconv.Itoa(i))
+				assert.Equal(v, []byte{byte(i)})
+				assert.GreaterOrEqual(GetUnixNano()+int64(sec*999), ts)
+				assert.Equal(ok, true)
+			}
+		}
+
+		b := m.buckets[0]
+		// force rehash
+		b.rehashing = true
+		b.nb = &bucket[string]{
+			idx:    hashmap.New[string, Idx](b.idx.Len()),
+			bytes:  bpool.Get(),
+			anyArr: make([]*anyItem, 0),
+		}
+
+		var last1, last2 int
+
+		// some set operations to tigger migrate.
+		for i := 0; i < NUM; i++ {
+			m.Set("none"+strconv.Itoa(i), []byte{1})
+
+			if b.rehashing {
+				if last1 > 0 && last1-b.idx.Len() != 100 {
+					t.Fatalf("error: %v %v", b.idx.Len(), last1)
+				}
+
+				if last2 > 0 && b.nb.idx.Len()-last2 > 100 {
+					t.Fatalf("error: %v %v", b.idx.Len(), last2)
+				}
+
+				last1 = b.idx.Len()
+				last2 = b.nb.idx.Len()
+
+				// scan
+				b.scan(func(k string, a any, i int64) bool {
+					return true
+				})
+
+			} else {
+				last1 = 0
+				last2 = 0
+			}
+
+			validFunc()
 		}
 	})
 

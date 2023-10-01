@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"strconv"
 	"time"
-	"unsafe"
+
+	"golang.org/x/exp/rand"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -13,66 +13,17 @@ import (
 	cache "github.com/xgzlucario/GigaCache"
 )
 
-// String convert to bytes unsafe
-func S2B(str *string) []byte {
-	strHeader := (*[2]uintptr)(unsafe.Pointer(str))
-	byteSliceHeader := [3]uintptr{
-		strHeader[0], strHeader[1], strHeader[1],
-	}
-	return *(*[]byte)(unsafe.Pointer(&byteSliceHeader))
-}
-
-func testBytes() {
-	bc := cache.New[string]()
-
-	// Test
-	for i := 1; i < 20; i++ {
-		bc.SetEx("xgz"+strconv.Itoa(i), []byte(strconv.Itoa(i)), time.Second/10*time.Duration(i))
-	}
-
-	for i := 0; i < 25; i++ {
-		bc.Scan(func(key string, val any, ts int64) bool {
-			fmt.Println(key, string(val.([]byte)), time.Unix(0, ts).Format(time.DateTime))
-			return true
-		})
-		fmt.Println()
-		time.Sleep(time.Second / 10)
-	}
-}
-
-func testAny() {
-	bc := cache.New[string]()
-
-	// Test
-	for i := 1; i < 20; i++ {
-		bc.SetEx("xgz-any"+strconv.Itoa(i), i, time.Second/10*time.Duration(i))
-	}
-
-	for i := 0; i < 25; i++ {
-		bc.Scan(func(key string, val any, ts int64) bool {
-			fmt.Println(key, val, time.Unix(0, ts).Format(time.DateTime))
-			return true
-		})
-		fmt.Println()
-		time.Sleep(time.Second / 10)
-	}
-}
-
 func main() {
 	go http.ListenAndServe("localhost:6060", nil)
 
-	// testBytes()
-	// testAny()
-
 	start := time.Now()
 
-	var sum float64
-	var n1, count int64
+	pset := cache.NewPercentile()
+
+	var count int64
+	var avgRate, avgBytes, avgTime float64
 
 	bc := cache.New[string]()
-
-	var c float64
-	var sumRate, sumBytesLen float64
 
 	// Stat
 	go func() {
@@ -80,51 +31,46 @@ func main() {
 			time.Sleep(time.Second / 10)
 
 			// benchmark test
-			if i > 0 && i%100 == 0 {
+			if i > 0 && i%20 == 0 {
 				stat := bc.Stat()
 
-				c++
-				sumRate += stat.ExpRate()
-				sumBytesLen += float64(stat.BytesLen)
+				avgRate += stat.ExpRate()
+				avgBytes += float64(stat.LenBytes)
+				avgTime++
 
-				fmt.Printf("[Cache] %.0fs | count: %dw | len: %dw | alloc: %dw | bytes: %.0fw | rate: %.1f%% | ccount: %d | avg: %.2f ns\n",
+				// Stats
+				fmt.Printf("New Cache [%.0fs] [%dw] | len: %dw | alloc: %dw | bytes: %.0fw | rate: %.1f%% | mtime: %d\n",
 					time.Since(start).Seconds(),
 					count/1e4,
 					stat.Len/1e4,
-					stat.Count/1e4,
-					sumBytesLen/c/1e4,
-					sumRate/c,
-					stat.CCount,
-					sum/float64(n1))
+					stat.AllocTimes/1e4,
+					avgBytes/avgTime/1e4,
+					avgRate/avgTime,
+					stat.MigrateTimes)
+
+				// latency
+				fmt.Println("latency(micros)")
+				pset.Print()
+
+				fmt.Println()
 			}
 		}
 	}()
 
-	// Get
-	go func() {
-		for i := 0; ; i++ {
-			now := time.Now()
-			key := strconv.Itoa(i)
+	// 8 clients set concurrent
+	for i := 0; i < 8; i++ {
+		go func() {
+			for {
+				k := strconv.Itoa(int(rand.Uint32()))
+				now := time.Now()
 
-			val, _, ok := bc.Get(key)
-			if ok && !bytes.Equal(S2B(&key), val.([]byte)) {
-				panic("key and value not equal")
+				bc.SetEx(k, []byte(k), time.Second)
+				count++
+
+				pset.Add(float64(time.Since(now)) / float64(time.Microsecond))
 			}
-
-			c := time.Since(now).Microseconds()
-			sum += float64(c)
-			n1++
-
-			time.Sleep(time.Microsecond)
-
-			i %= 1e9
-		}
-	}()
-
-	// Set
-	for i := 0; ; i++ {
-		count++
-		v := strconv.Itoa(i)
-		bc.SetEx(v, S2B(&v), time.Second)
+		}()
 	}
+
+	select {}
 }
