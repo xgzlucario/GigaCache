@@ -16,7 +16,7 @@ const (
 
 var (
 	str = []byte("0123456789")
-	sec = time.Second / 10
+	sec = time.Second / 20
 )
 
 func TestCacheSet(t *testing.T) {
@@ -29,27 +29,30 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		// get exist
-		if v, ts, ok := m.Get("foo123"); v == nil || ts != 0 || !ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
+		val, ts, ok := m.Get("foo123")
+		assert.Equal(val, []byte("123"))
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, true)
 
 		// update get
 		m.Set("foo100", []byte("200"))
-		if v, ts, ok := m.Get("foo100"); !assert.Equal([]byte("200"), v, "error1") || !ok || ts != 0 {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
+		val, ts, ok = m.Get("foo100")
+		assert.Equal(val, []byte("200"))
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, true)
 
 		// get not exist
-		val, ts, ok := m.Get("not-exist")
-		if val != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", val, ts, ok)
-		}
+		val, ts, ok = m.Get("not-exist")
+		assert.Equal(val, nil)
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, false)
 
 		// set negetive number
 		m.SetTx("no", []byte{1}, -9)
-		if val, ts, ok := m.Get("no"); val != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", val, ts, ok)
-		}
+		val, ts, ok = m.Get("no")
+		assert.Equal(val, nil)
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, false)
 
 		// get deleted
 		ok = m.Delete("foo5")
@@ -163,7 +166,7 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		s := m.Stat()
-		if s.BytesLen != 6000 || s.Len != 800 || s.Count != 1000 || s.AnyLen != 400 {
+		if s.LenBytes != 6000 || s.Len != 800 || s.Alloc != 1000 || s.LenAny != 400 {
 			t.Fatalf("%+v", s)
 		}
 		if s.ExpRate() != 80 {
@@ -256,7 +259,7 @@ func TestCacheSet(t *testing.T) {
 
 		// check
 		s := m.Stat()
-		if s.BytesLen != 2500 || s.Len != 1000 || s.Count != 1000 || s.AnyLen != 700 {
+		if s.LenBytes != 2500 || s.Len != 1000 || s.Alloc != 1000 || s.LenAny != 700 {
 			t.Fatalf("%+v", s)
 		}
 
@@ -265,7 +268,7 @@ func TestCacheSet(t *testing.T) {
 
 		// check2
 		s = m.Stat()
-		if s.BytesLen != 300 || s.Len != 400 || s.Count != 400 || s.AnyLen != 300 {
+		if s.LenBytes != 300 || s.Len != 400 || s.Alloc != 400 || s.LenAny != 300 {
 			t.Fatalf("%+v", s)
 		}
 
