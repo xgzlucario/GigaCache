@@ -181,7 +181,7 @@ func (c *GigaCache[K]) RandomGet() (key K, val any, ts int64, ok bool) {
 		b.Lock()
 
 		for b.idx.Len() > 0 {
-			key, idx, _ := b.idx.GetPos(rdm + i)
+			key, idx, _ := b.idx.GetPos(rdm)
 			val, ts, ok = b.get(idx)
 			// unexpired
 			if ok {
