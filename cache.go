@@ -41,6 +41,9 @@ var (
 
 	// Reuse buffer to reduce memory allocation.
 	bpool = NewBytePoolCap(defaultShardsCount, 0, bufferSize)
+
+	// rand source
+	source = rand.NewSource(uint64(time.Now().UnixNano()))
 )
 
 // GigaCache
@@ -118,8 +121,8 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 	return c.buckets[c.hash(key)]
 }
 
-// getNoCopy returns NoCopy value.
-func (b *bucket[K]) getNoCopy(idx Idx) (any, int64, bool) {
+// get returns nocopy value.
+func (b *bucket[K]) get(idx Idx, nocopy ...bool) (any, int64, bool) {
 	if idx.IsAny() {
 		n := b.anyArr[idx.start()]
 
@@ -140,26 +143,23 @@ func (b *bucket[K]) getNoCopy(idx Idx) (any, int64, bool) {
 			if ttl < clock {
 				return nil, 0, false
 			}
-			return b.bytes[start:end], ttl, true
+
+			// return
+			if nocopy != nil && nocopy[0] {
+				return b.bytes[start:end], ttl, true
+			}
+			return slices.Clone(b.bytes[start:end]), ttl, true
 		}
 
-		return b.bytes[start:end], noTTL, true
+		// return
+		if nocopy != nil && nocopy[0] {
+			return b.bytes[start:end], noTTL, true
+		}
+		return slices.Clone(b.bytes[start:end]), noTTL, true
 	}
 }
 
-// get returns value.
-func (b *bucket[K]) get(idx Idx) (any, int64, bool) {
-	val, ts, ok := b.getNoCopy(idx)
-	if ok {
-		if idx.IsAny() {
-			return val, ts, true
-		}
-		return slices.Clone(val.([]byte)), ts, true
-	}
-	return nil, 0, false
-}
-
-// Get return bytes value by key.
+// Get returns value with expiration time by the key.
 func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 	b := c.getShard(key)
 	b.RLock()
@@ -170,6 +170,33 @@ func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 	}
 
 	return nil, 0, false
+}
+
+// RandomGet
+func (c *GigaCache[K]) RandomGet() (key K, val any, ts int64, ok bool) {
+	rdm := source.Uint64()
+
+	for i := uint64(0); i < uint64(len(c.buckets)); i++ {
+		b := c.buckets[(rdm+i)&c.mask]
+		b.Lock()
+
+		for b.idx.Len() > 0 {
+			key, idx, _ := b.idx.GetPos(rdm + i)
+			val, ts, ok = b.get(idx)
+			// unexpired
+			if ok {
+				b.Unlock()
+				return key, val, ts, ok
+
+			} else {
+				b.idx.Delete(key)
+			}
+		}
+
+		b.Unlock()
+	}
+
+	return
 }
 
 // set
@@ -203,7 +230,7 @@ func (b *bucket[K]) set(key K, val any, ts int64) {
 	}
 }
 
-// SetTx
+// SetTx set value with expiration time by the key.
 func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 	b := c.getShard(key)
 	b.Lock()
@@ -212,7 +239,7 @@ func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 	b.Unlock()
 }
 
-// Set
+// Set set value with the key.
 func (c *GigaCache[K]) Set(key K, val any) {
 	c.SetTx(key, val, noTTL)
 }
@@ -233,19 +260,41 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	return ok
 }
 
+// scan
+func (b *bucket[K]) scan(f func(K, any, int64) bool, nocopy ...bool) {
+	b.idx.Scan(func(key K, idx Idx) bool {
+		val, ts, ok := b.get(idx, nocopy...)
+		if ok {
+			return f(key, val, ts)
+		}
+		return true
+	})
+}
+
 // Scan
 func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	for _, b := range c.buckets {
 		b.RLock()
-		b.idx.Scan(func(key K, idx Idx) bool {
-			val, ts, ok := b.get(idx)
-			if ok {
-				return f(key, val, ts)
-			}
-			return true
-		})
+		b.scan(f)
 		b.RUnlock()
 	}
+}
+
+// Keys
+func (c *GigaCache[K]) Keys() (keys []K) {
+	for _, b := range c.buckets {
+		b.RLock()
+		if keys == nil {
+			keys = make([]K, 0, len(c.buckets)*b.idx.Len())
+		}
+		b.scan(func(key K, _ any, _ int64) bool {
+			keys = append(keys, key)
+			return true
+		}, true)
+		b.RUnlock()
+	}
+
+	return
 }
 
 func parseTTL(b []byte) int64 {
@@ -265,7 +314,7 @@ func (b *bucket[K]) eliminate() {
 	}
 
 	var failCont, ttl int64
-	rdm := rand.Uint64()
+	rdm := source.Uint64()
 
 	// probing
 	for i := uint64(0); i < probeCount; i++ {
@@ -321,14 +370,10 @@ func (b *bucket[K]) compress() {
 		mtimes: b.mtimes + 1,
 	}
 
-	b.idx.Scan(func(key K, idx Idx) bool {
-		// nocopy
-		val, ts, ok := b.getNoCopy(idx)
-		if ok {
-			newBucket.set(key, val, ts)
-		}
+	b.scan(func(key K, val any, ts int64) bool {
+		newBucket.set(key, val, ts)
 		return true
-	})
+	}, true)
 
 	b.bytes = b.bytes[:0]
 	bpool.Put(b.bytes)

@@ -72,6 +72,42 @@ func TestCacheSet(t *testing.T) {
 		}
 	})
 
+	t.Run("Nocopy", func(t *testing.T) {
+		assert := assert.New(t)
+		m := New[string](1)
+
+		// get nocopy
+		m.SetEx("nocopy", []byte{1, 2, 3, 4}, time.Minute)
+
+		m.buckets[0].scan(func(k string, val any, i int64) bool {
+			if val, ok := val.([]byte); ok {
+				copy(val, []byte{8, 8, 8, 8})
+			}
+			return true
+		}, true)
+
+		val, ts, ok := m.Get("nocopy")
+		assert.Equal(val, []byte{8, 8, 8, 8})
+		assert.GreaterOrEqual(ts, GetUnixNano())
+		assert.Equal(ok, true)
+
+		// get copy
+		m = New[string](1)
+		m.SetEx("copy", []byte{1, 2, 3, 4}, time.Minute)
+
+		m.buckets[0].scan(func(k string, val any, i int64) bool {
+			if val, ok := val.([]byte); ok {
+				copy(val, []byte{8, 8, 8, 8})
+			}
+			return true
+		})
+
+		val, ts, ok = m.Get("copy")
+		assert.Equal(val, []byte{1, 2, 3, 4})
+		assert.GreaterOrEqual(ts, GetUnixNano())
+		assert.Equal(ok, true)
+	})
+
 	t.Run("SetAny/GetAny", func(t *testing.T) {
 		assert := assert.New(t)
 
@@ -81,21 +117,16 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		// get
-		if v, ts, ok := m.Get("foo123"); v == nil || ts != 0 || !ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
-
-		// get any
 		v, ts, ok := m.Get("foo123")
-		if v.(int) != 123 || ts != 0 || !ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
+		assert.Equal(v, 123)
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, true)
 
 		// get not exist
 		v, ts, ok = m.Get("not-exist")
-		if v != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
+		assert.Equal(v, nil)
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, false)
 
 		// expired
 		m.SetEx("foo", 1, sec)
@@ -171,6 +202,54 @@ func TestCacheSet(t *testing.T) {
 		}
 		if s.ExpRate() != 80 {
 			t.Fatalf("%+v", s.ExpRate())
+		}
+	})
+
+	t.Run("Keys", func(t *testing.T) {
+		m := New[string](20)
+		for i := 0; i < 200; i++ {
+			m.Set("noexp"+strconv.Itoa(i), str)
+			m.SetEx(strconv.Itoa(i), str, sec)
+		}
+		for i := 0; i < 200; i++ {
+			m.Set("any"+strconv.Itoa(i), i)
+		}
+
+		keys := m.Keys()
+		if len(keys) != 600 {
+			t.Fatalf("%+v", len(keys))
+		}
+
+		time.Sleep(sec * 2)
+
+		keys = m.Keys()
+		if len(keys) != 400 {
+			t.Fatalf("%+v", len(keys))
+		}
+	})
+
+	t.Run("RandomGet", func(t *testing.T) {
+		m := New[string](20)
+		m.RandomGet()
+
+		for i := 0; i < 200; i++ {
+			if i%2 == 0 {
+				m.SetEx(strconv.Itoa(i), str, sec)
+			} else {
+				m.Set(strconv.Itoa(i), str)
+			}
+		}
+
+		time.Sleep(sec * 2)
+
+		for i := 0; i < 200; i++ {
+			key, _, _, _ := m.RandomGet()
+			// if key is odd
+			if i%2 != 0 {
+				if _, err := strconv.Atoi(key); err != nil {
+					t.Fatalf("%+v", err)
+				}
+			}
 		}
 	})
 
