@@ -20,17 +20,18 @@ const (
 	// for ttl
 	ttlBytes = 8
 
-	bufferSize         = 1024
 	defaultShardsCount = 1024
+	bufferSize         = 1024
 
 	// eliminate probing
 	probeInterval = 3
 	probeCount    = 100
 	probeSpace    = 3
 
-	// compressThreshold Indicates how many effective bytes trigger the compression operation.
-	// Recommended between 0.6 and 0.7, see bench data for details.
-	compressThreshold = 0.6
+	// migrateThres defines the conditions necessary to trigger a migrate operation.
+	// Ratio recommended between 0.6 and 0.7, Delta recommended 128, see bench data for details.
+	migrateThresRatio = 0.6
+	migrateThresDelta = 128
 
 	maxFailCount = 5
 )
@@ -346,23 +347,29 @@ func (b *bucket[K]) eliminate() {
 		}
 	}
 
-	// on compress threshold
-	if rate := float64(b.idx.Len()) / float64(b.alloc); rate < compressThreshold {
-		b.compress()
+	// on migrate threshold
+	length := float64(b.idx.Len())
+	alloc := float64(b.alloc)
+
+	rate := length / alloc
+	delta := alloc - length
+
+	if rate < migrateThresRatio && delta > migrateThresDelta {
+		b.migrate()
 	}
 }
 
-// Compress
-func (c *GigaCache[K]) Compress() {
+// Migrate call migrate force.
+func (c *GigaCache[K]) Migrate() {
 	for _, b := range c.buckets {
 		b.Lock()
-		b.compress()
+		b.migrate()
 		b.Unlock()
 	}
 }
 
-// compress migrates valid key-value pairs to the new container to save memory.
-func (b *bucket[K]) compress() {
+// migrate move valid key-value pairs to the new container to save memory.
+func (b *bucket[K]) migrate() {
 	newBucket := &bucket[K]{
 		idx:    hashmap.New[K, Idx](b.idx.Len()),
 		bytes:  bpool.Get(),

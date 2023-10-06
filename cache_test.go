@@ -319,7 +319,37 @@ func TestCacheSet(t *testing.T) {
 		})
 	})
 
-	t.Run("Compress", func(t *testing.T) {
+	t.Run("Migrate-small", func(t *testing.T) {
+		m := New[string]()
+		m.buckets[0].eliminate()
+
+		for i := 0; i < 50; i++ {
+			m.Set("noexpired"+strconv.Itoa(i), []byte{1, 2, 3})
+		}
+		for i := 0; i < 50; i++ {
+			m.SetEx("expired"+strconv.Itoa(i), []byte{1, 2, 3}, sec)
+		}
+
+		// check
+		s := m.Stat()
+		if s.LenBytes != 700 || s.Len != 100 || s.Alloc != 100 {
+			t.Fatalf("%+v", s)
+		}
+
+		time.Sleep(sec * 2)
+		// trigger migrate
+		for i := 0; i < 9999; i++ {
+			m.Set("just-for-trig", []byte{})
+		}
+
+		// check2
+		s = m.Stat()
+		if s.LenBytes != 700 || s.Len != 101 {
+			t.Fatalf("%+v", s)
+		}
+	})
+
+	t.Run("Migrate", func(t *testing.T) {
 		m := New[string]()
 		m.buckets[0].eliminate()
 
@@ -343,7 +373,7 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		time.Sleep(sec * 2)
-		m.Compress()
+		m.Migrate()
 
 		// check2
 		s = m.Stat()
