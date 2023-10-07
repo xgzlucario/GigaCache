@@ -7,7 +7,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/tidwall/hashmap v1.8.1
 	github.com/zeebo/xxh3 v1.0.2
-	golang.org/x/exp v0.0.0-20231005195138-3e424a577f31
+	golang.org/x/exp v0.0.0-20231006140011-7918f672742d
 )
 
 require (

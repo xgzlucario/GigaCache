@@ -41,6 +41,28 @@ func TestCacheSet(t *testing.T) {
 		assert.Equal(ts, int64(0))
 		assert.Equal(ok, true)
 
+		// Rename
+		renameArgs := [][]string{
+			{"foo100", "foo100"},
+			{"foo100", "foo200"},
+			{"foo200", "foo100"},
+		}
+		for _, args := range renameArgs {
+			m.Rename(args[0], args[1])
+
+			if args[0] != args[1] {
+				val, ts, ok = m.Get(args[0])
+				assert.Equal(val, nil)
+				assert.Equal(ts, int64(0))
+				assert.Equal(ok, false)
+			}
+
+			val, ts, ok = m.Get(args[1])
+			assert.Equal(val, []byte("200"))
+			assert.Equal(ts, int64(0))
+			assert.Equal(ok, true)
+		}
+
 		// get not exist
 		val, ts, ok = m.Get("not-exist")
 		assert.Equal(val, nil)
