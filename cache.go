@@ -261,6 +261,35 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	return ok
 }
 
+// Rename
+func (c *GigaCache[K]) Rename(old, new K) bool {
+	oldb := c.getShard(old)
+	oldb.Lock()
+	defer oldb.Unlock()
+
+	// same bucket
+	if oldb == c.getShard(new) {
+		idx, _ := oldb.idx.Delete(old)
+		oldb.idx.Set(new, idx)
+		return true
+	}
+
+	// delete from old bucket.
+	idx, ok := oldb.idx.Delete(old)
+	if !ok {
+		return false
+	}
+	v, ts, ok := oldb.get(idx, true)
+	if !ok {
+		return false
+	}
+
+	// update new bucket.
+	c.SetTx(new, v, ts)
+
+	return true
+}
+
 // scan
 func (b *bucket[K]) scan(f func(K, any, int64) bool, nocopy ...bool) {
 	b.idx.Scan(func(key K, idx Idx) bool {
