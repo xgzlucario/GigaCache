@@ -4,6 +4,8 @@
 
 Powerful, fast, expiration supported cache for managing Gigabytes of data.
 
+[doc](https://www.yuque.com/1ucario/devdoc/ntyyeekkxu8apngd?singleDoc)
+
 # 🚗Usage
 
 **Install**
