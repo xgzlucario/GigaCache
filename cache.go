@@ -20,17 +20,18 @@ const (
 	// for ttl
 	ttlBytes = 8
 
-	bufferSize         = 1024
 	defaultShardsCount = 1024
+	bufferSize         = 1024
 
 	// eliminate probing
 	probeInterval = 3
 	probeCount    = 100
 	probeSpace    = 3
 
-	// compressThreshold Indicates how many effective bytes trigger the compression operation.
-	// Recommended between 0.6 and 0.7, see bench data for details.
-	compressThreshold = 0.6
+	// migrateThres defines the conditions necessary to trigger a migrate operation.
+	// Ratio recommended between 0.6 and 0.7, Delta recommended 128, see bench data for details.
+	migrateThresRatio = 0.6
+	migrateThresDelta = 128
 
 	maxFailCount = 5
 )
@@ -71,10 +72,10 @@ type anyItem struct {
 }
 
 // New returns a new GigaCache instance.
-func New[K comparable](count ...int) *GigaCache[K] {
+func New[K comparable](shardCount ...int) *GigaCache[K] {
 	var shards = defaultShardsCount
-	if len(count) > 0 {
-		shards = count[0]
+	if len(shardCount) > 0 {
+		shards = shardCount[0]
 	}
 
 	cache := &GigaCache[K]{
@@ -172,7 +173,7 @@ func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 	return nil, 0, false
 }
 
-// RandomGet
+// RandomGet returns a random unexpired key-value pair with ttl.
 func (c *GigaCache[K]) RandomGet() (key K, val any, ts int64, ok bool) {
 	rdm := source.Uint64()
 
@@ -230,7 +231,7 @@ func (b *bucket[K]) set(key K, val any, ts int64) {
 	}
 }
 
-// SetTx set value with expiration time by the key.
+// SetTx store key-value pair with deadline.
 func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 	b := c.getShard(key)
 	b.Lock()
@@ -239,17 +240,17 @@ func (c *GigaCache[K]) SetTx(key K, val any, ts int64) {
 	b.Unlock()
 }
 
-// Set set value with the key.
+// Set store key-value pair.
 func (c *GigaCache[K]) Set(key K, val any) {
 	c.SetTx(key, val, noTTL)
 }
 
-// SetEx
+// SetEx store key-value pair with expired duration.
 func (c *GigaCache[K]) SetEx(key K, val any, dur time.Duration) {
 	c.SetTx(key, val, clock+int64(dur))
 }
 
-// Delete
+// Delete removes the key-value pair by the key.
 func (c *GigaCache[K]) Delete(key K) bool {
 	b := c.getShard(key)
 	b.Lock()
@@ -271,7 +272,7 @@ func (b *bucket[K]) scan(f func(K, any, int64) bool, nocopy ...bool) {
 	})
 }
 
-// Scan
+// Scan walk all key-value pairs.
 func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	for _, b := range c.buckets {
 		b.RLock()
@@ -280,7 +281,7 @@ func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	}
 }
 
-// Keys
+// Keys returns all keys.
 func (c *GigaCache[K]) Keys() (keys []K) {
 	for _, b := range c.buckets {
 		b.RLock()
@@ -346,23 +347,29 @@ func (b *bucket[K]) eliminate() {
 		}
 	}
 
-	// on compress threshold
-	if rate := float64(b.idx.Len()) / float64(b.alloc); rate < compressThreshold {
-		b.compress()
+	// on migrate threshold
+	length := float64(b.idx.Len())
+	alloc := float64(b.alloc)
+
+	rate := length / alloc
+	delta := alloc - length
+
+	if rate < migrateThresRatio && delta > migrateThresDelta {
+		b.migrate()
 	}
 }
 
-// Compress
-func (c *GigaCache[K]) Compress() {
+// Migrate call migrate force.
+func (c *GigaCache[K]) Migrate() {
 	for _, b := range c.buckets {
 		b.Lock()
-		b.compress()
+		b.migrate()
 		b.Unlock()
 	}
 }
 
-// compress migrates valid key-value pairs to the new container to save memory.
-func (b *bucket[K]) compress() {
+// migrate move valid key-value pairs to the new container to save memory.
+func (b *bucket[K]) migrate() {
 	newBucket := &bucket[K]{
 		idx:    hashmap.New[K, Idx](b.idx.Len()),
 		bytes:  bpool.Get(),
@@ -456,7 +463,7 @@ type CacheStat struct {
 	MigrateTimes uint64
 }
 
-// Stat
+// Stat return the runtime statistics of Gigacache.
 func (c *GigaCache[K]) Stat() (s CacheStat) {
 	for _, b := range c.buckets {
 		b.RLock()
