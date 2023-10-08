@@ -3,7 +3,8 @@ module github.com/xgzlucario/GigaCache
 go 1.21
 
 require (
-	github.com/bytedance/sonic v1.10.1
+	github.com/bits-and-blooms/bitset v1.9.0
+	github.com/bytedance/sonic v1.10.2
 	github.com/stretchr/testify v1.8.4
 	github.com/tidwall/hashmap v1.8.1
 	github.com/zeebo/xxh3 v1.0.2
