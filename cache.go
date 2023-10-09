@@ -236,19 +236,19 @@ func (b *bucket[K, V]) set(key K, val any, ts int64) {
 		}
 		b.alloc++
 
-	// others
-	case Binarier, Jsoner:
+	// V type
+	case V:
 		idx, exist := b.idx.Get(key)
 		// update inplace
 		if exist && idx.IsAny() {
 			start := idx.start()
 			b.items[start].T = ts
-			b.items[start].V = val.(V)
+			b.items[start].V = val
 			b.idx.Set(key, newIdx(start, 0, hasTTL, true))
 
 		} else {
 			b.idx.Set(key, newIdx(len(b.items), 0, hasTTL, true))
-			b.items = append(b.items, &anyItem[V]{V: val.(V), T: ts})
+			b.items = append(b.items, &anyItem[V]{V: val, T: ts})
 			b.alloc++
 		}
 
