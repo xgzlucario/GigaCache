@@ -22,18 +22,21 @@ func (n Null) MarshalBinary() ([]byte, error) {
 }
 
 func (n Null) UnmarshalBinary(b []byte) error {
-	if len(b) != 0 {
+	if len(b) > 0 {
 		return errors.New("bytes not null")
 	}
 	return nil
 }
 
-func (n Null) MarshalJSON() ([]byte, error) {
+// nullJsoner
+type nullJsoner struct{}
+
+func (n nullJsoner) MarshalJSON() ([]byte, error) {
 	return []byte{}, nil
 }
 
-func (n Null) UnmarshalJSON(b []byte) error {
-	if len(b) != 0 {
+func (n nullJsoner) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 {
 		return errors.New("bytes not null")
 	}
 	return nil

@@ -457,6 +457,8 @@ type CacheJSON[K comparable] struct {
 // MarshalBinary
 func (c *GigaCache[K, V]) MarshalBinary() ([]byte, error) {
 	var data CacheJSON[K]
+	gob.Register(data)
+
 	var bitIndex uint32
 
 	for _, b := range c.buckets {
@@ -497,9 +499,6 @@ func (c *GigaCache[K, V]) MarshalBinary() ([]byte, error) {
 				// add means bitIndex is any.
 				data.A.Add(bitIndex)
 				data.V = append(data.V, b)
-
-			default:
-				panic("unsupported type: " + reflect.TypeOf(v).String())
 			}
 
 			return true
@@ -508,13 +507,9 @@ func (c *GigaCache[K, V]) MarshalBinary() ([]byte, error) {
 		b.RUnlock()
 	}
 
-	gob.Register(data)
-
 	// encode
 	buf := bytes.NewBuffer(nil)
-	if err := gob.NewEncoder(buf).Encode(data); err != nil {
-		return nil, err
-	}
+	gob.NewEncoder(buf).Encode(data)
 
 	return buf.Bytes(), nil
 }

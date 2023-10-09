@@ -193,6 +193,10 @@ func TestCacheSet(t *testing.T) {
 		m := New[int](100)
 		m.Set(100, []byte{1})
 
+		assert.Panics(func() {
+			NewCustom[string, int]()
+		})
+
 		// get exist
 		v, ts, ok := m.Get(100)
 		assert.Equal(v, []byte{1})
@@ -419,6 +423,7 @@ func TestCacheSet(t *testing.T) {
 
 			m.SetEx(key1, []byte(key1), time.Minute)
 			m.SetEx(key2, Null{}, time.Minute)
+
 		}
 
 		b, err := m.MarshalBinary()
@@ -444,6 +449,45 @@ func TestCacheSet(t *testing.T) {
 		m3 := New[string]()
 		err = m3.UnmarshalBinary([]byte("fake news"))
 		assert.NotNil(err, err)
+
+		var n Null
+		assert.NotNil(n.UnmarshalBinary([]byte("fake")))
+
+		var nj nullJsoner
+		assert.NotNil(nj.UnmarshalJSON([]byte("fake")))
+	})
+
+	t.Run("marshal-jsoner", func(t *testing.T) {
+		assert := assert.New(t)
+		m := NewCustom[string, nullJsoner]()
+
+		for i := 0; i < 1000; i++ {
+			key1 := "byte" + strconv.Itoa(i)
+			key2 := "null" + strconv.Itoa(i)
+
+			m.SetEx(key1, []byte(key1), time.Minute)
+			m.SetEx(key2, nullJsoner{}, time.Minute)
+
+		}
+
+		b, err := m.MarshalBinary()
+		assert.Nil(err)
+
+		m2 := NewCustom[string, nullJsoner]()
+		err = m2.UnmarshalBinary(b)
+		assert.Nil(err)
+
+		m2.Scan(func(k string, v any, ts int64) bool {
+			pre := k[0:4]
+			switch pre {
+			case "byte":
+				assert.Equal(k, string(v.([]byte)))
+
+			case "null":
+				assert.Equal(v, nullJsoner{})
+			}
+			return true
+		})
 	})
 
 	t.Run("eliminate", func(t *testing.T) {
