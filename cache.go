@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/gob"
-	"errors"
 	"reflect"
 	"slices"
 	"sync"
@@ -52,27 +51,8 @@ var (
 	source = rand.NewSource(uint64(time.Now().UnixNano()))
 )
 
-// Jsoner
-type Jsoner interface {
-	MarshalJSON() ([]byte, error)
-	UnmarshalJSON([]byte) error
-}
-
-type Null struct{}
-
-func (n Null) MarshalJSON() ([]byte, error) {
-	return []byte{}, nil
-}
-
-func (n Null) UnmarshalJSON(b []byte) error {
-	if len(b) != 0 {
-		return errors.New("bytes not null")
-	}
-	return nil
-}
-
-// GigaCache
-type GigaCache[K comparable, V Jsoner] struct {
+// GigaCache store key-value pairs with []byte, Binarier or Jsoner values.
+type GigaCache[K comparable, V any] struct {
 	kstr    bool
 	ksize   int
 	mask    uint64
@@ -80,7 +60,7 @@ type GigaCache[K comparable, V Jsoner] struct {
 }
 
 // bucket
-type bucket[K comparable, V Jsoner] struct {
+type bucket[K comparable, V any] struct {
 	idx    *hashmap.Map[K, Idx]
 	alloc  int64
 	mtimes int64
@@ -90,7 +70,7 @@ type bucket[K comparable, V Jsoner] struct {
 }
 
 // anyItem
-type anyItem[V Jsoner] struct {
+type anyItem[V any] struct {
 	V V
 	T int64
 }
@@ -101,15 +81,23 @@ func New[K comparable](shard ...int) *GigaCache[K, Null] {
 }
 
 // NewCustom returns new GigaCache instance with custom type.
-func NewCustom[K comparable, V Jsoner](shard ...int) *GigaCache[K, V] {
+func NewCustom[K comparable, V any](shard ...int) *GigaCache[K, V] {
 	return create[K, V](shard...)
 }
 
 // create is real new func.
-func create[K comparable, V Jsoner](shard ...int) *GigaCache[K, V] {
+func create[K comparable, V any](shard ...int) *GigaCache[K, V] {
 	num := defaultShardsCount
 	if len(shard) > 0 {
 		num = shard[0]
+	}
+
+	// type check
+	var v V
+	switch any(v).(type) {
+	case Binarier, Jsoner:
+	default:
+		panic("unsupported type: " + reflect.TypeOf(v).String())
 	}
 
 	cache := &GigaCache[K, V]{
@@ -118,7 +106,7 @@ func create[K comparable, V Jsoner](shard ...int) *GigaCache[K, V] {
 	}
 
 	var k K
-	switch ((interface{})(k)).(type) {
+	switch any(k).(type) {
 	case string:
 		cache.kstr = true
 	default:
@@ -459,7 +447,7 @@ func (b *bucket[K, V]) migrate() {
 }
 
 // CacheJSON
-type CacheJSON[K comparable, V Jsoner] struct {
+type CacheJSON[K comparable] struct {
 	K []K
 	V [][]byte
 	T []int64
@@ -468,7 +456,7 @@ type CacheJSON[K comparable, V Jsoner] struct {
 
 // MarshalBinary
 func (c *GigaCache[K, V]) MarshalBinary() ([]byte, error) {
-	var data CacheJSON[K, V]
+	var data CacheJSON[K]
 	var bitIndex uint32
 
 	for _, b := range c.buckets {
@@ -492,14 +480,26 @@ func (c *GigaCache[K, V]) MarshalBinary() ([]byte, error) {
 			case []byte:
 				data.V = append(data.V, v)
 
-			case Jsoner:
-				bytes, err := v.MarshalJSON()
+			case Binarier:
+				b, err := v.MarshalBinary()
 				if err != nil {
 					return false
 				}
 				// add means bitIndex is any.
 				data.A.Add(bitIndex)
-				data.V = append(data.V, bytes)
+				data.V = append(data.V, b)
+
+			case Jsoner:
+				b, err := v.MarshalJSON()
+				if err != nil {
+					return false
+				}
+				// add means bitIndex is any.
+				data.A.Add(bitIndex)
+				data.V = append(data.V, b)
+
+			default:
+				panic("unsupported type: " + reflect.TypeOf(v).String())
 			}
 
 			return true
@@ -521,7 +521,7 @@ func (c *GigaCache[K, V]) MarshalBinary() ([]byte, error) {
 
 // UnmarshalBinary
 func (c *GigaCache[K, V]) UnmarshalBinary(src []byte) error {
-	var data CacheJSON[K, V]
+	var data CacheJSON[K]
 	gob.Register(data)
 
 	// decode
@@ -533,10 +533,24 @@ func (c *GigaCache[K, V]) UnmarshalBinary(src []byte) error {
 		// is any
 		if data.A.ContainsInt(i + 1) {
 			var v V
-			if err := v.UnmarshalJSON(data.V[i]); err != nil {
-				return err
+			switch v := any(v).(type) {
+			// Binarier
+			case Binarier:
+				if err := v.UnmarshalBinary(data.V[i]); err != nil {
+					return err
+				}
+				c.SetTx(k, v, data.T[i]*timeCarry)
+
+			// Jsoner
+			case Jsoner:
+				if err := v.UnmarshalJSON(data.V[i]); err != nil {
+					return err
+				}
+				c.SetTx(k, v, data.T[i]*timeCarry)
+
+			default:
+				panic("unsupported type: " + reflect.TypeOf(v).String())
 			}
-			c.SetTx(k, v, data.T[i]*timeCarry)
 
 		} else {
 			c.SetTx(k, data.V[i], data.T[i]*timeCarry)
