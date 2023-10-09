@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/binary"
+	"errors"
 	"reflect"
 	"slices"
 	"sync"
@@ -10,7 +11,6 @@ import (
 
 	"golang.org/x/exp/rand"
 
-	"github.com/bits-and-blooms/bitset"
 	"github.com/bytedance/sonic"
 	"github.com/tidwall/hashmap"
 	"github.com/zeebo/xxh3"
@@ -20,7 +20,8 @@ const (
 	noTTL = 0
 
 	// for ttl
-	ttlBytes = 8
+	ttlBytes  = 8
+	timeCarry = 1e9
 
 	defaultShardsCount = 1024
 	bufferSize         = 1024
@@ -61,7 +62,10 @@ func (n Null) MarshalJSON() ([]byte, error) {
 	return []byte{}, nil
 }
 
-func (n Null) UnmarshalJSON([]byte) error {
+func (n Null) UnmarshalJSON(b []byte) error {
+	if len(b) != 0 {
+		return errors.New("bytes not null")
+	}
 	return nil
 }
 
@@ -90,25 +94,25 @@ type anyItem[V Marshaler] struct {
 }
 
 // New returns new GigaCache instance.
-func New[K comparable](shardCount ...int) *GigaCache[K, Null] {
-	return create[K, Null](shardCount...)
+func New[K comparable](shard ...int) *GigaCache[K, Null] {
+	return create[K, Null](shard...)
 }
 
 // NewCustom returns new GigaCache instance with custom type.
-func NewCustom[K comparable, V Marshaler](shardCount ...int) *GigaCache[K, V] {
-	return create[K, V](shardCount...)
+func NewCustom[K comparable, V Marshaler](shard ...int) *GigaCache[K, V] {
+	return create[K, V](shard...)
 }
 
 // create is real new func.
-func create[K comparable, V Marshaler](shardCount ...int) *GigaCache[K, V] {
-	var shards = defaultShardsCount
-	if len(shardCount) > 0 {
-		shards = shardCount[0]
+func create[K comparable, V Marshaler](shard ...int) *GigaCache[K, V] {
+	num := defaultShardsCount
+	if len(shard) > 0 {
+		num = shard[0]
 	}
 
 	cache := &GigaCache[K, V]{
-		mask:    uint64(shards - 1),
-		buckets: make([]*bucket[K, V], shards),
+		mask:    uint64(num - 1),
+		buckets: make([]*bucket[K, V], num),
 	}
 
 	var k K
@@ -454,10 +458,10 @@ func (b *bucket[K, V]) migrate() {
 
 // CacheJSON
 type CacheJSON[K comparable, V Marshaler] struct {
-	K    []K
-	V    [][]byte
-	T    []int64
-	Type *bitset.BitSet
+	K []K
+	V [][]byte
+	T []int64
+	A []byte // type
 }
 
 // MarshalJSON
@@ -473,26 +477,24 @@ func (c *GigaCache[K, V]) MarshalJSON() ([]byte, error) {
 			data.K = make([]K, 0, n)
 			data.V = make([][]byte, 0, n)
 			data.T = make([]int64, 0, n)
-			data.Type = bitset.New(uint(n))
+			data.A = make([]byte, 0, n)
 		}
 
-		var bits uint
 		b.scan(func(k K, a any, i int64) bool {
-			bits++
 			data.K = append(data.K, k)
-			data.T = append(data.T, i)
+			data.T = append(data.T, i/timeCarry) // ns -> s
 
 			switch v := a.(type) {
 			case []byte:
 				data.V = append(data.V, v)
+				data.A = append(data.A, 0)
 
 			case Marshaler:
 				bytes, err := v.MarshalJSON()
 				if err != nil {
 					return false
 				}
-				// bit set means this data type is any.
-				data.Type.Set(bits)
+				data.A = append(data.A, 1)
 				data.V = append(data.V, bytes)
 			}
 
@@ -512,18 +514,17 @@ func (c *GigaCache[K, V]) UnmarshalJSON(src []byte) error {
 		return err
 	}
 
-	for i, k := range data.K {
-		isAny := data.Type.Test(uint(i) + 1)
-		// is any
-		if isAny {
+	for i, _type := range data.A {
+		switch _type {
+		case 0:
+			c.SetTx(data.K[i], data.V[i], data.T[i]*timeCarry)
+
+		case 1:
 			var v V
 			if err := v.UnmarshalJSON(data.V[i]); err != nil {
 				return err
 			}
-			c.SetTx(k, v, data.T[i])
-
-		} else {
-			c.SetTx(k, data.V[i], data.T[i])
+			c.SetTx(data.K[i], v, data.T[i]*timeCarry)
 		}
 	}
 

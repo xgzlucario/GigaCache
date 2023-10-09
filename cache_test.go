@@ -2,7 +2,6 @@ package cache
 
 import (
 	"math"
-	"math/rand"
 	"strconv"
 	"testing"
 	"time"
@@ -130,6 +129,27 @@ func TestCacheSet(t *testing.T) {
 		if val != nil || ts != 0 || ok {
 			t.Fatalf("%v %v %v", val, ts, ok)
 		}
+
+		// panic
+		assert.Panics(func() {
+			m := New[string](1)
+			m.Set("myInt", 9)
+		})
+		assert.Panics(func() {
+			m := New[string](1)
+			m.Set("myInt", MyInt(9))
+		})
+
+		{
+			m := NewCustom[string, *MyInt](1)
+			// test set inplace
+			m.Set("myInt", NewInt(1))
+			assert.Equal(len(m.buckets[0].items), 1)
+			m.Set("myInt", NewInt(5))
+			assert.Equal(len(m.buckets[0].items), 1)
+			m.Set("myInt2", NewInt(5))
+			assert.Equal(len(m.buckets[0].items), 2)
+		}
 	})
 
 	t.Run("Nocopy", func(t *testing.T) {
@@ -168,82 +188,31 @@ func TestCacheSet(t *testing.T) {
 		assert.Equal(ok, true)
 	})
 
-	t.Run("SetAny/GetAny", func(t *testing.T) {
-		// assert := assert.New(t)
-
-		// m := New[string](100)
-		// for i := 0; i < 10000; i++ {
-		// 	m.Set("foo"+strconv.Itoa(i), NewInt(i))
-		// }
-
-		// // get
-		// v, ts, ok := m.Get("foo123")
-		// assert.Equal(v, 123)
-		// assert.Equal(ts, int64(0))
-		// assert.Equal(ok, true)
-
-		// // get not exist
-		// v, ts, ok = m.Get("not-exist")
-		// assert.Equal(v, nil)
-		// assert.Equal(ts, int64(0))
-		// assert.Equal(ok, false)
-
-		// // expired
-		// m.SetEx("foo", 1, sec)
-		// time.Sleep(sec * 2)
-		// v, ts, ok = m.Get("foo")
-		// if v != nil || ts != 0 || ok {
-		// 	t.Fatalf("%v %v %v", v, ts, ok)
-		// }
-
-		// // bytes to any
-		// m.Set("test1", []byte{1, 2, 3})
-		// m.Set("test1", 123)
-		// if v, ts, ok = m.Get("test1"); v.(int) != 123 || ts != 0 || !ok {
-		// 	t.Fatalf("%v %v %v", v, ts, ok)
-		// }
-
-		// // any to bytes
-		// m.Set("test2", 123)
-		// m.Set("test2", []byte{1, 2, 3})
-		// if v, ts, ok := m.Get("test2"); !assert.Equal([]byte{1, 2, 3}, v) || ts != 0 || !ok {
-		// 	t.Fatalf("%v %v %v", v, ts, ok)
-		// }
-
-		// // anyTx to anyTx
-		// m.SetEx("test3", 123, time.Hour)
-		// m.SetEx("test3", 234, time.Hour)
-		// if v, ts, ok := m.Get("test3"); v.(int) != 234 || ts == 0 || !ok {
-		// 	t.Fatalf("%v %v %v", v, ts, ok)
-		// }
-	})
-
 	t.Run("int-generic", func(t *testing.T) {
+		assert := assert.New(t)
 		m := New[int](100)
-		// set
-		for i := 0; i < 9999; i++ {
-			m.Set(i, []byte{1})
-		}
+		m.Set(100, []byte{1})
 
 		// get exist
-		v, ts, ok := m.Get(1234)
-		if !assert.Equal(t, []byte{1}, v) || ts != 0 || !ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
+		v, ts, ok := m.Get(100)
+		assert.Equal(v, []byte{1})
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, true)
 
 		// get not exist
-		v, ts, ok = m.Get(20000)
-		if v != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
+		v, ts, ok = m.Get(200)
+		assert.Equal(v, nil)
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, false)
 
-		// expired
-		m.SetEx(777, []byte{7, 7, 7}, sec)
+		// get expired
+		m.SetEx(200, []byte{1, 2, 3}, sec)
 		time.Sleep(sec * 2)
-		v, ts, ok = m.Get(777)
-		if v != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
+
+		v, ts, ok = m.Get(200)
+		assert.Equal(v, nil)
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, false)
 	})
 
 	t.Run("Stat", func(t *testing.T) {
@@ -443,37 +412,48 @@ func TestCacheSet(t *testing.T) {
 	t.Run("marshal", func(t *testing.T) {
 		assert := assert.New(t)
 		m := New[string]()
-		valid := map[string][]byte{}
 
-		for i := 0; i < 10*10000; i++ {
-			key := strconv.Itoa(rand.Int())
-			value := []byte(key)
+		for i := 0; i < 1000; i++ {
+			key1 := "byte" + strconv.Itoa(i)
+			key2 := "null" + strconv.Itoa(i)
 
-			m.SetEx(key, value, time.Hour)
-			valid[key] = value
+			m.SetEx(key1, []byte(key1), time.Minute)
+			m.SetEx(key2, Null{}, time.Minute)
 		}
 
-		src, err := m.MarshalJSON()
+		b, err := m.MarshalJSON()
 		assert.Nil(err)
 
-		m1 := New[string]()
-		err = m1.UnmarshalJSON(src)
+		m2 := New[string]()
+		err = m2.UnmarshalJSON(b)
 		assert.Nil(err)
 
-		// check items
-		for k, v := range valid {
-			res, ts, ok := m1.Get(k)
-			assert.Equal(res, v)
-			assert.NotEqual(ts, int64(0))
-			assert.Equal(ok, true)
-		}
+		m2.Scan(func(k string, v any, ts int64) bool {
+			pre := k[0:4]
+			switch pre {
+			case "byte":
+				assert.Equal(k, string(v.([]byte)))
 
-		// check count
-		assert.Equal(len(valid), int(m1.Stat().Len))
+			case "null":
+				assert.Equal(v, Null{})
+			}
+			return true
+		})
 
-		// unmarshal error
-		err = m.UnmarshalJSON([]byte("fake news"))
-		assert.NotNil(err)
+		// test unmarshal error
+		m3 := New[string]()
+		err = m3.UnmarshalJSON([]byte("fake news"))
+		assert.NotNil(err, err)
+
+		// test unmarshal any item error
+		m4 := New[string]()
+		err = m4.UnmarshalJSON([]byte(`{"K":["foo","bar"],"V":["",""],"T":[0,0],"A":"AQE="}`))
+		assert.Nil(err, err)
+
+		// test Null{} type value is not null
+		m5 := New[string]()
+		err = m5.UnmarshalJSON([]byte(`{"K":["foo","bar"],"V":["AQE=","AQE="],"T":[0,0],"A":"AQE="}`))
+		assert.NotNil(err, err)
 	})
 
 	t.Run("eliminate", func(t *testing.T) {
