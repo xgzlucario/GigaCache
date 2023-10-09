@@ -236,8 +236,8 @@ func (b *bucket[K, V]) set(key K, val any, ts int64) {
 		}
 		b.alloc++
 
-	// if Jsoner
-	case Jsoner:
+	// others
+	case Binarier, Jsoner:
 		idx, exist := b.idx.Get(key)
 		// update inplace
 		if exist && idx.IsAny() {
