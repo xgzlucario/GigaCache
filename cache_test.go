@@ -18,26 +18,6 @@ var (
 	sec = time.Second / 20
 )
 
-type MyInt int64
-
-func NewInt(i int) *MyInt {
-	n := MyInt(i)
-	return &n
-}
-
-func (i *MyInt) MarshalJSON() ([]byte, error) {
-	return []byte(strconv.FormatInt(int64(*i), 10)), nil
-}
-
-func (i *MyInt) UnmarshalJSON(b []byte) error {
-	n, err := strconv.ParseInt(string(b), 10, 64)
-	if err != nil {
-		return err
-	}
-	*i = MyInt(n)
-	return nil
-}
-
 func TestCacheSet(t *testing.T) {
 	t.Run("Set/Get", func(t *testing.T) {
 		assert := assert.New(t)
@@ -130,24 +110,14 @@ func TestCacheSet(t *testing.T) {
 			t.Fatalf("%v %v %v", val, ts, ok)
 		}
 
-		// panic
-		assert.Panics(func() {
-			m := New[string](1)
-			m.Set("myInt", 9)
-		})
-		assert.Panics(func() {
-			m := New[string](1)
-			m.Set("myInt", MyInt(9))
-		})
-
 		{
-			m := NewCustom[string, *MyInt](1)
+			m := New[string](1)
 			// test set inplace
-			m.Set("myInt", NewInt(1))
+			m.Set("myInt", 1)
 			assert.Equal(len(m.buckets[0].items), 1)
-			m.Set("myInt", NewInt(5))
+			m.Set("myInt", 2)
 			assert.Equal(len(m.buckets[0].items), 1)
-			m.Set("myInt2", NewInt(5))
+			m.Set("myInt2", 3)
 			assert.Equal(len(m.buckets[0].items), 2)
 		}
 	})
@@ -193,9 +163,9 @@ func TestCacheSet(t *testing.T) {
 		m := New[int](100)
 		m.Set(100, []byte{1})
 
-		assert.Panics(func() {
-			NewCustom[string, int]()
-		})
+		// assert.Panics(func() {
+		// 	NewCustom[string, int]()
+		// })
 
 		// get exist
 		v, ts, ok := m.Get(100)
@@ -220,13 +190,13 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("Stat", func(t *testing.T) {
-		m := NewCustom[string, *MyInt](20)
+		m := New[string](20)
 		for i := 0; i < 600; i++ {
 			m.Set(strconv.Itoa(i), str)
 		}
 		for i := 0; i < 200; i++ {
-			m.Set(strconv.Itoa(i), NewInt(i))
-			m.Set("any"+strconv.Itoa(i), NewInt(i))
+			m.Set(strconv.Itoa(i), i)
+			m.Set("any"+strconv.Itoa(i), i)
 		}
 
 		s := m.Stat()
@@ -239,13 +209,13 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("Keys", func(t *testing.T) {
-		m := NewCustom[string, *MyInt](20)
+		m := New[string](20)
 		for i := 0; i < 200; i++ {
 			m.Set("noexp"+strconv.Itoa(i), str)
 			m.SetEx(strconv.Itoa(i), str, sec)
 		}
 		for i := 0; i < 200; i++ {
-			m.Set("any"+strconv.Itoa(i), NewInt(i))
+			m.Set("any"+strconv.Itoa(i), i)
 		}
 
 		keys := m.Keys()
@@ -288,7 +258,7 @@ func TestCacheSet(t *testing.T) {
 
 	t.Run("Scan", func(t *testing.T) {
 		assert := assert.New(t)
-		m := NewCustom[string, *MyInt](20)
+		m := New[string](20)
 
 		for i := 0; i < 5000; i++ {
 			m.Set("a"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
@@ -297,10 +267,10 @@ func TestCacheSet(t *testing.T) {
 			m.SetEx("b"+strconv.Itoa(i), []byte(strconv.Itoa(i)), sec)
 		}
 		for i := 0; i < 5000; i++ {
-			m.Set("c"+strconv.Itoa(i), NewInt(i))
+			m.Set("c"+strconv.Itoa(i), i)
 		}
 		for i := 0; i < 5000; i++ {
-			m.SetEx("d"+strconv.Itoa(i), NewInt(i), sec)
+			m.SetEx("d"+strconv.Itoa(i), i, sec)
 		}
 
 		m.Scan(func(k string, a any, i int64) bool {
@@ -314,11 +284,11 @@ func TestCacheSet(t *testing.T) {
 
 			case 'c':
 				n, _ := strconv.Atoi(id)
-				assert.Equal(a, NewInt(n))
+				assert.Equal(a, n)
 
 			case 'd':
 				n, _ := strconv.Atoi(id)
-				assert.Equal(a, NewInt(n))
+				assert.Equal(a, n)
 			}
 			return true
 		})
@@ -333,7 +303,7 @@ func TestCacheSet(t *testing.T) {
 
 			case 'c':
 				n, _ := strconv.Atoi(id)
-				assert.Equal(a, NewInt(n))
+				assert.Equal(a, n)
 
 			case 'b', 'd':
 				t.Fatalf("want expired, got %v", a)
@@ -373,7 +343,7 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("Migrate", func(t *testing.T) {
-		m := NewCustom[string, *MyInt]()
+		m := New[string]()
 		m.buckets[0].eliminate()
 
 		for i := 0; i < 100; i++ {
@@ -383,10 +353,10 @@ func TestCacheSet(t *testing.T) {
 			m.SetEx("expired"+strconv.Itoa(i), []byte{1, 2, 3}, sec)
 		}
 		for i := 0; i < 300; i++ {
-			m.Set("noexpired-any"+strconv.Itoa(i), NewInt(i))
+			m.Set("noexpired-any"+strconv.Itoa(i), i)
 		}
 		for i := 0; i < 400; i++ {
-			m.SetEx("expired-any"+strconv.Itoa(i), NewInt(123), sec)
+			m.SetEx("expired-any"+strconv.Itoa(i), 123, sec)
 		}
 
 		// check
@@ -414,86 +384,51 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("marshal", func(t *testing.T) {
-		assert := assert.New(t)
 		m := New[string]()
+		valid := map[string][]byte{}
 
-		for i := 0; i < 1000; i++ {
-			key1 := "byte" + strconv.Itoa(i)
-			key2 := "null" + strconv.Itoa(i)
+		for i := 0; i < 10000; i++ {
+			key := strconv.Itoa(i)
+			value := []byte(key)
 
-			m.SetEx(key1, []byte(key1), time.Minute)
-			m.SetEx(key2, Null{}, time.Minute)
-
+			m.SetEx(key, value, time.Hour)
+			valid[key] = value
 		}
 
-		b, err := m.MarshalBinary()
-		assert.Nil(err)
-
-		m2 := New[string]()
-		err = m2.UnmarshalBinary(b)
-		assert.Nil(err)
-
-		m2.Scan(func(k string, v any, ts int64) bool {
-			pre := k[0:4]
-			switch pre {
-			case "byte":
-				assert.Equal(k, string(v.([]byte)))
-
-			case "null":
-				assert.Equal(v, Null{})
-			}
-			return true
-		})
-
-		// test unmarshal error
-		m3 := New[string]()
-		err = m3.UnmarshalBinary([]byte("fake news"))
-		assert.NotNil(err, err)
-
-		var n Null
-		assert.NotNil(n.UnmarshalBinary([]byte("fake")))
-
-		var nj nullJsoner
-		assert.NotNil(nj.UnmarshalJSON([]byte("fake")))
-	})
-
-	t.Run("marshal-jsoner", func(t *testing.T) {
-		assert := assert.New(t)
-		m := NewCustom[string, nullJsoner]()
-
-		for i := 0; i < 1000; i++ {
-			key1 := "byte" + strconv.Itoa(i)
-			key2 := "null" + strconv.Itoa(i)
-
-			m.SetEx(key1, []byte(key1), time.Minute)
-			m.SetEx(key2, nullJsoner{}, time.Minute)
-
+		src, err := m.MarshalBinary()
+		if err != nil {
+			t.Fatalf("error: %v", err)
 		}
 
-		b, err := m.MarshalBinary()
-		assert.Nil(err)
+		m1 := New[string]()
+		if err := m1.UnmarshalBinary(src); err != nil {
+			t.Fatalf("error: %v", err)
+		}
 
-		m2 := NewCustom[string, nullJsoner]()
-		err = m2.UnmarshalBinary(b)
-		assert.Nil(err)
-
-		m2.Scan(func(k string, v any, ts int64) bool {
-			pre := k[0:4]
-			switch pre {
-			case "byte":
-				assert.Equal(k, string(v.([]byte)))
-
-			case "null":
-				assert.Equal(v, nullJsoner{})
+		// check items
+		for k, v := range valid {
+			res, ts, ok := m1.Get(k)
+			if !assert.Equal(t, res, v) || ts == 0 || !ok {
+				t.Fatalf("error: %v %v %v", res, ts, ok)
 			}
-			return true
-		})
+		}
+
+		// check count
+		if len(valid) != int(m.Stat().Len) {
+			t.Fatalf("error: %v", m.Stat())
+		}
+
+		// unmarshal error
+		err = m.UnmarshalBinary([]byte("fake news"))
+		if err == nil {
+			t.Fatalf("error: %v", err)
+		}
 	})
 
 	t.Run("eliminate", func(t *testing.T) {
-		m := NewCustom[string, *MyInt](100)
+		m := New[string](100)
 		for i := 0; i < 3000; i++ {
-			m.SetEx(strconv.Itoa(i), NewInt(i), sec)
+			m.SetEx(strconv.Itoa(i), i, sec)
 		}
 		for i := 0; i < 3000; i++ {
 			m.SetEx("t"+strconv.Itoa(i), []byte{1}, sec)
