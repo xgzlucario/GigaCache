@@ -8,7 +8,6 @@ import (
 
 	"golang.org/x/exp/rand"
 
-	"net/http"
 	_ "net/http/pprof"
 
 	cache "github.com/xgzlucario/GigaCache"
@@ -35,8 +34,6 @@ import (
 */
 
 func main() {
-	go http.ListenAndServe("localhost:6060", nil)
-
 	start := time.Now()
 	pset := cache.NewPercentile()
 
@@ -106,7 +103,7 @@ func main() {
 		for {
 			time.Sleep(time.Second * 8)
 			a := time.Now()
-			bc.MarshalJSON()
+			bc.MarshalBinary()
 			fmt.Println("Marshal cost:", time.Since(a))
 		}
 	}()

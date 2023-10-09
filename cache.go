@@ -1,7 +1,9 @@
 package cache
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/gob"
 	"errors"
 	"reflect"
 	"slices"
@@ -11,7 +13,7 @@ import (
 
 	"golang.org/x/exp/rand"
 
-	"github.com/bytedance/sonic"
+	"github.com/RoaringBitmap/roaring"
 	"github.com/tidwall/hashmap"
 	"github.com/zeebo/xxh3"
 )
@@ -50,8 +52,8 @@ var (
 	source = rand.NewSource(uint64(time.Now().UnixNano()))
 )
 
-// Marshaler
-type Marshaler interface {
+// Jsoner
+type Jsoner interface {
 	MarshalJSON() ([]byte, error)
 	UnmarshalJSON([]byte) error
 }
@@ -70,7 +72,7 @@ func (n Null) UnmarshalJSON(b []byte) error {
 }
 
 // GigaCache
-type GigaCache[K comparable, V Marshaler] struct {
+type GigaCache[K comparable, V Jsoner] struct {
 	kstr    bool
 	ksize   int
 	mask    uint64
@@ -78,7 +80,7 @@ type GigaCache[K comparable, V Marshaler] struct {
 }
 
 // bucket
-type bucket[K comparable, V Marshaler] struct {
+type bucket[K comparable, V Jsoner] struct {
 	idx    *hashmap.Map[K, Idx]
 	alloc  int64
 	mtimes int64
@@ -88,7 +90,7 @@ type bucket[K comparable, V Marshaler] struct {
 }
 
 // anyItem
-type anyItem[V Marshaler] struct {
+type anyItem[V Jsoner] struct {
 	V V
 	T int64
 }
@@ -99,12 +101,12 @@ func New[K comparable](shard ...int) *GigaCache[K, Null] {
 }
 
 // NewCustom returns new GigaCache instance with custom type.
-func NewCustom[K comparable, V Marshaler](shard ...int) *GigaCache[K, V] {
+func NewCustom[K comparable, V Jsoner](shard ...int) *GigaCache[K, V] {
 	return create[K, V](shard...)
 }
 
 // create is real new func.
-func create[K comparable, V Marshaler](shard ...int) *GigaCache[K, V] {
+func create[K comparable, V Jsoner](shard ...int) *GigaCache[K, V] {
 	num := defaultShardsCount
 	if len(shard) > 0 {
 		num = shard[0]
@@ -246,8 +248,8 @@ func (b *bucket[K, V]) set(key K, val any, ts int64) {
 		}
 		b.alloc++
 
-	// if Marshaler
-	case Marshaler:
+	// if Jsoner
+	case Jsoner:
 		idx, exist := b.idx.Get(key)
 		// update inplace
 		if exist && idx.IsAny() {
@@ -457,16 +459,17 @@ func (b *bucket[K, V]) migrate() {
 }
 
 // CacheJSON
-type CacheJSON[K comparable, V Marshaler] struct {
+type CacheJSON[K comparable, V Jsoner] struct {
 	K []K
 	V [][]byte
 	T []int64
-	A []byte // type
+	A *roaring.Bitmap
 }
 
-// MarshalJSON
-func (c *GigaCache[K, V]) MarshalJSON() ([]byte, error) {
+// MarshalBinary
+func (c *GigaCache[K, V]) MarshalBinary() ([]byte, error) {
 	var data CacheJSON[K, V]
+	var bitIndex uint32
 
 	for _, b := range c.buckets {
 		b.RLock()
@@ -477,24 +480,25 @@ func (c *GigaCache[K, V]) MarshalJSON() ([]byte, error) {
 			data.K = make([]K, 0, n)
 			data.V = make([][]byte, 0, n)
 			data.T = make([]int64, 0, n)
-			data.A = make([]byte, 0, n)
+			data.A = roaring.New()
 		}
 
 		b.scan(func(k K, a any, i int64) bool {
+			bitIndex++
 			data.K = append(data.K, k)
 			data.T = append(data.T, i/timeCarry) // ns -> s
 
 			switch v := a.(type) {
 			case []byte:
 				data.V = append(data.V, v)
-				data.A = append(data.A, 0)
 
-			case Marshaler:
+			case Jsoner:
 				bytes, err := v.MarshalJSON()
 				if err != nil {
 					return false
 				}
-				data.A = append(data.A, 1)
+				// add means bitIndex is any.
+				data.A.Add(bitIndex)
 				data.V = append(data.V, bytes)
 			}
 
@@ -504,27 +508,38 @@ func (c *GigaCache[K, V]) MarshalJSON() ([]byte, error) {
 		b.RUnlock()
 	}
 
-	return sonic.Marshal(data)
+	gob.Register(data)
+
+	// encode
+	buf := bytes.NewBuffer(nil)
+	if err := gob.NewEncoder(buf).Encode(data); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
 
-// UnmarshalJSON
-func (c *GigaCache[K, V]) UnmarshalJSON(src []byte) error {
+// UnmarshalBinary
+func (c *GigaCache[K, V]) UnmarshalBinary(src []byte) error {
 	var data CacheJSON[K, V]
-	if err := sonic.Unmarshal(src, &data); err != nil {
+	gob.Register(data)
+
+	// decode
+	if err := gob.NewDecoder(bytes.NewBuffer(src)).Decode(&data); err != nil {
 		return err
 	}
 
-	for i, _type := range data.A {
-		switch _type {
-		case 0:
-			c.SetTx(data.K[i], data.V[i], data.T[i]*timeCarry)
-
-		case 1:
+	for i, k := range data.K {
+		// is any
+		if data.A.ContainsInt(i + 1) {
 			var v V
 			if err := v.UnmarshalJSON(data.V[i]); err != nil {
 				return err
 			}
-			c.SetTx(data.K[i], v, data.T[i]*timeCarry)
+			c.SetTx(k, v, data.T[i]*timeCarry)
+
+		} else {
+			c.SetTx(k, data.V[i], data.T[i]*timeCarry)
 		}
 	}
 

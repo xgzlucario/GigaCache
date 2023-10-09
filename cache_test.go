@@ -421,11 +421,11 @@ func TestCacheSet(t *testing.T) {
 			m.SetEx(key2, Null{}, time.Minute)
 		}
 
-		b, err := m.MarshalJSON()
+		b, err := m.MarshalBinary()
 		assert.Nil(err)
 
 		m2 := New[string]()
-		err = m2.UnmarshalJSON(b)
+		err = m2.UnmarshalBinary(b)
 		assert.Nil(err)
 
 		m2.Scan(func(k string, v any, ts int64) bool {
@@ -442,17 +442,7 @@ func TestCacheSet(t *testing.T) {
 
 		// test unmarshal error
 		m3 := New[string]()
-		err = m3.UnmarshalJSON([]byte("fake news"))
-		assert.NotNil(err, err)
-
-		// test unmarshal any item error
-		m4 := New[string]()
-		err = m4.UnmarshalJSON([]byte(`{"K":["foo","bar"],"V":["",""],"T":[0,0],"A":"AQE="}`))
-		assert.Nil(err, err)
-
-		// test Null{} type value is not null
-		m5 := New[string]()
-		err = m5.UnmarshalJSON([]byte(`{"K":["foo","bar"],"V":["AQE=","AQE="],"T":[0,0],"A":"AQE="}`))
+		err = m3.UnmarshalBinary([]byte("fake news"))
 		assert.NotNil(err, err)
 	})
 
