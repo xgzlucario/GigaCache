@@ -8,44 +8,40 @@ import (
 
 	"golang.org/x/exp/rand"
 
-	"net/http"
 	_ "net/http/pprof"
 
 	cache "github.com/xgzlucario/GigaCache"
 )
 
 /*
-	1024
-	[Cache] 101s / 41927w | len: 535w | alloc: 691w | bytes: 12490w | rate: 77.9% | mtime: 84438
-	[Mem] mem: 925MB | sys: 1251MB | object: 1662w | gc: 109 | gcpause: 238 us
+	5sec 1024
+	[Cache] 201s / 70665w | len: 2284w | alloc: 2894w | bytes: 52827w | rate: 77.6% | mtime: 33098
+	[Mem] mem: 3659MB | sys: 6103MB | gc: 59 | gcpause: 236 us
 	[Latency]
-	avg: 1.04 | min: 0.08 | p50: 0.38 | p95: 1.85 | p99: 3.47 | max: 2351.58
+	avg: 1.50 | min: 0.09 | p50: 0.40 | p95: 1.87 | p99: 3.34 | max: 2992.52
 
-	2048
-	[Cache] 101s / 43006w | len: 569w | alloc: 730w | bytes: 12847w | rate: 78.0% | mtime: 169595
-	[Mem] mem: 778MB | sys: 1173MB | object: 1304w | gc: 114 | gcpause: 257 us
+	5sec 2048
+	[Cache] 201s / 74424w | len: 2384w | alloc: 3056w | bytes: 55520w | rate: 77.4% | mtime: 66862
+	[Mem] mem: 4367MB | sys: 5080MB | gc: 60 | gcpause: 262 us
 	[Latency]
-	avg: 0.85 | min: 0.08 | p50: 0.37 | p95: 1.65 | p99: 2.99 | max: 638.79
+	avg: 1.23 | min: 0.08 | p50: 0.44 | p95: 1.99 | p99: 3.56 | max: 2692.78
 
-	4096
-	[Cache] 101s / 46147w | len: 616w | alloc: 794w | bytes: 13859w | rate: 77.9% | mtime: 343968
-	[Mem] mem: 1060MB | sys: 1261MB | object: 2204w | gc: 112 | gcpause: 248 us
+	5sec 4096
+	[Cache] 201s / 77253w | len: 2477w | alloc: 3096w | bytes: 56733w | rate: 78.2% | mtime: 134800
+	[Mem] mem: 2637MB | sys: 5206MB | gc: 61 | gcpause: 258 us
 	[Latency]
-	avg: 0.77 | min: 0.08 | p50: 0.40 | p95: 1.65 | p99: 2.90 | max: 397.24
+	avg: 1.03 | min: 0.09 | p50: 0.49 | p95: 2.05 | p99: 3.72 | max: 2133.35
 */
 
 func main() {
-	go http.ListenAndServe("localhost:6060", nil)
-
 	start := time.Now()
-
 	pset := cache.NewPercentile()
 
 	var count int64
 	var avgRate, avgBytes, avgTime float64
 	var memStats runtime.MemStats
 
-	bc := cache.New[string](4096)
+	bc := cache.New[string]()
 
 	// Stat
 	go func() {
@@ -72,11 +68,9 @@ func main() {
 
 				// mem stats
 				runtime.ReadMemStats(&memStats)
-
-				fmt.Printf("[Mem] mem: %.0fMB | sys: %.0fMB | object: %.0fw | gc: %d | gcpause: %.0f us\n",
+				fmt.Printf("[Mem] mem: %.0fMB | sys: %.0fMB | gc: %d | gcpause: %.0f us\n",
 					float64(memStats.Alloc)/1024/1024,
 					float64(memStats.Sys)/1024/1024,
-					float64(memStats.HeapObjects)/1e4,
 					memStats.NumGC,
 					float64(memStats.PauseTotalNs)/float64(memStats.NumGC)/1000)
 
@@ -96,13 +90,23 @@ func main() {
 				k := strconv.Itoa(int(rand.Uint32()))
 				now := time.Now()
 
-				bc.SetEx(k, []byte(k), time.Second)
+				bc.SetEx(k, []byte(k), time.Second*5)
 				count++
 
 				pset.Add(float64(time.Since(now)) / float64(time.Microsecond))
 			}
 		}()
 	}
+
+	// Marshal test
+	go func() {
+		for {
+			time.Sleep(time.Second * 8)
+			a := time.Now()
+			bc.MarshalBytes()
+			fmt.Println("Marshal cost:", time.Since(a))
+		}
+	}()
 
 	select {}
 }

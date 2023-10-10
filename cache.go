@@ -1,7 +1,9 @@
 package cache
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/gob"
 	"slices"
 	"sync"
 	"time"
@@ -9,7 +11,6 @@ import (
 
 	"golang.org/x/exp/rand"
 
-	"github.com/bytedance/sonic"
 	"github.com/tidwall/hashmap"
 	"github.com/zeebo/xxh3"
 )
@@ -18,7 +19,8 @@ const (
 	noTTL = 0
 
 	// for ttl
-	ttlBytes = 8
+	ttlBytes  = 8
+	timeCarry = 1e9
 
 	defaultShardsCount = 1024
 	bufferSize         = 1024
@@ -47,7 +49,7 @@ var (
 	source = rand.NewSource(uint64(time.Now().UnixNano()))
 )
 
-// GigaCache
+// GigaCache return a new GigaCache instance.
 type GigaCache[K comparable] struct {
 	kstr    bool
 	ksize   int
@@ -61,30 +63,30 @@ type bucket[K comparable] struct {
 	alloc  int64
 	mtimes int64
 	bytes  []byte
-	anyArr []*anyItem
+	items  []*item
 	sync.RWMutex
 }
 
-// anyItem
-type anyItem struct {
+// item
+type item struct {
 	V any
 	T int64
 }
 
-// New returns a new GigaCache instance.
-func New[K comparable](shardCount ...int) *GigaCache[K] {
-	var shards = defaultShardsCount
-	if len(shardCount) > 0 {
-		shards = shardCount[0]
+// New returns new GigaCache instance.
+func New[K comparable](shard ...int) *GigaCache[K] {
+	num := defaultShardsCount
+	if len(shard) > 0 {
+		num = shard[0]
 	}
 
 	cache := &GigaCache[K]{
-		mask:    uint64(shards - 1),
-		buckets: make([]*bucket[K], shards),
+		mask:    uint64(num - 1),
+		buckets: make([]*bucket[K], num),
 	}
 
 	var k K
-	switch ((interface{})(k)).(type) {
+	switch any(k).(type) {
 	case string:
 		cache.kstr = true
 	default:
@@ -93,9 +95,9 @@ func New[K comparable](shardCount ...int) *GigaCache[K] {
 
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket[K]{
-			idx:    hashmap.New[K, Idx](0),
-			bytes:  bpool.Get(),
-			anyArr: make([]*anyItem, 0),
+			idx:   hashmap.New[K, Idx](0),
+			bytes: bpool.Get(),
+			items: make([]*item, 0),
 		}
 	}
 
@@ -125,7 +127,7 @@ func (c *GigaCache[K]) getShard(key K) *bucket[K] {
 // get returns nocopy value.
 func (b *bucket[K]) get(idx Idx, nocopy ...bool) (any, int64, bool) {
 	if idx.IsAny() {
-		n := b.anyArr[idx.start()]
+		n := b.items[idx.start()]
 
 		if idx.hasTTL() {
 			if n.T > clock {
@@ -219,13 +221,13 @@ func (b *bucket[K]) set(key K, val any, ts int64) {
 		// update inplace
 		if exist && idx.IsAny() {
 			start := idx.start()
-			b.anyArr[start].T = ts
-			b.anyArr[start].V = val
+			b.items[start].T = ts
+			b.items[start].V = val
 			b.idx.Set(key, newIdx(start, 0, hasTTL, true))
 
 		} else {
-			b.idx.Set(key, newIdx(len(b.anyArr), 0, hasTTL, true))
-			b.anyArr = append(b.anyArr, &anyItem{V: val, T: ts})
+			b.idx.Set(key, newIdx(len(b.items), 0, hasTTL, true))
+			b.items = append(b.items, &item{V: val, T: ts})
 			b.alloc++
 		}
 	}
@@ -355,7 +357,7 @@ func (b *bucket[K]) eliminate() {
 		}
 
 		if idx.IsAny() {
-			ttl = b.anyArr[idx.start()].T
+			ttl = b.items[idx.start()].T
 
 		} else {
 			end := idx.start() + idx.offset()
@@ -400,10 +402,9 @@ func (c *GigaCache[K]) Migrate() {
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket[K]) migrate() {
 	newBucket := &bucket[K]{
-		idx:    hashmap.New[K, Idx](b.idx.Len()),
-		bytes:  bpool.Get(),
-		anyArr: make([]*anyItem, 0),
-		mtimes: b.mtimes + 1,
+		idx:   hashmap.New[K, Idx](b.idx.Len()),
+		bytes: bpool.Get(),
+		items: make([]*item, 0),
 	}
 
 	b.scan(func(key K, val any, ts int64) bool {
@@ -415,69 +416,67 @@ func (b *bucket[K]) migrate() {
 	bpool.Put(b.bytes)
 
 	b.bytes = newBucket.bytes
-	b.anyArr = newBucket.anyArr
+	b.items = newBucket.items
 	b.idx = newBucket.idx
-	b.mtimes = newBucket.mtimes
 	b.alloc = newBucket.alloc
+	b.mtimes++
 }
 
-type bucketJSON[K comparable] struct {
-	C    int64
-	K    []K
-	I, B []byte
+// cacheJSON
+type cacheJSON[K comparable] struct {
+	K []K
+	V [][]byte
+	T []int64
 }
 
-// MarshalBytes only marshal bytes data ignore any data.
+// MarshalBytes
 func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
-	buckets := make([]*bucketJSON[K], 0, len(c.buckets))
+	var data cacheJSON[K]
+	gob.Register(data)
 
 	for _, b := range c.buckets {
 		b.RLock()
-		defer b.RUnlock()
 
-		k := make([]K, 0, b.idx.Len())
-		i := make([]byte, 0, b.idx.Len())
+		// init
+		if data.K == nil {
+			n := len(c.buckets) * b.idx.Len()
+			data.K = make([]K, 0, n)
+			data.V = make([][]byte, 0, n)
+			data.T = make([]int64, 0, n)
+		}
 
-		b.idx.Scan(func(key K, idx Idx) bool {
-			if !idx.IsAny() {
-				k = append(k, key)
-				i = order.AppendUint64(i, uint64(idx))
+		b.scan(func(k K, a any, i int64) bool {
+			// if bytes
+			if bytes, ok := a.([]byte); ok {
+				data.K = append(data.K, k)
+				data.V = append(data.V, bytes)
+				data.T = append(data.T, i/timeCarry) // ns -> s
 			}
 			return true
-		})
 
-		buckets = append(buckets, &bucketJSON[K]{
-			b.alloc, k, i, b.bytes,
-		})
+		}, true)
+
+		b.RUnlock()
 	}
 
-	return sonic.Marshal(buckets)
+	// encode
+	buf := bytes.NewBuffer(nil)
+	gob.NewEncoder(buf).Encode(data)
+
+	return buf.Bytes(), nil
 }
 
 // UnmarshalBytes
 func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
-	var buckets []*bucketJSON[K]
+	var data cacheJSON[K]
+	gob.Register(data)
 
-	if err := sonic.Unmarshal(src, &buckets); err != nil {
+	if err := gob.NewDecoder(bytes.NewBuffer(src)).Decode(&data); err != nil {
 		return err
 	}
 
-	c.buckets = make([]*bucket[K], 0, len(buckets))
-	for _, b := range buckets {
-		bc := &bucket[K]{
-			alloc:  b.C,
-			idx:    hashmap.New[K, Idx](len(b.K)),
-			bytes:  b.B,
-			anyArr: make([]*anyItem, 0),
-		}
-
-		// set key
-		for i, k := range b.K {
-			idx := order.Uint64(b.I[i*8 : (i+1)*8])
-			bc.idx.Set(k, Idx(idx))
-		}
-
-		c.buckets = append(c.buckets, bc)
+	for i, k := range data.K {
+		c.SetTx(k, data.V[i], data.T[i]*timeCarry)
 	}
 
 	return nil
@@ -499,7 +498,7 @@ func (c *GigaCache[K]) Stat() (s CacheStat) {
 		s.Len += uint64(b.idx.Len())
 		s.Alloc += uint64(b.alloc)
 		s.LenBytes += uint64(len(b.bytes))
-		s.LenAny += uint64(len(b.anyArr))
+		s.LenAny += uint64(len(b.items))
 		s.MigrateTimes += uint64(b.mtimes)
 		b.RUnlock()
 	}

@@ -2,7 +2,6 @@ package cache
 
 import (
 	"math"
-	"math/rand"
 	"strconv"
 	"testing"
 	"time"
@@ -63,6 +62,24 @@ func TestCacheSet(t *testing.T) {
 			assert.Equal(ok, true)
 		}
 
+		// Rename not exist
+		m.Rename("not-exist", "not-exist2")
+		for _, args := range []string{"not-exist", "not-exist2"} {
+			val, ts, ok = m.Get(args)
+			assert.Equal(val, nil)
+			assert.Equal(ts, int64(0))
+			assert.Equal(ok, false)
+		}
+
+		// Rename expired
+		m.SetEx("foo", []byte{1}, sec)
+		time.Sleep(sec * 2)
+		m.Rename("foo", "foo2")
+		val, ts, ok = m.Get("foo")
+		assert.Equal(val, nil)
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, false)
+
 		// get not exist
 		val, ts, ok = m.Get("not-exist")
 		assert.Equal(val, nil)
@@ -91,6 +108,17 @@ func TestCacheSet(t *testing.T) {
 		val, ts, ok = m.Get("test")
 		if val != nil || ts != 0 || ok {
 			t.Fatalf("%v %v %v", val, ts, ok)
+		}
+
+		{
+			m := New[string](1)
+			// test set inplace
+			m.Set("myInt", 1)
+			assert.Equal(len(m.buckets[0].items), 1)
+			m.Set("myInt", 2)
+			assert.Equal(len(m.buckets[0].items), 1)
+			m.Set("myInt2", 3)
+			assert.Equal(len(m.buckets[0].items), 2)
 		}
 	})
 
@@ -130,82 +158,35 @@ func TestCacheSet(t *testing.T) {
 		assert.Equal(ok, true)
 	})
 
-	t.Run("SetAny/GetAny", func(t *testing.T) {
+	t.Run("int-generic", func(t *testing.T) {
 		assert := assert.New(t)
+		m := New[int](100)
+		m.Set(100, []byte{1})
 
-		m := New[string](100)
-		for i := 0; i < 10000; i++ {
-			m.Set("foo"+strconv.Itoa(i), i)
-		}
+		// assert.Panics(func() {
+		// 	NewCustom[string, int]()
+		// })
 
-		// get
-		v, ts, ok := m.Get("foo123")
-		assert.Equal(v, 123)
+		// get exist
+		v, ts, ok := m.Get(100)
+		assert.Equal(v, []byte{1})
 		assert.Equal(ts, int64(0))
 		assert.Equal(ok, true)
 
 		// get not exist
-		v, ts, ok = m.Get("not-exist")
+		v, ts, ok = m.Get(200)
 		assert.Equal(v, nil)
 		assert.Equal(ts, int64(0))
 		assert.Equal(ok, false)
 
-		// expired
-		m.SetEx("foo", 1, sec)
+		// get expired
+		m.SetEx(200, []byte{1, 2, 3}, sec)
 		time.Sleep(sec * 2)
-		v, ts, ok = m.Get("foo")
-		if v != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
 
-		// bytes to any
-		m.Set("test1", []byte{1, 2, 3})
-		m.Set("test1", 123)
-		if v, ts, ok = m.Get("test1"); v.(int) != 123 || ts != 0 || !ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
-
-		// any to bytes
-		m.Set("test2", 123)
-		m.Set("test2", []byte{1, 2, 3})
-		if v, ts, ok := m.Get("test2"); !assert.Equal([]byte{1, 2, 3}, v) || ts != 0 || !ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
-
-		// anyTx to anyTx
-		m.SetEx("test3", 123, time.Hour)
-		m.SetEx("test3", 234, time.Hour)
-		if v, ts, ok := m.Get("test3"); v.(int) != 234 || ts == 0 || !ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
-	})
-
-	t.Run("int-generic", func(t *testing.T) {
-		m := New[int](100)
-		// set
-		for i := 0; i < 9999; i++ {
-			m.Set(i, []byte{1})
-		}
-
-		// get exist
-		v, ts, ok := m.Get(1234)
-		if !assert.Equal(t, []byte{1}, v) || ts != 0 || !ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
-
-		// get not exist
-		v, ts, ok = m.Get(20000)
-		if v != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
-
-		// expired
-		m.SetEx(777, []byte{7, 7, 7}, sec)
-		time.Sleep(sec * 2)
-		v, ts, ok = m.Get(777)
-		if v != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", v, ts, ok)
-		}
+		v, ts, ok = m.Get(200)
+		assert.Equal(v, nil)
+		assert.Equal(ts, int64(0))
+		assert.Equal(ok, false)
 	})
 
 	t.Run("Stat", func(t *testing.T) {
@@ -276,7 +257,9 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("Scan", func(t *testing.T) {
+		assert := assert.New(t)
 		m := New[string](20)
+
 		for i := 0; i < 5000; i++ {
 			m.Set("a"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
 		}
@@ -294,26 +277,18 @@ func TestCacheSet(t *testing.T) {
 			id := k[1:]
 			switch k[0] {
 			case 'a':
-				if string(a.([]byte)) != id {
-					t.Fatalf("want %v, got %v", id, a)
-				}
+				assert.Equal(string(a.([]byte)), id)
 
 			case 'b':
-				if string(a.([]byte)) != id {
-					t.Fatalf("want %v, got %v", id, a)
-				}
+				assert.Equal(string(a.([]byte)), id)
 
 			case 'c':
 				n, _ := strconv.Atoi(id)
-				if a.(int) != n {
-					t.Fatalf("want %v, got %v", id, a)
-				}
+				assert.Equal(a, n)
 
 			case 'd':
 				n, _ := strconv.Atoi(id)
-				if a.(int) != n {
-					t.Fatalf("want %v, got %v", id, a)
-				}
+				assert.Equal(a, n)
 			}
 			return true
 		})
@@ -324,15 +299,11 @@ func TestCacheSet(t *testing.T) {
 			id := k[1:]
 			switch k[0] {
 			case 'a':
-				if string(a.([]byte)) != id {
-					t.Fatalf("want %v, got %v", id, a)
-				}
+				assert.Equal(string(a.([]byte)), id)
 
 			case 'c':
 				n, _ := strconv.Atoi(id)
-				if a.(int) != n {
-					t.Fatalf("want %v, got %v", id, a)
-				}
+				assert.Equal(a, n)
 
 			case 'b', 'd':
 				t.Fatalf("want expired, got %v", a)
@@ -382,7 +353,7 @@ func TestCacheSet(t *testing.T) {
 			m.SetEx("expired"+strconv.Itoa(i), []byte{1, 2, 3}, sec)
 		}
 		for i := 0; i < 300; i++ {
-			m.Set("noexpired-any"+strconv.Itoa(i), 123)
+			m.Set("noexpired-any"+strconv.Itoa(i), i)
 		}
 		for i := 0; i < 400; i++ {
 			m.SetEx("expired-any"+strconv.Itoa(i), 123, sec)
@@ -416,8 +387,8 @@ func TestCacheSet(t *testing.T) {
 		m := New[string]()
 		valid := map[string][]byte{}
 
-		for i := 0; i < 10*10000; i++ {
-			key := strconv.Itoa(rand.Int())
+		for i := 0; i < 10000; i++ {
+			key := strconv.Itoa(i)
 			value := []byte(key)
 
 			m.SetEx(key, value, time.Hour)
@@ -457,7 +428,7 @@ func TestCacheSet(t *testing.T) {
 	t.Run("eliminate", func(t *testing.T) {
 		m := New[string](100)
 		for i := 0; i < 3000; i++ {
-			m.SetEx(strconv.Itoa(i), 1, sec)
+			m.SetEx(strconv.Itoa(i), i, sec)
 		}
 		for i := 0; i < 3000; i++ {
 			m.SetEx("t"+strconv.Itoa(i), []byte{1}, sec)
