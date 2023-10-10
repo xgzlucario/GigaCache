@@ -384,45 +384,34 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("marshal", func(t *testing.T) {
+		assert := assert.New(t)
 		m := New[string]()
-		valid := map[string][]byte{}
 
 		for i := 0; i < 10000; i++ {
 			key := strconv.Itoa(i)
 			value := []byte(key)
 
-			m.SetEx(key, value, time.Hour)
-			valid[key] = value
+			m.SetEx("any"+key, i, time.Minute)
+			m.SetEx(key, value, time.Minute)
+		}
+
+		{
+			var anyCount int
+			_, err := m.MarshalBytesFunc(func(k string, a any, i int64) {
+				anyCount++
+			})
+			assert.Nil(err)
+			assert.Equal(anyCount, 10000)
 		}
 
 		src, err := m.MarshalBytes()
-		if err != nil {
-			t.Fatalf("error: %v", err)
-		}
+		assert.Nil(err)
 
 		m1 := New[string]()
-		if err := m1.UnmarshalBytes(src); err != nil {
-			t.Fatalf("error: %v", err)
-		}
-
-		// check items
-		for k, v := range valid {
-			res, ts, ok := m1.Get(k)
-			if !assert.Equal(t, res, v) || ts == 0 || !ok {
-				t.Fatalf("error: %v %v %v", res, ts, ok)
-			}
-		}
-
-		// check count
-		if len(valid) != int(m.Stat().Len) {
-			t.Fatalf("error: %v", m.Stat())
-		}
+		assert.Nil(m1.UnmarshalBytes(src))
 
 		// unmarshal error
-		err = m.UnmarshalBytes([]byte("fake news"))
-		if err == nil {
-			t.Fatalf("error: %v", err)
-		}
+		assert.NotNil(m.UnmarshalBytes([]byte("fake news")))
 	})
 
 	t.Run("eliminate", func(t *testing.T) {

@@ -431,6 +431,12 @@ type cacheJSON[K comparable] struct {
 
 // MarshalBytes
 func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
+	return c.MarshalBytesFunc(nil)
+}
+
+// MarshalBytesFunc serializes all key-value pairs with a value of []byte,
+// and calls the callback function when value is any.
+func (c *GigaCache[K]) MarshalBytesFunc(callbackAny func(K, any, int64)) ([]byte, error) {
 	var data cacheJSON[K]
 	gob.Register(data)
 
@@ -451,9 +457,11 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 				data.K = append(data.K, k)
 				data.V = append(data.V, bytes)
 				data.T = append(data.T, i/timeCarry) // ns -> s
+
+			} else if callbackAny != nil {
+				callbackAny(k, a, i)
 			}
 			return true
-
 		}, true)
 
 		b.RUnlock()
