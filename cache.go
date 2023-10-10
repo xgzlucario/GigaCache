@@ -59,11 +59,12 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	idx    *hashmap.Map[K, Idx]
-	alloc  int64
-	mtimes int64
-	bytes  []byte
-	items  []*item
+	idx     *hashmap.Map[K, Idx]
+	alloc   int64
+	mtimes  int64
+	eltimes byte
+	bytes   []byte
+	items   []*item
 	sync.RWMutex
 }
 
@@ -257,9 +258,6 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	b := c.getShard(key)
 	b.Lock()
 	_, ok := b.idx.Delete(key)
-	if ok {
-		b.alloc--
-	}
 	b.eliminate()
 	b.Unlock()
 
@@ -340,7 +338,8 @@ func parseTTL(b []byte) int64 {
 
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
-	if b.alloc%probeInterval != 0 {
+	b.eltimes = (b.eltimes + 1) % probeInterval
+	if b.eltimes > 0 {
 		return
 	}
 
