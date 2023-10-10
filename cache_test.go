@@ -395,13 +395,13 @@ func TestCacheSet(t *testing.T) {
 			valid[key] = value
 		}
 
-		src, err := m.MarshalBinary()
+		src, err := m.MarshalBytes()
 		if err != nil {
 			t.Fatalf("error: %v", err)
 		}
 
 		m1 := New[string]()
-		if err := m1.UnmarshalBinary(src); err != nil {
+		if err := m1.UnmarshalBytes(src); err != nil {
 			t.Fatalf("error: %v", err)
 		}
 
@@ -419,7 +419,7 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		// unmarshal error
-		err = m.UnmarshalBinary([]byte("fake news"))
+		err = m.UnmarshalBytes([]byte("fake news"))
 		if err == nil {
 			t.Fatalf("error: %v", err)
 		}

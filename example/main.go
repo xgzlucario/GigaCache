@@ -103,7 +103,7 @@ func main() {
 		for {
 			time.Sleep(time.Second * 8)
 			a := time.Now()
-			bc.MarshalBinary()
+			bc.MarshalBytes()
 			fmt.Println("Marshal cost:", time.Since(a))
 		}
 	}()

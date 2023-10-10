@@ -422,16 +422,16 @@ func (b *bucket[K]) migrate() {
 	b.mtimes++
 }
 
-// CacheJSON
-type CacheJSON[K comparable] struct {
+// cacheJSON
+type cacheJSON[K comparable] struct {
 	K []K
 	V [][]byte
 	T []int64
 }
 
-// MarshalBinary
-func (c *GigaCache[K]) MarshalBinary() ([]byte, error) {
-	var data CacheJSON[K]
+// MarshalBytes
+func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
+	var data cacheJSON[K]
 	gob.Register(data)
 
 	for _, b := range c.buckets {
@@ -466,9 +466,9 @@ func (c *GigaCache[K]) MarshalBinary() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// UnmarshalBinary
-func (c *GigaCache[K]) UnmarshalBinary(src []byte) error {
-	var data CacheJSON[K]
+// UnmarshalBytes
+func (c *GigaCache[K]) UnmarshalBytes(src []byte) error {
+	var data cacheJSON[K]
 	gob.Register(data)
 
 	if err := gob.NewDecoder(bytes.NewBuffer(src)).Decode(&data); err != nil {
