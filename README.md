@@ -2,7 +2,7 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/xgzlucario/GigaCache)](https://goreportcard.com/report/github.com/xgzlucario/GigaCache) [![Go Reference](https://pkg.go.dev/badge/github.com/xgzlucario/GigaCache.svg)](https://pkg.go.dev/github.com/xgzlucario/GigaCache) ![](https://img.shields.io/badge/go-1.21.0-orange.svg) ![](https://img.shields.io/github/languages/code-size/xgzlucario/GigaCache.svg) 
 
-Powerful, fast, expiration supported cache for managing Gigabytes of data.
+Powerful, fast, eviction supported cache for managing Gigabytes of data, multi-threads support, faster than golang stdmap.
 
 [See doc here](https://www.yuque.com/1ucario/devdoc/ntyyeekkxu8apngd?singleDoc)
 
@@ -25,17 +25,27 @@ import (
 )
 
 func main() {
-    m := cache.NewGigaCache[string]()
-    
-    m.Set("foo", []byte("bar")) // Set with key
-    m.SetEx("foo1", []byte("bar1"), time.Minute) // Set key with expired duration
-    m.SetTx("foo2", []byte("bar2"), time.Now().Add(time.Minute).UnixNano()) // Set key with expired deadline
-    
+    m := cache.New[string]()
+
+    m.Set("foo", []byte("bar"))
+    m.SetEx("foo1", []byte("bar1"), time.Minute) // With expired time
+    m.SetTx("foo2", []byte("bar2"), time.Now().Add(time.Minute).UnixNano()) // With deadline
+
     val,ok := m.Get("foo")
     fmt.Println(string(val), ok) // bar, true
 
     val, ts, ok := m.GetTx("foo1")
-    fmt.Println(string(val), ts, ok) // bar1, 1687458634306210383(nanoseconds), true
+    fmt.Println(string(val), ts, ok) // bar1, (nanosecs), true
+
+    ok := m.Delete("foo1")
+    if ok { // ... }
+
+    ok = m.Rename("foo", "newFoo")
+    if ok { // ... }
+
+    // or Range cache
+    m.Scan()
+    m.Keys()
 }
 ```
 
@@ -57,7 +67,6 @@ Gigache Set operation has better performance than stdmap.
 | Benchmark           | Iter    | time/op     | bytes/op | alloc/op    |
 | ------------------- | ------- | ----------- | -------- | ----------- |
 | Set/stdmap-20       | 4059187 | 315.2 ns/op | 156 B/op | 1 allocs/op |
-| Set/syncmap-20      | 2632218 | 385.3 ns/op | 126 B/op | 5 allocs/op |
 | Set/gigacache-20    | 4897693 | 277.9 ns/op | 133 B/op | 1 allocs/op |
 | Set/gigacache/Tx-20 | 4355415 | 328.2 ns/op | 161 B/op | 1 allocs/op |
 
@@ -66,18 +75,16 @@ Gigache Set operation has better performance than stdmap.
 | Benchmark           | Iter    | time/op     | bytes/op | alloc/op    |
 | ------------------- | ------- | ----------- | -------- | ----------- |
 | Get/stdmap-20       | 8906018 | 150.1 ns/op | 7 B/op   | 0 allocs/op |
-| Get/syncmap-20      | 7723198 | 168.5 ns/op | 7 B/op   | 0 allocs/op |
 | Get/gigacache-20    | 7293346 | 167.1 ns/op | 7 B/op   | 0 allocs/op |
 | Get/gigacache/Tx-20 | 5621548 | 204.0 ns/op | 7 B/op   | 0 allocs/op |
 
 **Delete**
 
-| Benchmark              | Iter    | time/op     | bytes/op | alloc/op    |
-| ---------------------- | ------- | ----------- | -------- | ----------- |
-| Delete/stdmap-20       | 8321840 | 167.3 ns/op | 7 B/op   | 0 allocs/op |
-| Delete/syncmap-20      | 7192041 | 176.8 ns/op | 7 B/op   | 0 allocs/op |
-| Delete/gigacache-20    | 5177775 | 258.1 ns/op | 13 B/op  | 1 allocs/op |
-| Delete/gigacache/Tx-20 | 3510531 | 306.2 ns/op | 7 B/op   | 0 allocs/op |
+| Benchmark              | Iter     | time/op     | bytes/op | alloc/op    |
+| ---------------------- | -------- | ----------- | -------- | ----------- |
+| Delete/stdmap-20       | 70440334 | 16.38 ns/op |	7 B/op	 | 0 allocs/op |
+| Delete/gigacache-20    | 24050403 | 48.55 ns/op |	8 B/op	 | 1 allocs/op |
+| Delete/gigacache/Ex-20 | 22860742	| 50.32 ns/op |	9 B/op	 | 1 allocs/op |
 
 **GC pause time**（Reference to [allegro/bigcache-bench](https://github.com/allegro/bigcache-bench)）
 
