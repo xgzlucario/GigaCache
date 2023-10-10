@@ -257,6 +257,9 @@ func (c *GigaCache[K]) Delete(key K) bool {
 	b := c.getShard(key)
 	b.Lock()
 	_, ok := b.idx.Delete(key)
+	if ok {
+		b.alloc--
+	}
 	b.eliminate()
 	b.Unlock()
 
