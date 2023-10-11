@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/exp/rand"
 
+	"net/http"
 	_ "net/http/pprof"
 
 	cache "github.com/xgzlucario/GigaCache"
@@ -34,6 +35,8 @@ import (
 */
 
 func main() {
+	go http.ListenAndServe("localhost:6060", nil)
+
 	start := time.Now()
 	pset := cache.NewPercentile()
 
