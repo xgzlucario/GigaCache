@@ -18,6 +18,12 @@ var (
 	sec = time.Second / 20
 )
 
+func assertCacheNil(a *assert.Assertions, val any, ts int64, ok bool) {
+	a.Equal(val, nil)
+	a.Equal(ts, int64(0))
+	a.Equal(ok, false)
+}
+
 func TestCacheSet(t *testing.T) {
 	t.Run("Set/Get", func(t *testing.T) {
 		assert := assert.New(t)
@@ -40,6 +46,9 @@ func TestCacheSet(t *testing.T) {
 		assert.Equal(ts, int64(0))
 		assert.Equal(ok, true)
 
+		// has
+		assert.Equal(m.Has("foo100"), true)
+
 		// Rename
 		renameArgs := [][]string{
 			{"foo100", "foo100"},
@@ -51,9 +60,7 @@ func TestCacheSet(t *testing.T) {
 
 			if args[0] != args[1] {
 				val, ts, ok = m.Get(args[0])
-				assert.Equal(val, nil)
-				assert.Equal(ts, int64(0))
-				assert.Equal(ok, false)
+				assertCacheNil(assert, val, ts, ok)
 			}
 
 			val, ts, ok = m.Get(args[1])
@@ -63,12 +70,14 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		// Rename not exist
+		m.Rename("not-exist", "not-exist")
+		val, ts, ok = m.Get("not-exist")
+		assertCacheNil(assert, val, ts, ok)
+
 		m.Rename("not-exist", "not-exist2")
 		for _, args := range []string{"not-exist", "not-exist2"} {
 			val, ts, ok = m.Get(args)
-			assert.Equal(val, nil)
-			assert.Equal(ts, int64(0))
-			assert.Equal(ok, false)
+			assertCacheNil(assert, val, ts, ok)
 		}
 
 		// Rename expired
@@ -76,39 +85,29 @@ func TestCacheSet(t *testing.T) {
 		time.Sleep(sec * 2)
 		m.Rename("foo", "foo2")
 		val, ts, ok = m.Get("foo")
-		assert.Equal(val, nil)
-		assert.Equal(ts, int64(0))
-		assert.Equal(ok, false)
+		assertCacheNil(assert, val, ts, ok)
 
 		// get not exist
 		val, ts, ok = m.Get("not-exist")
-		assert.Equal(val, nil)
-		assert.Equal(ts, int64(0))
-		assert.Equal(ok, false)
+		assertCacheNil(assert, val, ts, ok)
 
 		// set negetive number
 		m.SetTx("no", []byte{1}, -9)
 		val, ts, ok = m.Get("no")
-		assert.Equal(val, nil)
-		assert.Equal(ts, int64(0))
-		assert.Equal(ok, false)
+		assertCacheNil(assert, val, ts, ok)
 
 		// get deleted
 		ok = m.Delete("foo5")
 		assert.Equal(ok, true, "delete error")
 
 		val, ts, ok = m.Get("foo5")
-		if val != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", val, ts, ok)
-		}
+		assertCacheNil(assert, val, ts, ok)
 
 		// get expired
 		m.SetEx("test", []byte{1}, sec)
 		time.Sleep(sec * 2)
 		val, ts, ok = m.Get("test")
-		if val != nil || ts != 0 || ok {
-			t.Fatalf("%v %v %v", val, ts, ok)
-		}
+		assertCacheNil(assert, val, ts, ok)
 
 		{
 			m := New[string](1)
@@ -163,30 +162,22 @@ func TestCacheSet(t *testing.T) {
 		m := New[int](100)
 		m.Set(100, []byte{1})
 
-		// assert.Panics(func() {
-		// 	NewCustom[string, int]()
-		// })
-
 		// get exist
-		v, ts, ok := m.Get(100)
-		assert.Equal(v, []byte{1})
+		val, ts, ok := m.Get(100)
+		assert.Equal(val, []byte{1})
 		assert.Equal(ts, int64(0))
 		assert.Equal(ok, true)
 
 		// get not exist
-		v, ts, ok = m.Get(200)
-		assert.Equal(v, nil)
-		assert.Equal(ts, int64(0))
-		assert.Equal(ok, false)
+		val, ts, ok = m.Get(200)
+		assertCacheNil(assert, val, ts, ok)
 
 		// get expired
 		m.SetEx(200, []byte{1, 2, 3}, sec)
 		time.Sleep(sec * 2)
 
-		v, ts, ok = m.Get(200)
-		assert.Equal(v, nil)
-		assert.Equal(ts, int64(0))
-		assert.Equal(ok, false)
+		val, ts, ok = m.Get(200)
+		assertCacheNil(assert, val, ts, ok)
 	})
 
 	t.Run("Stat", func(t *testing.T) {
@@ -456,9 +447,7 @@ func FuzzSet(f *testing.F) {
 
 				// expired
 			} else if ts < now {
-				assert.Equal(t, v, nil)
-				assert.Equal(t, ttl, int64(0))
-				assert.Equal(t, ok, false)
+				assertCacheNil(assert.New(t), v, ttl, ok)
 
 				// not expired
 			} else if ts > now {

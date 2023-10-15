@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dolthub/swiss"
 	rand2 "golang.org/x/exp/rand"
 )
 
@@ -36,6 +37,13 @@ func BenchmarkSet(b *testing.B) {
 		m := New[string]()
 		for i := 0; i < b.N; i++ {
 			m.SetEx(strconv.Itoa(i), str, time.Minute)
+		}
+	})
+
+	b.Run("swiss/map", func(b *testing.B) {
+		m := swiss.NewMap[string, []byte](8)
+		for i := 0; i < b.N; i++ {
+			m.Put(strconv.Itoa(i), str)
 		}
 	})
 }
@@ -70,30 +78,36 @@ func BenchmarkGet(b *testing.B) {
 }
 
 func BenchmarkDelete(b *testing.B) {
-	m1 := getStdmap()
 	b.Run("stdmap", func(b *testing.B) {
+		m := getStdmap()
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
-			delete(m1, strconv.Itoa(i))
+			delete(m, strconv.Itoa(i))
 		}
 	})
 
-	m3 := New[string]()
-	for i := 0; i < num; i++ {
-		m3.Set(strconv.Itoa(i), str)
-	}
 	b.Run("gigacache", func(b *testing.B) {
+		m := New[string]()
+		for i := 0; i < num; i++ {
+			m.Set(strconv.Itoa(i), str)
+		}
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
-			m3.Delete(strconv.Itoa(i))
+			m.Delete(strconv.Itoa(i))
 		}
 	})
 
-	m4 := New[string]()
-	for i := 0; i < num; i++ {
-		m4.SetEx(strconv.Itoa(i), str, time.Minute)
-	}
 	b.Run("gigacache/Ex", func(b *testing.B) {
+		m := New[string]()
+		for i := 0; i < num; i++ {
+			m.SetEx(strconv.Itoa(i), str, time.Minute)
+		}
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
-			m4.Delete(strconv.Itoa(i))
+			m.Delete(strconv.Itoa(i))
 		}
 	})
 }
