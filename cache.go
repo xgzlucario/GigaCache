@@ -183,11 +183,13 @@ func (c *GigaCache[K]) Has(key K) bool {
 func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 	b := c.getShard(key)
 	b.RLock()
-	defer b.RUnlock()
 
 	if idx, ok := b.idx.Get(key); ok {
-		return b.get(idx)
+		v, ts, ok := b.get(idx)
+		b.RUnlock()
+		return v, ts, ok
 	}
+	b.RUnlock()
 
 	return nil, 0, false
 }
@@ -199,28 +201,23 @@ func (c *GigaCache[K]) RandomGet() (key K, val any, ts int64, ok bool) {
 	for i := uint64(0); i < uint64(len(c.buckets)); i++ {
 		b := c.buckets[(rdm+i)&c.mask]
 		b.Lock()
-
-		for b.idx.Count() > 0 {
-			// get random
-			var key K
-			var idx Idx
-			b.idx.Iter(func(k K, v Idx) bool {
-				key, idx = k, v
-				return true
-			})
-
+		b.idx.Iter(func(k K, idx Idx) bool {
+			key = k
 			val, ts, ok = b.get(idx)
 			// unexpired
 			if ok {
-				b.Unlock()
-				return key, val, ts, ok
+				return true
 
 			} else {
 				b.idx.Delete(key)
+				return false
 			}
-		}
-
+		})
 		b.Unlock()
+
+		if ok {
+			return
+		}
 	}
 
 	return

@@ -447,9 +447,7 @@ func FuzzSet(f *testing.F) {
 
 				// expired
 			} else if ts < now {
-				assert.Equal(t, v, nil)
-				assert.Equal(t, ttl, int64(0))
-				assert.Equal(t, ok, false)
+				assertCacheNil(assert.New(t), v, ttl, ok)
 
 				// not expired
 			} else if ts > now {
