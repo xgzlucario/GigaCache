@@ -3,14 +3,15 @@ module github.com/xgzlucario/GigaCache
 go 1.21
 
 require (
+	github.com/dolthub/swiss v0.2.1
 	github.com/stretchr/testify v1.8.4
-	github.com/tidwall/hashmap v1.8.1
 	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d
 )
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dolthub/maphash v0.1.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/zeebo/assert v1.3.1 // indirect

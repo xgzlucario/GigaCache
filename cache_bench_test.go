@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dolthub/swiss"
 	rand2 "golang.org/x/exp/rand"
 )
 
@@ -36,6 +37,13 @@ func BenchmarkSet(b *testing.B) {
 		m := New[string]()
 		for i := 0; i < b.N; i++ {
 			m.SetEx(strconv.Itoa(i), str, time.Minute)
+		}
+	})
+
+	b.Run("swiss/map", func(b *testing.B) {
+		m := swiss.NewMap[string, []byte](8)
+		for i := 0; i < b.N; i++ {
+			m.Put(strconv.Itoa(i), str)
 		}
 	})
 }

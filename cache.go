@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/exp/rand"
 
-	"github.com/tidwall/hashmap"
+	"github.com/dolthub/swiss"
 	"github.com/zeebo/xxh3"
 )
 
@@ -28,12 +28,10 @@ const (
 	// eliminate probing
 	probeInterval = 3
 	probeCount    = 100
-	probeSpace    = 3
 
 	// migrateThres defines the conditions necessary to trigger a migrate operation.
-	// Ratio recommended between 0.6 and 0.7, Delta recommended 128, see bench data for details.
+	// Ratio recommended between 0.6 and 0.7, see bench data for details.
 	migrateThresRatio = 0.6
-	migrateThresDelta = 128
 
 	maxFailCount = 5
 )
@@ -59,7 +57,7 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	idx     *hashmap.Map[K, Idx]
+	idx     *swiss.Map[K, Idx]
 	alloc   int64
 	mtimes  int64
 	eltimes byte
@@ -96,7 +94,7 @@ func New[K comparable](shard ...int) *GigaCache[K] {
 
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket[K]{
-			idx:   hashmap.New[K, Idx](0),
+			idx:   swiss.NewMap[K, Idx](8),
 			bytes: bpool.Get(),
 			items: make([]*item, 0),
 		}
@@ -163,6 +161,24 @@ func (b *bucket[K]) get(idx Idx, nocopy ...bool) (any, int64, bool) {
 	}
 }
 
+// deleteGet
+func (b *bucket[K]) deleteGet(key K) (Idx, bool) {
+	idx, ok := b.idx.Get(key)
+	if ok {
+		b.idx.Delete(key)
+	}
+	return idx, ok
+}
+
+// Has
+func (c *GigaCache[K]) Has(key K) bool {
+	b := c.getShard(key)
+	b.RLock()
+	ok := b.idx.Has(key)
+	b.RUnlock()
+	return ok
+}
+
 // Get returns value with expiration time by the key.
 func (c *GigaCache[K]) Get(key K) (any, int64, bool) {
 	b := c.getShard(key)
@@ -184,8 +200,15 @@ func (c *GigaCache[K]) RandomGet() (key K, val any, ts int64, ok bool) {
 		b := c.buckets[(rdm+i)&c.mask]
 		b.Lock()
 
-		for b.idx.Len() > 0 {
-			key, idx, _ := b.idx.GetPos(rdm)
+		for b.idx.Count() > 0 {
+			// get random
+			var key K
+			var idx Idx
+			b.idx.Iter(func(k K, v Idx) bool {
+				key, idx = k, v
+				return true
+			})
+
 			val, ts, ok = b.get(idx)
 			// unexpired
 			if ok {
@@ -210,7 +233,7 @@ func (b *bucket[K]) set(key K, val any, ts int64) {
 	// if bytes
 	bytes, ok := val.([]byte)
 	if ok {
-		b.idx.Set(key, newIdx(len(b.bytes), len(bytes), hasTTL, false))
+		b.idx.Put(key, newIdx(len(b.bytes), len(bytes), hasTTL, false))
 		b.bytes = append(b.bytes, bytes...)
 		if hasTTL {
 			b.bytes = order.AppendUint64(b.bytes, uint64(ts))
@@ -218,16 +241,16 @@ func (b *bucket[K]) set(key K, val any, ts int64) {
 		b.alloc++
 
 	} else {
-		idx, exist := b.idx.Get(key)
+		idx, ok := b.idx.Get(key)
 		// update inplace
-		if exist && idx.IsAny() {
+		if ok && idx.IsAny() {
 			start := idx.start()
 			b.items[start].T = ts
 			b.items[start].V = val
-			b.idx.Set(key, newIdx(start, 0, hasTTL, true))
+			b.idx.Put(key, newIdx(start, 0, hasTTL, true))
 
 		} else {
-			b.idx.Set(key, newIdx(len(b.items), 0, hasTTL, true))
+			b.idx.Put(key, newIdx(len(b.items), 0, hasTTL, true))
 			b.items = append(b.items, &item{V: val, T: ts})
 			b.alloc++
 		}
@@ -257,7 +280,7 @@ func (c *GigaCache[K]) SetEx(key K, val any, dur time.Duration) {
 func (c *GigaCache[K]) Delete(key K) bool {
 	b := c.getShard(key)
 	b.Lock()
-	_, ok := b.idx.Delete(key)
+	ok := b.idx.Delete(key)
 	b.eliminate()
 	b.Unlock()
 
@@ -272,13 +295,16 @@ func (c *GigaCache[K]) Rename(old, new K) bool {
 
 	// same bucket
 	if oldb == c.getShard(new) {
-		idx, _ := oldb.idx.Delete(old)
-		oldb.idx.Set(new, idx)
+		idx, ok := oldb.deleteGet(old)
+		if !ok {
+			return false
+		}
+		oldb.idx.Put(new, idx)
 		return true
 	}
 
 	// delete from old bucket.
-	idx, ok := oldb.idx.Delete(old)
+	idx, ok := oldb.deleteGet(old)
 	if !ok {
 		return false
 	}
@@ -295,12 +321,12 @@ func (c *GigaCache[K]) Rename(old, new K) bool {
 
 // scan
 func (b *bucket[K]) scan(f func(K, any, int64) bool, nocopy ...bool) {
-	b.idx.Scan(func(key K, idx Idx) bool {
+	b.idx.Iter(func(key K, idx Idx) bool {
 		val, ts, ok := b.get(idx, nocopy...)
 		if ok {
 			return f(key, val, ts)
 		}
-		return true
+		return false
 	})
 }
 
@@ -318,11 +344,11 @@ func (c *GigaCache[K]) Keys() (keys []K) {
 	for _, b := range c.buckets {
 		b.RLock()
 		if keys == nil {
-			keys = make([]K, 0, len(c.buckets)*b.idx.Len())
+			keys = make([]K, 0, len(c.buckets)*b.idx.Count())
 		}
 		b.scan(func(key K, _ any, _ int64) bool {
 			keys = append(keys, key)
-			return true
+			return false
 		}, true)
 		b.RUnlock()
 	}
@@ -343,17 +369,10 @@ func (b *bucket[K]) eliminate() {
 		return
 	}
 
-	if b.idx.Len() == 0 {
-		return
-	}
-
-	var failCont, ttl int64
-	rdm := source.Uint64()
+	var failCont, ttl, pcount int64
 
 	// probing
-	for i := uint64(0); i < probeCount; i++ {
-		k, idx, _ := b.idx.GetPos(rdm + i*probeSpace)
-
+	b.idx.Iter(func(key K, idx Idx) bool {
 		if !idx.hasTTL() {
 			goto FAILED
 		}
@@ -368,26 +387,24 @@ func (b *bucket[K]) eliminate() {
 
 		// expired
 		if ttl < clock {
-			b.idx.Delete(k)
+			b.idx.Delete(key)
 			failCont = 0
-			continue
+			return false
 		}
 
 	FAILED:
 		failCont++
+		// break
 		if failCont > maxFailCount {
-			break
+			return true
 		}
-	}
+
+		pcount++
+		return pcount > probeCount
+	})
 
 	// on migrate threshold
-	length := float64(b.idx.Len())
-	alloc := float64(b.alloc)
-
-	rate := length / alloc
-	delta := alloc - length
-
-	if rate < migrateThresRatio && delta > migrateThresDelta {
+	if rate := float64(b.idx.Count()) / float64(b.alloc); rate < migrateThresRatio {
 		b.migrate()
 	}
 }
@@ -404,14 +421,14 @@ func (c *GigaCache[K]) Migrate() {
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket[K]) migrate() {
 	newBucket := &bucket[K]{
-		idx:   hashmap.New[K, Idx](b.idx.Len()),
+		idx:   swiss.NewMap[K, Idx](uint32(b.idx.Count())),
 		bytes: bpool.Get(),
 		items: make([]*item, 0),
 	}
 
 	b.scan(func(key K, val any, ts int64) bool {
 		newBucket.set(key, val, ts)
-		return true
+		return false
 	}, true)
 
 	b.bytes = b.bytes[:0]
@@ -438,7 +455,7 @@ func (c *GigaCache[K]) MarshalBytes() ([]byte, error) {
 
 // MarshalBytesFunc serializes all key-value pairs with a value of []byte,
 // and calls the callback function when value is any.
-func (c *GigaCache[K]) MarshalBytesFunc(callbackAny func(K, any, int64)) ([]byte, error) {
+func (c *GigaCache[K]) MarshalBytesFunc(cb func(K, any, int64)) ([]byte, error) {
 	var data cacheJSON[K]
 	gob.Register(data)
 
@@ -447,7 +464,7 @@ func (c *GigaCache[K]) MarshalBytesFunc(callbackAny func(K, any, int64)) ([]byte
 
 		// init
 		if data.K == nil {
-			n := len(c.buckets) * b.idx.Len()
+			n := len(c.buckets) * b.idx.Count()
 			data.K = make([]K, 0, n)
 			data.V = make([][]byte, 0, n)
 			data.T = make([]int64, 0, n)
@@ -460,10 +477,10 @@ func (c *GigaCache[K]) MarshalBytesFunc(callbackAny func(K, any, int64)) ([]byte
 				data.V = append(data.V, bytes)
 				data.T = append(data.T, i/timeCarry) // ns -> s
 
-			} else if callbackAny != nil {
-				callbackAny(k, a, i)
+			} else if cb != nil {
+				cb(k, a, i)
 			}
-			return true
+			return false
 		}, true)
 
 		b.RUnlock()
@@ -505,7 +522,7 @@ type CacheStat struct {
 func (c *GigaCache[K]) Stat() (s CacheStat) {
 	for _, b := range c.buckets {
 		b.RLock()
-		s.Len += uint64(b.idx.Len())
+		s.Len += uint64(b.idx.Count())
 		s.Alloc += uint64(b.alloc)
 		s.LenBytes += uint64(len(b.bytes))
 		s.LenAny += uint64(len(b.items))
