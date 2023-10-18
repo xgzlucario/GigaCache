@@ -102,14 +102,14 @@ func main() {
 	}
 
 	// Marshal test
-	go func() {
-		for {
-			time.Sleep(time.Second * 8)
-			a := time.Now()
-			bc.MarshalBytes()
-			fmt.Println("Marshal cost:", time.Since(a))
-		}
-	}()
+	// go func() {
+	// 	for {
+	// 		time.Sleep(time.Second * 8)
+	// 		a := time.Now()
+	// 		bc.MarshalBytes()
+	// 		fmt.Println("Marshal cost:", time.Since(a))
+	// 	}
+	// }()
 
 	select {}
 }

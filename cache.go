@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/gob"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -415,6 +416,17 @@ func (c *GigaCache[K]) Migrate() {
 	}
 }
 
+var (
+	count = 0
+	p99   = NewPercentile()
+)
+
+// 100000=======avg: 2.63 | min: 1.83 | p50: 2.44 | p95: 3.12 | p99: 11.52 | max: 39.22
+// with NewMap
+
+// 100000=======avg: 2.65 | min: 1.80 | p50: 2.47 | p95: 3.19 | p99: 11.17 | max: 29.21
+// without NewMap
+
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket[K]) migrate() {
 	newBucket := &bucket[K]{
@@ -422,6 +434,7 @@ func (b *bucket[K]) migrate() {
 		bytes: bpool.Get(),
 		items: make([]*item, 0),
 	}
+	a := time.Now()
 
 	b.scan(func(key K, val any, ts int64) bool {
 		newBucket.set(key, val, ts)
@@ -436,6 +449,13 @@ func (b *bucket[K]) migrate() {
 	b.idx = newBucket.idx
 	b.alloc = newBucket.alloc
 	b.mtimes++
+
+	count++
+	p99.Add(float64(time.Since(a)) / float64(time.Millisecond))
+	if count%1000 == 0 {
+		fmt.Printf("%d=======", count)
+		p99.Print()
+	}
 }
 
 // cacheJSON
