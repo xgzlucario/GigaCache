@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"runtime"
 	"strconv"
 	"time"
 
@@ -35,6 +34,21 @@ import (
 */
 
 func main() {
+	// m1 := swiss.NewMap[int, int](16)
+	// for i := 0; i < 10; i++ {
+	// 	m1.Put(i, i)
+	// 	fmt.Println(m1.Count(), m1.Capacity())
+	// }
+
+	// fmt.Println("==========")
+
+	// for i := 0; i < 10; i++ {
+	// 	m1.Delete(i)
+	// 	fmt.Println(m1.Count(), m1.Capacity())
+	// }
+
+	// time.Sleep(time.Hour)
+
 	go http.ListenAndServe("localhost:6060", nil)
 
 	start := time.Now()
@@ -42,7 +56,6 @@ func main() {
 
 	var count int64
 	var avgRate, avgBytes, avgTime float64
-	var memStats runtime.MemStats
 
 	bc := cache.New[string]()
 
@@ -52,7 +65,7 @@ func main() {
 			time.Sleep(time.Second / 10)
 
 			// benchmark test
-			if i > 0 && i%100 == 0 {
+			if i > 0 && i%10 == 0 {
 				stat := bc.Stat()
 
 				avgRate += stat.ExpRate()
@@ -69,16 +82,7 @@ func main() {
 					avgRate/avgTime,
 					stat.MigrateTimes)
 
-				// mem stats
-				runtime.ReadMemStats(&memStats)
-				fmt.Printf("[Mem] mem: %.0fMB | sys: %.0fMB | gc: %d | gcpause: %.0f us\n",
-					float64(memStats.Alloc)/1024/1024,
-					float64(memStats.Sys)/1024/1024,
-					memStats.NumGC,
-					float64(memStats.PauseTotalNs)/float64(memStats.NumGC)/1000)
-
 				// latency
-				fmt.Println("[Latency]")
 				pset.Print()
 
 				fmt.Println("-----------------------------------------------------")
@@ -87,18 +91,14 @@ func main() {
 	}()
 
 	// 8 clients set concurrent
-	for i := 0; i < 8; i++ {
-		go func() {
-			for {
-				k := strconv.Itoa(int(rand.Uint32()))
-				now := time.Now()
+	for {
+		k := strconv.Itoa(int(rand.Uint32()))
+		now := time.Now()
 
-				bc.SetEx(k, []byte(k), time.Second*5)
-				count++
+		bc.SetEx(k, []byte(k), time.Second*3)
+		count++
 
-				pset.Add(float64(time.Since(now)) / float64(time.Microsecond))
-			}
-		}()
+		pset.Add(float64(time.Since(now)) / float64(time.Microsecond))
 	}
 
 	// Marshal test

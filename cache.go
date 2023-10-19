@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/gob"
-	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -29,6 +28,9 @@ const (
 	// eliminate probing
 	probeInterval = 3
 	probeCount    = 100
+
+	// rehash
+	rehashStep = 100
 
 	// migrateThres defines the conditions necessary to trigger a migrate operation.
 	// Ratio recommended between 0.6 and 0.7, see bench data for details.
@@ -58,12 +60,14 @@ type GigaCache[K comparable] struct {
 
 // bucket
 type bucket[K comparable] struct {
-	idx     *swiss.Map[K, Idx]
-	alloc   int64
-	mtimes  int64
-	eltimes byte
-	bytes   []byte
-	items   []*item
+	rehashing bool
+	eltimes   byte
+	alloc     int64
+	mtimes    int64
+	idx       *swiss.Map[K, Idx]
+	bytes     []byte
+	items     []*item
+	nb        *bucket[K] // new bucket for rehash.
 	sync.RWMutex
 }
 
@@ -175,9 +179,13 @@ func (b *bucket[K]) deleteGet(key K) (Idx, bool) {
 func (c *GigaCache[K]) Has(key K) bool {
 	b := c.getShard(key)
 	b.RLock()
-	ok := b.idx.Has(key)
-	b.RUnlock()
-	return ok
+	defer b.RUnlock()
+	if b.rehashing {
+		if b.nb.idx.Has(key) {
+			return true
+		}
+	}
+	return b.idx.Has(key)
 }
 
 // Get returns value with expiration time by the key.
@@ -226,6 +234,12 @@ func (c *GigaCache[K]) RandomGet() (key K, val any, ts int64, ok bool) {
 
 // set
 func (b *bucket[K]) set(key K, val any, ts int64) {
+	// if rehashing
+	if b.rehashing {
+		b.nb.set(key, val, ts)
+		return
+	}
+
 	hasTTL := (ts != noTTL)
 
 	// if bytes
@@ -317,6 +331,49 @@ func (c *GigaCache[K]) Rename(old, new K) bool {
 	return true
 }
 
+// rehash
+func (b *bucket[K]) rehash(start bool) {
+	if start {
+		b.rehashing = true
+		b.nb = &bucket[K]{
+			idx:   swiss.NewMap[K, Idx](uint32(float64(b.idx.Count()) * 1.5)),
+			bytes: bpool.Get(),
+			items: make([]*item, 0),
+		}
+		return
+	}
+	if !b.rehashing {
+		return
+	}
+
+	// migrate
+	var count int
+	b.idx.Iter(func(key K, idx Idx) bool {
+		val, ts, ok := b.get(idx, true)
+		if ok {
+			b.nb.set(key, val, ts)
+		}
+		b.idx.Delete(key)
+		count++
+		return count >= rehashStep
+	})
+
+	// finish
+	if b.idx.Count() == 0 {
+		b.bytes = b.bytes[:0]
+		bpool.Put(b.bytes)
+
+		b.bytes = b.nb.bytes
+		b.items = b.nb.items
+		b.idx = b.nb.idx
+		b.alloc = b.nb.alloc
+		b.mtimes++
+
+		b.nb = nil
+		b.rehashing = false
+	}
+}
+
 // scan
 func (b *bucket[K]) scan(f func(K, any, int64) bool, nocopy ...bool) {
 	b.idx.Iter(func(key K, idx Idx) bool {
@@ -337,23 +394,6 @@ func (c *GigaCache[K]) Scan(f func(K, any, int64) bool) {
 	}
 }
 
-// Keys returns all keys.
-func (c *GigaCache[K]) Keys() (keys []K) {
-	for _, b := range c.buckets {
-		b.RLock()
-		if keys == nil {
-			keys = make([]K, 0, len(c.buckets)*b.idx.Count())
-		}
-		b.scan(func(key K, _ any, _ int64) bool {
-			keys = append(keys, key)
-			return false
-		}, true)
-		b.RUnlock()
-	}
-
-	return
-}
-
 func parseTTL(b []byte) int64 {
 	// check bound
 	_ = b[ttlBytes-1]
@@ -362,6 +402,8 @@ func parseTTL(b []byte) int64 {
 
 // eliminate the expired key-value pairs.
 func (b *bucket[K]) eliminate() {
+	b.rehash(false)
+
 	b.eltimes = (b.eltimes + 1) % probeInterval
 	if b.eltimes > 0 {
 		return
@@ -392,8 +434,8 @@ func (b *bucket[K]) eliminate() {
 
 	FAILED:
 		failCont++
-		// break
 		if failCont > maxFailCount {
+			// break
 			return true
 		}
 
@@ -403,58 +445,7 @@ func (b *bucket[K]) eliminate() {
 
 	// on migrate threshold
 	if rate := float64(b.idx.Count()) / float64(b.alloc); rate < migrateThresRatio {
-		b.migrate()
-	}
-}
-
-// Migrate call migrate force.
-func (c *GigaCache[K]) Migrate() {
-	for _, b := range c.buckets {
-		b.Lock()
-		b.migrate()
-		b.Unlock()
-	}
-}
-
-var (
-	count = 0
-	p99   = NewPercentile()
-)
-
-// 100000=======avg: 2.63 | min: 1.83 | p50: 2.44 | p95: 3.12 | p99: 11.52 | max: 39.22
-// with NewMap
-
-// 100000=======avg: 2.65 | min: 1.80 | p50: 2.47 | p95: 3.19 | p99: 11.17 | max: 29.21
-// without NewMap
-
-// migrate move valid key-value pairs to the new container to save memory.
-func (b *bucket[K]) migrate() {
-	newBucket := &bucket[K]{
-		idx:   swiss.NewMap[K, Idx](uint32(b.idx.Count())),
-		bytes: bpool.Get(),
-		items: make([]*item, 0),
-	}
-	a := time.Now()
-
-	b.scan(func(key K, val any, ts int64) bool {
-		newBucket.set(key, val, ts)
-		return false
-	}, true)
-
-	b.bytes = b.bytes[:0]
-	bpool.Put(b.bytes)
-
-	b.bytes = newBucket.bytes
-	b.items = newBucket.items
-	b.idx = newBucket.idx
-	b.alloc = newBucket.alloc
-	b.mtimes++
-
-	count++
-	p99.Add(float64(time.Since(a)) / float64(time.Millisecond))
-	if count%1000 == 0 {
-		fmt.Printf("%d=======", count)
-		p99.Print()
+		b.rehash(true)
 	}
 }
 

@@ -199,29 +199,6 @@ func TestCacheSet(t *testing.T) {
 		}
 	})
 
-	t.Run("Keys", func(t *testing.T) {
-		m := New[string](20)
-		for i := 0; i < 200; i++ {
-			m.Set("noexp"+strconv.Itoa(i), str)
-			m.SetEx(strconv.Itoa(i), str, sec)
-		}
-		for i := 0; i < 200; i++ {
-			m.Set("any"+strconv.Itoa(i), i)
-		}
-
-		keys := m.Keys()
-		if len(keys) != 600 {
-			t.Fatalf("%+v", len(keys))
-		}
-
-		time.Sleep(sec * 2)
-
-		keys = m.Keys()
-		if len(keys) != 400 {
-			t.Fatalf("%+v", len(keys))
-		}
-	})
-
 	t.Run("RandomGet", func(t *testing.T) {
 		m := New[string](20)
 		m.RandomGet()
@@ -331,47 +308,6 @@ func TestCacheSet(t *testing.T) {
 		if s.LenBytes != 700 || s.Len != 101 {
 			t.Fatalf("%+v", s)
 		}
-	})
-
-	t.Run("Migrate", func(t *testing.T) {
-		m := New[string]()
-		m.buckets[0].eliminate()
-
-		for i := 0; i < 100; i++ {
-			m.Set("noexpired"+strconv.Itoa(i), []byte{1, 2, 3})
-		}
-		for i := 0; i < 200; i++ {
-			m.SetEx("expired"+strconv.Itoa(i), []byte{1, 2, 3}, sec)
-		}
-		for i := 0; i < 300; i++ {
-			m.Set("noexpired-any"+strconv.Itoa(i), i)
-		}
-		for i := 0; i < 400; i++ {
-			m.SetEx("expired-any"+strconv.Itoa(i), 123, sec)
-		}
-
-		// check
-		s := m.Stat()
-		if s.LenBytes != 2500 || s.Len != 1000 || s.Alloc != 1000 || s.LenAny != 700 {
-			t.Fatalf("%+v", s)
-		}
-
-		time.Sleep(sec * 2)
-		m.Migrate()
-
-		// check2
-		s = m.Stat()
-		if s.LenBytes != 300 || s.Len != 400 || s.Alloc != 400 || s.LenAny != 300 {
-			t.Fatalf("%+v", s)
-		}
-
-		// check3
-		m.Scan(func(k string, a any, i int64) bool {
-			if k[:3] == "exp" {
-				t.Fatal(k)
-			}
-			return true
-		})
 	})
 
 	t.Run("marshal", func(t *testing.T) {
