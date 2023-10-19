@@ -411,31 +411,29 @@ func (b *bucket[K]) eliminate() {
 
 	var failCont, ttl, pcount int64
 
+	probeBucket := b.idx
+	if b.rehashing {
+		probeBucket = b.nb.idx
+	}
+
 	// probing
-	b.idx.Iter(func(key K, idx Idx) bool {
-		if !idx.hasTTL() {
-			goto FAILED
+	probeBucket.Iter(func(key K, idx Idx) bool {
+		if idx.hasTTL() {
+			if idx.IsAny() {
+				ttl = b.items[idx.start()].T
+			} else {
+				ttl = parseTTL(b.bytes[idx.start()+idx.offset():])
+			}
+			// expired
+			if ttl < clock {
+				probeBucket.Delete(key)
+				failCont = 0
+				return false
+			}
 		}
 
-		if idx.IsAny() {
-			ttl = b.items[idx.start()].T
-
-		} else {
-			end := idx.start() + idx.offset()
-			ttl = parseTTL(b.bytes[end:])
-		}
-
-		// expired
-		if ttl < clock {
-			b.idx.Delete(key)
-			failCont = 0
-			return false
-		}
-
-	FAILED:
 		failCont++
 		if failCont > maxFailCount {
-			// break
 			return true
 		}
 
@@ -444,8 +442,10 @@ func (b *bucket[K]) eliminate() {
 	})
 
 	// on migrate threshold
-	if rate := float64(b.idx.Count()) / float64(b.alloc); rate < migrateThresRatio {
-		b.rehash(true)
+	if !b.rehashing {
+		if rate := float64(b.idx.Count()) / float64(b.alloc); rate < migrateThresRatio {
+			b.rehash(true)
+		}
 	}
 }
 

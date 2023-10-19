@@ -359,6 +359,25 @@ func TestCacheSet(t *testing.T) {
 		}
 	})
 
+	t.Run("rehash", func(t *testing.T) {
+		assert := assert.New(t)
+		m := New[string](1)
+		for i := 0; i < 10000; i++ {
+			m.SetEx(strconv.Itoa(i), str, sec)
+		}
+		time.Sleep(sec * 2)
+
+		// force rehash
+		b := m.buckets[0]
+		b.rehash(true)
+
+		m.Set("new-key1", "value")
+		m.Set("new-key2", "value")
+
+		assert.Equal(9800, b.idx.Count())
+		assert.Equal(2, b.nb.idx.Count())
+	})
+
 	t.Run("clock", func(t *testing.T) {
 		if GetUnixNano() != clock {
 			t.Fatalf("error: %v", GetUnixNano())
