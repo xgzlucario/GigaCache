@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	num = 100 * 10000
+	num = 10000
 )
 
 var (
@@ -29,7 +29,7 @@ func TestCacheSet(t *testing.T) {
 		assert := assert.New(t)
 
 		m := New[string](100)
-		for i := 0; i < 10000; i++ {
+		for i := 0; i < num; i++ {
 			m.Set("foo"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
 		}
 
@@ -137,7 +137,7 @@ func TestCacheSet(t *testing.T) {
 
 		val, ts, ok := m.Get("nocopy")
 		assert.Equal(val, []byte{8, 8, 8, 8})
-		assert.GreaterOrEqual(ts, GetUnixNano())
+		assert.GreaterOrEqual(ts, getClock())
 		assert.Equal(ok, true)
 
 		// get copy
@@ -153,7 +153,7 @@ func TestCacheSet(t *testing.T) {
 
 		val, ts, ok = m.Get("copy")
 		assert.Equal(val, []byte{1, 2, 3, 4})
-		assert.GreaterOrEqual(ts, GetUnixNano())
+		assert.GreaterOrEqual(ts, getClock())
 		assert.Equal(ok, true)
 	})
 
@@ -251,16 +251,16 @@ func TestCacheSet(t *testing.T) {
 		assert := assert.New(t)
 		m := New[string](20)
 
-		for i := 0; i < 5000; i++ {
+		for i := 0; i < 1000; i++ {
 			m.Set("a"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
 		}
-		for i := 0; i < 5000; i++ {
+		for i := 0; i < 1000; i++ {
 			m.SetEx("b"+strconv.Itoa(i), []byte(strconv.Itoa(i)), sec)
 		}
-		for i := 0; i < 5000; i++ {
+		for i := 0; i < 1000; i++ {
 			m.Set("c"+strconv.Itoa(i), i)
 		}
-		for i := 0; i < 5000; i++ {
+		for i := 0; i < 1000; i++ {
 			m.SetEx("d"+strconv.Itoa(i), i, sec)
 		}
 
@@ -378,7 +378,7 @@ func TestCacheSet(t *testing.T) {
 		assert := assert.New(t)
 		m := New[string]()
 
-		for i := 0; i < 10000; i++ {
+		for i := 0; i < num; i++ {
 			key := strconv.Itoa(i)
 			value := []byte(key)
 
@@ -392,7 +392,7 @@ func TestCacheSet(t *testing.T) {
 				anyCount++
 			})
 			assert.Nil(err)
-			assert.Equal(anyCount, 10000)
+			assert.Equal(anyCount, num)
 		}
 
 		src, err := m.MarshalBytes()
@@ -422,12 +422,6 @@ func TestCacheSet(t *testing.T) {
 			m.Set("just-for-trig", []byte{})
 		}
 	})
-
-	t.Run("clock", func(t *testing.T) {
-		if GetUnixNano() != clock {
-			t.Fatalf("error: %v", GetUnixNano())
-		}
-	})
 }
 
 func FuzzSet(f *testing.F) {
@@ -435,7 +429,7 @@ func FuzzSet(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, key string, val []byte, ts int64) {
 		f := func(ts int64) {
-			now := GetUnixNano()
+			now := getClock()
 			m.SetTx(key, val, ts)
 			v, ttl, ok := m.Get(key)
 

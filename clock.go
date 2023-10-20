@@ -21,7 +21,7 @@ func init() {
 	}()
 }
 
-// GetUnix return now unixnano time.
-func GetUnixNano() int64 {
-	return clock
+// getClock return now unixnano time.
+func getClock() int64 {
+	return atomic.LoadInt64(&clock)
 }
