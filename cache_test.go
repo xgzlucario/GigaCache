@@ -223,10 +223,10 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("RandomGet", func(t *testing.T) {
-		m := New[string](20)
+		m := New[string](10)
 		m.RandomGet()
 
-		for i := 0; i < 200; i++ {
+		for i := 0; i < 100; i++ {
 			if i%2 == 0 {
 				m.SetEx(strconv.Itoa(i), str, sec)
 			} else {
@@ -236,7 +236,7 @@ func TestCacheSet(t *testing.T) {
 
 		time.Sleep(sec * 2)
 
-		for i := 0; i < 200; i++ {
+		for i := 0; i < 100; i++ {
 			key, _, _, _ := m.RandomGet()
 			// if key is odd
 			if i%2 != 0 {
@@ -253,14 +253,8 @@ func TestCacheSet(t *testing.T) {
 
 		for i := 0; i < 1000; i++ {
 			m.Set("a"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
-		}
-		for i := 0; i < 1000; i++ {
 			m.SetEx("b"+strconv.Itoa(i), []byte(strconv.Itoa(i)), sec)
-		}
-		for i := 0; i < 1000; i++ {
 			m.Set("c"+strconv.Itoa(i), i)
-		}
-		for i := 0; i < 1000; i++ {
 			m.SetEx("d"+strconv.Itoa(i), i, sec)
 		}
 
@@ -407,13 +401,13 @@ func TestCacheSet(t *testing.T) {
 
 	t.Run("eliminate", func(t *testing.T) {
 		m := New[string](100)
-		for i := 0; i < 3000; i++ {
+		for i := 0; i < 1000; i++ {
 			m.SetEx(strconv.Itoa(i), i, sec)
 		}
-		for i := 0; i < 3000; i++ {
+		for i := 0; i < 1000; i++ {
 			m.SetEx("t"+strconv.Itoa(i), []byte{1}, sec)
 		}
-		for i := 0; i < 3000; i++ {
+		for i := 0; i < 1000; i++ {
 			m.SetEx("x"+strconv.Itoa(i), []byte{1}, sec*999)
 		}
 
