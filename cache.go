@@ -129,7 +129,7 @@ func (b *bucket[K]) get(idx Idx, nocopy ...bool) (any, int64, bool) {
 		n := b.items[idx.start()]
 
 		if idx.hasTTL() {
-			if n.T > getClock() {
+			if n.T > GetClock() {
 				return n.V, n.T, true
 			}
 			return nil, 0, false
@@ -142,7 +142,7 @@ func (b *bucket[K]) get(idx Idx, nocopy ...bool) (any, int64, bool) {
 
 		if idx.hasTTL() {
 			ttl := parseTTL(b.bytes[end:])
-			if ttl < getClock() {
+			if ttl < GetClock() {
 				return nil, 0, false
 			}
 
@@ -270,7 +270,7 @@ func (c *GigaCache[K]) Set(key K, val any) {
 
 // SetEx store key-value pair with expired duration.
 func (c *GigaCache[K]) SetEx(key K, val any, dur time.Duration) {
-	c.SetTx(key, val, getClock()+int64(dur))
+	c.SetTx(key, val, GetClock()+int64(dur))
 }
 
 // Delete removes the key-value pair by the key.
@@ -383,7 +383,7 @@ func (b *bucket[K]) eliminate() {
 		}
 
 		// expired
-		if ttl < getClock() {
+		if ttl < GetClock() {
 			b.idx.Delete(key)
 			failCont = 0
 			return false
