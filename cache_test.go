@@ -137,7 +137,7 @@ func TestCacheSet(t *testing.T) {
 
 		val, ts, ok := m.Get("nocopy")
 		assert.Equal(val, []byte{8, 8, 8, 8})
-		assert.GreaterOrEqual(ts, getClock())
+		assert.GreaterOrEqual(ts, GetClock())
 		assert.Equal(ok, true)
 
 		// get copy
@@ -153,7 +153,7 @@ func TestCacheSet(t *testing.T) {
 
 		val, ts, ok = m.Get("copy")
 		assert.Equal(val, []byte{1, 2, 3, 4})
-		assert.GreaterOrEqual(ts, getClock())
+		assert.GreaterOrEqual(ts, GetClock())
 		assert.Equal(ok, true)
 	})
 
@@ -423,7 +423,7 @@ func FuzzSet(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, key string, val []byte, ts int64) {
 		f := func(ts int64) {
-			now := getClock()
+			now := GetClock()
 			m.SetTx(key, val, ts)
 			v, ttl, ok := m.Get(key)
 
