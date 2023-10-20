@@ -13,9 +13,8 @@ test:
 
 # 生成 html 覆盖率文件
 test-cover:
-	go test -coverprofile=coverage.out
-	go tool cover -html=coverage.out -o coverage.html
-	rm coverage.out
+	go test -race -coverprofile=coverage.txt -covermode=atomic
+	go tool cover -html=coverage.txt -o coverage.html
 
 bench:
 	go test -bench .
