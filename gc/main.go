@@ -75,7 +75,7 @@ func stdMap(entries, valueSize int) {
 }
 
 func gigaCache(entries, valueSize int) {
-	c := cache.New[string]()
+	c := cache.New()
 	for i := 0; i < entries; i++ {
 		key, val := generateKeyValue(i, valueSize)
 		c.SetEx(key, val, time.Minute)

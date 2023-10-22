@@ -44,7 +44,7 @@ func main() {
 	var avgRate, avgBytes, avgTime float64
 	var memStats runtime.MemStats
 
-	bc := cache.New[string]()
+	bc := cache.New()
 
 	// Stat
 	go func() {
