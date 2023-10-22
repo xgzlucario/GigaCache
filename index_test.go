@@ -4,30 +4,40 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestIndex(t *testing.T) {
 	t.Run("index", func(t *testing.T) {
-		for i := 0; i < 1e8; i++ {
-			a, b := int(rand.Uint32()>>1), int(rand.Uint32()>>1)
-			idx := newIdx(a, b, i%2 == 0, false)
+		assert := assert.New(t)
 
-			if idx.start() != a {
-				t.Fatalf("%v != %v", idx.start(), a)
-			}
-			if idx.offset() != b {
-				t.Fatalf("%v != %v", idx.offset(), b)
-			}
+		for i := 0; i < 1e6; i++ {
+			a, b := int(rand.Uint32()>>1), int(rand.Uint32()>>1)
+			idx := newIdx(a, b, i%2 == 0)
+
+			assert.Equal(idx.start(), a)
+			assert.Equal(idx.offset(), b)
 
 			if i%2 == 0 {
-				if !idx.hasTTL() {
-					t.Fatal("a")
-				}
+				assert.True(idx.IsAny())
 			} else {
-				if idx.hasTTL() {
-					t.Fatal("b")
-				}
+				assert.False(idx.IsAny())
 			}
+		}
+	})
+
+	t.Run("key", func(t *testing.T) {
+		assert := assert.New(t)
+
+		for i := 0; i < 1e6; i++ {
+			hash := rand.Uint64()
+			keylen := int(rand.Uint32() & klenMask)
+
+			key := newKey(hash, keylen)
+
+			assert.Equal(key.hash(), hash>>16)
+			assert.Equal(key.klen(), keylen)
 		}
 	})
 
@@ -37,15 +47,27 @@ func TestIndex(t *testing.T) {
 				t.Fatal("should panic")
 			}
 		}()
-		newIdx(math.MaxInt, 0, false, false)
+		newIdx(math.MaxInt, 0, false)
 	})
 
 	t.Run("panic-offset", func(t *testing.T) {
+		defer func() {
+
+			if r := recover(); r == nil {
+				t.Fatal("should panic")
+			}
+		}()
+		newIdx(0, math.MaxInt, false)
+	})
+
+	t.Run("panic-keylen", func(t *testing.T) {
+		newKey(0, math.MaxUint16)
+
 		defer func() {
 			if r := recover(); r == nil {
 				t.Fatal("should panic")
 			}
 		}()
-		newIdx(0, math.MaxInt, false, false)
+		newKey(0, math.MaxUint16+1)
 	})
 }

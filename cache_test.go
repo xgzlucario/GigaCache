@@ -28,7 +28,7 @@ func TestCacheSet(t *testing.T) {
 	t.Run("Set/Get", func(t *testing.T) {
 		assert := assert.New(t)
 
-		m := New[string](100)
+		m := New(100)
 		for i := 0; i < num; i++ {
 			m.Set("foo"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
 		}
@@ -110,7 +110,7 @@ func TestCacheSet(t *testing.T) {
 		assertCacheNil(assert, val, ts, ok)
 
 		{
-			m := New[string](1)
+			m := New(1)
 			// test set inplace
 			m.Set("myInt", 1)
 			assert.Equal(len(m.buckets[0].items), 1)
@@ -123,7 +123,7 @@ func TestCacheSet(t *testing.T) {
 
 	t.Run("Nocopy", func(t *testing.T) {
 		assert := assert.New(t)
-		m := New[string](1)
+		m := New(1)
 
 		// get nocopy
 		m.SetEx("nocopy", []byte{1, 2, 3, 4}, time.Minute)
@@ -141,7 +141,7 @@ func TestCacheSet(t *testing.T) {
 		assert.Equal(ok, true)
 
 		// get copy
-		m = New[string](1)
+		m = New(1)
 		m.SetEx("copy", []byte{1, 2, 3, 4}, time.Minute)
 
 		m.buckets[0].scan(func(k string, val any, i int64) bool {
@@ -157,31 +157,8 @@ func TestCacheSet(t *testing.T) {
 		assert.Equal(ok, true)
 	})
 
-	t.Run("int-generic", func(t *testing.T) {
-		assert := assert.New(t)
-		m := New[int](100)
-		m.Set(100, []byte{1})
-
-		// get exist
-		val, ts, ok := m.Get(100)
-		assert.Equal(val, []byte{1})
-		assert.Equal(ts, int64(0))
-		assert.Equal(ok, true)
-
-		// get not exist
-		val, ts, ok = m.Get(200)
-		assertCacheNil(assert, val, ts, ok)
-
-		// get expired
-		m.SetEx(200, []byte{1, 2, 3}, sec)
-		time.Sleep(sec * 2)
-
-		val, ts, ok = m.Get(200)
-		assertCacheNil(assert, val, ts, ok)
-	})
-
 	t.Run("Stat", func(t *testing.T) {
-		m := New[string](20)
+		m := New(20)
 		for i := 0; i < 600; i++ {
 			m.Set(strconv.Itoa(i), str)
 		}
@@ -191,7 +168,7 @@ func TestCacheSet(t *testing.T) {
 		}
 
 		s := m.Stat()
-		if s.LenBytes != 6000 || s.Len != 800 || s.Alloc != 1000 || s.LenAny != 400 {
+		if s.LenBytes != 7690 || s.Len != 800 || s.Alloc != 1000 || s.LenAny != 400 {
 			t.Fatalf("%+v", s)
 		}
 		if s.ExpRate() != 80 {
@@ -200,7 +177,7 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("Keys", func(t *testing.T) {
-		m := New[string](20)
+		m := New(20)
 		for i := 0; i < 200; i++ {
 			m.Set("noexp"+strconv.Itoa(i), str)
 			m.SetEx(strconv.Itoa(i), str, sec)
@@ -223,7 +200,7 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("RandomGet", func(t *testing.T) {
-		m := New[string](10)
+		m := New(10)
 		m.RandomGet()
 
 		for i := 0; i < 100; i++ {
@@ -249,7 +226,7 @@ func TestCacheSet(t *testing.T) {
 
 	t.Run("Scan", func(t *testing.T) {
 		assert := assert.New(t)
-		m := New[string](20)
+		m := New(20)
 
 		for i := 0; i < 1000; i++ {
 			m.Set("a"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
@@ -298,7 +275,7 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("Migrate-small", func(t *testing.T) {
-		m := New[string]()
+		m := New()
 		m.buckets[0].eliminate()
 
 		for i := 0; i < 50; i++ {
@@ -310,7 +287,7 @@ func TestCacheSet(t *testing.T) {
 
 		// check
 		s := m.Stat()
-		if s.LenBytes != 700 || s.Len != 100 || s.Alloc != 100 {
+		if s.LenBytes != 1280 || s.Len != 100 || s.Alloc != 100 {
 			t.Fatalf("%+v", s)
 		}
 
@@ -322,13 +299,13 @@ func TestCacheSet(t *testing.T) {
 
 		// check2
 		s = m.Stat()
-		if s.LenBytes != 700 || s.Len != 101 {
+		if s.LenBytes != 1293 || s.Len != 101 {
 			t.Fatalf("%+v", s)
 		}
 	})
 
 	t.Run("Migrate", func(t *testing.T) {
-		m := New[string]()
+		m := New()
 		m.buckets[0].eliminate()
 
 		for i := 0; i < 100; i++ {
@@ -346,7 +323,7 @@ func TestCacheSet(t *testing.T) {
 
 		// check
 		s := m.Stat()
-		if s.LenBytes != 2500 || s.Len != 1000 || s.Alloc != 1000 || s.LenAny != 700 {
+		if s.LenBytes != 3880 || s.Len != 1000 || s.Alloc != 1000 || s.LenAny != 700 {
 			t.Fatalf("%+v", s)
 		}
 
@@ -355,7 +332,7 @@ func TestCacheSet(t *testing.T) {
 
 		// check2
 		s = m.Stat()
-		if s.LenBytes != 300 || s.Len != 400 || s.Alloc != 400 || s.LenAny != 300 {
+		if s.LenBytes != 1390 || s.Len != 400 || s.Alloc != 400 || s.LenAny != 300 {
 			t.Fatalf("%+v", s)
 		}
 
@@ -370,7 +347,7 @@ func TestCacheSet(t *testing.T) {
 
 	t.Run("marshal", func(t *testing.T) {
 		assert := assert.New(t)
-		m := New[string]()
+		m := New()
 
 		for i := 0; i < num; i++ {
 			key := strconv.Itoa(i)
@@ -392,7 +369,7 @@ func TestCacheSet(t *testing.T) {
 		src, err := m.MarshalBytes()
 		assert.Nil(err)
 
-		m1 := New[string]()
+		m1 := New()
 		assert.Nil(m1.UnmarshalBytes(src))
 
 		// unmarshal error
@@ -400,7 +377,7 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("eliminate", func(t *testing.T) {
-		m := New[string](100)
+		m := New(100)
 		for i := 0; i < 1000; i++ {
 			m.SetEx(strconv.Itoa(i), i, sec)
 		}
@@ -419,7 +396,7 @@ func TestCacheSet(t *testing.T) {
 }
 
 func FuzzSet(f *testing.F) {
-	m := New[string]()
+	m := New()
 
 	f.Fuzz(func(t *testing.T, key string, val []byte, ts int64) {
 		f := func(ts int64) {
