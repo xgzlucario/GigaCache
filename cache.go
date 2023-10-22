@@ -24,14 +24,12 @@ const (
 	bufferSize         = 1024
 
 	// eliminate probing
-	probeInterval = 3
-	probeCount    = 100
+	probeCount   = 100
+	maxFailCount = 3
 
 	// migrateThres defines the conditions necessary to trigger a migrate operation.
 	// Ratio recommended between 0.6 and 0.7, see bench data for details.
 	migrateThresRatio = 0.6
-
-	maxFailCount = 5
 )
 
 var (
@@ -59,12 +57,11 @@ func (v V) expired() bool {
 
 // bucket
 type bucket struct {
-	idx     *swiss.Map[Key, V]
-	alloc   int64
-	mtimes  int64
-	eltimes byte
-	bytes   []byte
-	items   []*item
+	idx    *swiss.Map[Key, V]
+	alloc  int64
+	mtimes int64
+	bytes  []byte
+	items  []*item
 	sync.RWMutex
 }
 
@@ -171,12 +168,10 @@ func (c *GigaCache) RandomGet() (kstr string, val any, ts int64, ok bool) {
 			}
 		})
 		b.Unlock()
-
 		if ok {
 			return
 		}
 	}
-
 	return
 }
 
@@ -207,17 +202,11 @@ func (b *bucket) set(key Key, kstr string, val any, ts int64) {
 		v, ok := b.idx.Get(key)
 		// update inplace
 		if ok && v.IsAny() {
-			b.idx.Put(key, V{
-				Idx: v.Idx,
-				TTL: ts,
-			})
+			b.idx.Put(key, V{Idx: v.Idx, TTL: ts})
 			b.items[v.start()].val = val
 
 		} else {
-			b.idx.Put(key, V{
-				Idx: newIdx(len(b.items), 1, true),
-				TTL: ts,
-			})
+			b.idx.Put(key, V{Idx: newIdx(len(b.items), 1, true), TTL: ts})
 			b.items = append(b.items, &item{kstr, val})
 			b.alloc++
 		}
@@ -326,11 +315,6 @@ func (c *GigaCache) Keys() (keys []string) {
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
-	b.eltimes = (b.eltimes + 1) % probeInterval
-	if b.eltimes > 0 {
-		return
-	}
-
 	var failCont, pcount int64
 
 	// probing

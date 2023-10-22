@@ -15,23 +15,23 @@ import (
 )
 
 /*
-	5sec 1024
-	[Cache] 201s / 70665w | len: 2284w | alloc: 2894w | bytes: 52827w | rate: 77.6% | mtime: 33098
-	[Mem] mem: 3659MB | sys: 6103MB | gc: 59 | gcpause: 236 us
+	5secs 1024
+	[Cache] 201s / 99236w | len: 3126w | alloc: 4273w | bytes: 68195w | rate: 87.0% | mtime: 39936
+	[Mem] mem: 3257MB | sys: 5941MB | gc: 97 | gcpause: 238 us
 	[Latency]
-	avg: 1.50 | min: 0.09 | p50: 0.40 | p95: 1.87 | p99: 3.34 | max: 2992.52
+	avg: 0.44 | min: 0.14 | p50: 0.36 | p95: 0.70 | p99: 1.02 | max: 656.02
 
-	5sec 2048
-	[Cache] 201s / 74424w | len: 2384w | alloc: 3056w | bytes: 55520w | rate: 77.4% | mtime: 66862
-	[Mem] mem: 4367MB | sys: 5080MB | gc: 60 | gcpause: 262 us
+	5secs 2048
+	[Cache] 201s / 103751w | len: 3228w | alloc: 4551w | bytes: 72911w | rate: 85.6% | mtime: 79872
+	[Mem] mem: 4078MB | sys: 6067MB | gc: 98 | gcpause: 273 us
 	[Latency]
-	avg: 1.23 | min: 0.08 | p50: 0.44 | p95: 1.99 | p99: 3.56 | max: 2692.78
+	avg: 0.46 | min: 0.14 | p50: 0.38 | p95: 0.74 | p99: 1.05 | max: 328.07
 
-	5sec 4096
-	[Cache] 201s / 77253w | len: 2477w | alloc: 3096w | bytes: 56733w | rate: 78.2% | mtime: 134800
-	[Mem] mem: 2637MB | sys: 5206MB | gc: 61 | gcpause: 258 us
+	5secs 4096
+	[Cache] 201s / 104891w | len: 3330w | alloc: 4755w | bytes: 74831w | rate: 85.0% | mtime: 159745
+	[Mem] mem: 4289MB | sys: 6110MB | gc: 98 | gcpause: 272 us
 	[Latency]
-	avg: 1.03 | min: 0.09 | p50: 0.49 | p95: 2.05 | p99: 3.72 | max: 2133.35
+	avg: 0.41 | min: 0.11 | p50: 0.36 | p95: 0.66 | p99: 0.90 | max: 133.64
 */
 
 func main() {
