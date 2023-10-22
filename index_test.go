@@ -10,7 +10,7 @@ func TestIndex(t *testing.T) {
 	t.Run("index", func(t *testing.T) {
 		for i := 0; i < 1e8; i++ {
 			a, b := int(rand.Uint32()>>1), int(rand.Uint32()>>1)
-			idx := newIdx(a, b, i%2 == 0, false)
+			idx := newIdx(a, b, i%2 == 0)
 
 			if idx.start() != a {
 				t.Fatalf("%v != %v", idx.start(), a)
@@ -20,11 +20,11 @@ func TestIndex(t *testing.T) {
 			}
 
 			if i%2 == 0 {
-				if !idx.hasTTL() {
+				if !idx.IsAny() {
 					t.Fatal("a")
 				}
 			} else {
-				if idx.hasTTL() {
+				if idx.IsAny() {
 					t.Fatal("b")
 				}
 			}
@@ -37,7 +37,7 @@ func TestIndex(t *testing.T) {
 				t.Fatal("should panic")
 			}
 		}()
-		newIdx(math.MaxInt, 0, false, false)
+		newIdx(math.MaxInt, 0, false)
 	})
 
 	t.Run("panic-offset", func(t *testing.T) {
@@ -46,6 +46,6 @@ func TestIndex(t *testing.T) {
 				t.Fatal("should panic")
 			}
 		}()
-		newIdx(0, math.MaxInt, false, false)
+		newIdx(0, math.MaxInt, false)
 	})
 }

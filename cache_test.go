@@ -310,7 +310,7 @@ func TestCacheSet(t *testing.T) {
 
 		// check
 		s := m.Stat()
-		if s.LenBytes != 700 || s.Len != 100 || s.Alloc != 100 {
+		if s.LenBytes != 300 || s.Len != 100 || s.Alloc != 100 {
 			t.Fatalf("%+v", s)
 		}
 
@@ -322,7 +322,7 @@ func TestCacheSet(t *testing.T) {
 
 		// check2
 		s = m.Stat()
-		if s.LenBytes != 700 || s.Len != 101 {
+		if s.LenBytes != 300 || s.Len != 101 {
 			t.Fatalf("%+v", s)
 		}
 	})
@@ -346,7 +346,7 @@ func TestCacheSet(t *testing.T) {
 
 		// check
 		s := m.Stat()
-		if s.LenBytes != 2500 || s.Len != 1000 || s.Alloc != 1000 || s.LenAny != 700 {
+		if s.LenBytes != 900 || s.Len != 1000 || s.Alloc != 1000 || s.LenAny != 700 {
 			t.Fatalf("%+v", s)
 		}
 
