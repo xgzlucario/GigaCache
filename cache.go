@@ -114,7 +114,7 @@ func (b *bucket) find(k Key, v V, nocopy ...bool) (string, any, int64, bool) {
 		bytes := getSlice(b.bytes, v.start()+k.klen(), v.offset())
 
 		// nocopy
-		if nocopy != nil && nocopy[0] {
+		if len(nocopy) > 0 && nocopy[0] {
 			return *b2s(kstr), bytes, v.TTL, true
 		}
 		return string(kstr), slices.Clone(bytes), v.TTL, true
