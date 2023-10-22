@@ -143,11 +143,12 @@ func (c *GigaCache) Has(kstr string) bool {
 func (c *GigaCache) Get(kstr string) (any, int64, bool) {
 	b, key := c.getShard(kstr)
 	b.RLock()
-	defer b.RUnlock()
 	if v, ok := b.idx.Get(key); ok {
 		_, val, ts, ok := b.find(key, v)
+		b.RUnlock()
 		return val, ts, ok
 	}
+	b.RUnlock()
 	return nil, 0, false
 }
 
