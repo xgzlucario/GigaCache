@@ -2,7 +2,7 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/xgzlucario/GigaCache)](https://goreportcard.com/report/github.com/xgzlucario/GigaCache) [![Go Reference](https://pkg.go.dev/badge/github.com/xgzlucario/GigaCache.svg)](https://pkg.go.dev/github.com/xgzlucario/GigaCache) ![](https://img.shields.io/badge/go-1.21.0-orange.svg) ![](https://img.shields.io/github/languages/code-size/xgzlucario/GigaCache.svg) [![codecov](https://codecov.io/gh/xgzlucario/GigaCache/graph/badge.svg?token=yC1xELYaM2)](https://codecov.io/gh/xgzlucario/GigaCache) [![Test and coverage](https://github.com/xgzlucario/GigaCache/actions/workflows/rotom.yml/badge.svg)](https://github.com/xgzlucario/GigaCache/actions/workflows/rotom.yml)
 
-Powerful, fast, eviction supported cache for managing Gigabytes of data, multi-threads support, faster than golang stdmap.
+Powerful, fast, eviction supported cache for managing Gigabytes of data, multi-threads support, Set() method is 2x fast as `built-in map`.
 
 [See doc here](https://www.yuque.com/1ucario/devdoc/ntyyeekkxu8apngd?singleDoc)
 
@@ -64,27 +64,27 @@ cpu: 13th Gen Intel(R) Core(TM) i5-13600KF
 
 Gigache Set operation has better performance than stdmap.
 
-| Benchmark           | Iter    | time/op     | bytes/op | alloc/op    |
-| ------------------- | ------- | ----------- | -------- | ----------- |
-| Set/stdmap-20       | 4059187 | 315.2 ns/op | 156 B/op | 1 allocs/op |
-| Set/gigacache-20    | 4897693 | 277.9 ns/op | 133 B/op | 1 allocs/op |
-| Set/gigacache/Tx-20 | 4355415 | 328.2 ns/op | 161 B/op | 1 allocs/op |
+| Benchmark        | Iter    | time/op     | bytes/op | alloc/op    |
+| ---------------- | ------- | ----------- | -------- | ----------- |
+| Set/stdmap-20    | 3864405 | 335.9 ns/op | 210 B/op | 1 allocs/op |
+| Set/GigaCache-20 | 7264236 | 227.4 ns/op | 173 B/op | 2 allocs/op |
+| Set/swissmap-20  | 6519584 | 212.5 ns/op | 113 B/op | 0 allocs/op |
 
 **Get** from 100k entries.
 
-| Benchmark           | Iter    | time/op     | bytes/op | alloc/op    |
-| ------------------- | ------- | ----------- | -------- | ----------- |
-| Get/stdmap-20       | 8906018 | 150.1 ns/op | 7 B/op   | 0 allocs/op |
-| Get/gigacache-20    | 7293346 | 167.1 ns/op | 7 B/op   | 0 allocs/op |
-| Get/gigacache/Tx-20 | 5621548 | 204.0 ns/op | 7 B/op   | 0 allocs/op |
+| Benchmark        | Iter     | time/op     | bytes/op | alloc/op    |
+| ---------------- | -------- | ----------- | -------- | ----------- |
+| Get/stdmap-20    | 47223234 | 26.28 ns/op | 7 B/op   | 0 allocs/op |
+| Get/GigaCache-20 | 26522108 | 42.99 ns/op | 8 B/op   | 0 allocs/op |
+| Get/swissmap-20  | 46438924 | 26.10 ns/op | 7 B/op   | 0 allocs/op |
 
 **Delete**
 
 | Benchmark              | Iter     | time/op     | bytes/op | alloc/op    |
 | ---------------------- | -------- | ----------- | -------- | ----------- |
-| Delete/stdmap-20       | 70440334 | 16.38 ns/op |	7 B/op	 | 0 allocs/op |
-| Delete/gigacache-20    | 24050403 | 48.55 ns/op |	8 B/op	 | 1 allocs/op |
-| Delete/gigacache/Ex-20 | 22860742	| 50.32 ns/op |	9 B/op	 | 1 allocs/op |
+| Delete/stdmap-20       | 87499602 | 14.53 ns/op |	7 B/op	 | 0 allocs/op |
+| Delete/GigaCache-20 | 22143832 | 49.78 ns/op |	8 B/op	 | 1 allocs/op |
+| Delete/swissmap-20 | 50007508	| 24.14 ns/op |	7 B/op	| 0 allocs/op |
 
 **GC pause time**（Reference to [allegro/bigcache-bench](https://github.com/allegro/bigcache-bench)）
 
