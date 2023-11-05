@@ -3,6 +3,7 @@ package cache
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -52,14 +53,19 @@ func (v V) expired() bool {
 
 // bucket
 type bucket struct {
-	idx    *swiss.Map[Key, V]
-	alloc  int64
-	mtimes int64
-	bytes  []byte
-	items  []*item
 	sync.RWMutex
 
-	// for reused bytes
+	// index and data.
+	idx   *swiss.Map[Key, V]
+	bytes []byte
+	items []*item
+
+	// stat for alloc.
+	alloc   uint64
+	inused  uint64
+	mgtimes uint64
+
+	// for reused bytes.
 	roffset int
 	rstart  int
 }
@@ -117,15 +123,6 @@ func (b *bucket) find(k Key, v V, nocopy ...bool) (string, any, int64, bool) {
 	}
 }
 
-// deleteGet
-func (b *bucket) deleteGet(key Key) (V, bool) {
-	v, ok := b.idx.Get(key)
-	if ok {
-		b.idx.Delete(key)
-	}
-	return v, ok
-}
-
 // Has
 func (c *GigaCache) Has(kstr string) bool {
 	b, key := c.getShard(kstr)
@@ -163,14 +160,17 @@ func (c *GigaCache) Get(kstr string) (any, int64, bool) {
 func (b *bucket) set(key Key, kstr string, val any, ts int64) {
 	bytes, ok := val.([]byte)
 	if ok {
+		need := len(kstr) + len(bytes)
 		// reuse.
-		if b.roffset >= len(kstr)+len(bytes) {
+		if b.roffset >= need {
 			b.idx.Put(key, V{
 				Idx: newIdx(b.rstart, len(bytes), false),
 				TTL: ts,
 			})
 			copy(b.bytes[b.rstart:], kstr)
 			copy(b.bytes[b.rstart+len(kstr):], bytes)
+
+			b.inused += uint64(need)
 			b.resetReused()
 			return
 		}
@@ -182,7 +182,9 @@ func (b *bucket) set(key Key, kstr string, val any, ts int64) {
 		})
 		b.bytes = append(b.bytes, kstr...)
 		b.bytes = append(b.bytes, bytes...)
-		b.alloc++
+
+		b.alloc += uint64(need)
+		b.inused += uint64(need)
 
 	} else {
 		v, ok := b.idx.Get(key)
@@ -194,7 +196,11 @@ func (b *bucket) set(key Key, kstr string, val any, ts int64) {
 		} else {
 			b.idx.Put(key, V{Idx: newIdx(len(b.items), 1, true), TTL: ts})
 			b.items = append(b.items, &item{kstr, val})
-			b.alloc++
+
+			// A uintptr type can be approximated as uint64.
+			need := uint64(8)
+			b.alloc += need
+			b.inused += need
 		}
 	}
 }
@@ -227,39 +233,6 @@ func (c *GigaCache) Delete(kstr string) bool {
 	b.Unlock()
 
 	return ok
-}
-
-// Rename
-func (c *GigaCache) Rename(old, new string) bool {
-	oldb, oldKey := c.getShard(old)
-	oldb.Lock()
-	defer oldb.Unlock()
-
-	// same bucket
-	newb, newKey := c.getShard(new)
-	if oldb == newb {
-		idx, ok := oldb.deleteGet(oldKey)
-		if !ok {
-			return false
-		}
-		oldb.idx.Put(newKey, idx)
-		return true
-	}
-
-	// delete from old bucket.
-	v, ok := oldb.deleteGet(oldKey)
-	if !ok {
-		return false
-	}
-	_, val, ts, ok := oldb.find(oldKey, v, true)
-	if !ok {
-		return false
-	}
-
-	// update new bucket.
-	c.SetTx(new, val, ts)
-
-	return true
 }
 
 // scan
@@ -314,22 +287,24 @@ func (b *bucket) resetReused() {
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
-	var failCont, pcount int64
+	var failed, pcount int64
 
 	// probing
 	b.idx.Iter(func(k Key, v V) bool {
 		if v.expired() {
 			b.idx.Delete(k)
+			// release mem space.
+			used := k.klen() + v.offset()
+			b.inused -= uint64(used)
 			if !v.IsAny() {
-				b.updateReused(v.start(), k.klen()+v.offset())
+				b.updateReused(v.start(), used)
 			}
-			failCont = 0
+			failed = 0
 			return false
 		}
 
-		failCont++
-		// break
-		if failCont > maxFailCount {
+		failed++
+		if failed > maxFailCount {
 			return true
 		}
 
@@ -338,7 +313,7 @@ func (b *bucket) eliminate() {
 	})
 
 	// on migrate threshold
-	if rate := float64(b.idx.Count()) / float64(b.alloc); rate < migrateThresRatio {
+	if rate := float64(b.inused) / float64(b.alloc); rate <= migrateThresRatio {
 		b.migrate()
 	}
 }
@@ -352,8 +327,30 @@ func (c *GigaCache) Migrate() {
 	}
 }
 
+// reuse   200s migrate 36.254602356s 24870 1.457764ms
+// default 200s migrate 51.892735467s 39936 1.299397ms
+// 0.65    200s migrate 43.748878171s 31532 1.387443ms
+
+var (
+	as time.Duration
+	cs int
+)
+
+func init() {
+	go func() {
+		for {
+			time.Sleep(time.Second * 3)
+			if cs == 0 {
+				continue
+			}
+			fmt.Println("migrate", as, cs, as/time.Duration(cs))
+		}
+	}()
+}
+
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket) migrate() {
+	ss := time.Now()
 	nb := &bucket{
 		idx:   swiss.NewMap[Key, V](uint32(b.idx.Count())),
 		bytes: bpool.Get(),
@@ -368,15 +365,20 @@ func (b *bucket) migrate() {
 		return false
 	})
 
+	// release bytes.
 	b.bytes = b.bytes[:0]
 	bpool.Put(b.bytes)
 
+	// swap buckets.
 	b.bytes = nb.bytes
 	b.items = nb.items
 	b.idx = nb.idx
 	b.alloc = nb.alloc
+	b.inused = nb.inused
 	b.resetReused()
-	b.mtimes++
+	b.mgtimes++
+	as += time.Since(ss)
+	cs++
 }
 
 // cacheJSON
@@ -450,9 +452,8 @@ func (c *GigaCache) UnmarshalBytes(src []byte) error {
 // CacheStat is the runtime statistics of Gigacache.
 type CacheStat struct {
 	Len          uint64
-	Alloc        uint64
-	LenBytes     uint64
-	LenAny       uint64
+	BytesAlloc   uint64
+	BytesInused  uint64
 	MigrateTimes uint64
 }
 
@@ -461,10 +462,9 @@ func (c *GigaCache) Stat() (s CacheStat) {
 	for _, b := range c.buckets {
 		b.RLock()
 		s.Len += uint64(b.idx.Count())
-		s.Alloc += uint64(b.alloc)
-		s.LenBytes += uint64(len(b.bytes))
-		s.LenAny += uint64(len(b.items))
-		s.MigrateTimes += uint64(b.mtimes)
+		s.BytesAlloc += uint64(b.alloc)
+		s.BytesInused += uint64(b.inused)
+		s.MigrateTimes += uint64(b.mgtimes)
 		b.RUnlock()
 	}
 	return
@@ -472,7 +472,7 @@ func (c *GigaCache) Stat() (s CacheStat) {
 
 // ExpRate
 func (s CacheStat) ExpRate() float64 {
-	return float64(s.Len) / float64(s.Alloc) * 100
+	return float64(s.BytesInused) / float64(s.BytesAlloc) * 100
 }
 
 func getSlice(b []byte, start int, offset int) []byte {

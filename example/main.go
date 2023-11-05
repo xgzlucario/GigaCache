@@ -56,16 +56,16 @@ func main() {
 				stat := bc.Stat()
 
 				avgRate += stat.ExpRate()
-				avgBytes += float64(stat.LenBytes)
+				avgBytes += float64(stat.BytesAlloc)
 				avgTime++
 
 				// Stats
-				fmt.Printf("[Cache] %.0fs / %dw | len: %dw | alloc: %dw | bytes: %.0fw | rate: %.1f%% | mtime: %d\n",
+				fmt.Printf("[Cache] %.0fs / %dw | len: %dw | alloc: %v | bytes: %v | rate: %.1f%% | mtime: %d\n",
 					time.Since(start).Seconds(),
 					count/1e4,
 					stat.Len/1e4,
-					stat.Alloc/1e4,
-					avgBytes/avgTime/1e4,
+					formatSize(stat.BytesAlloc),
+					formatSize(avgBytes/avgTime),
 					avgRate/avgTime,
 					stat.MigrateTimes)
 
@@ -112,4 +112,21 @@ func main() {
 	// }()
 
 	select {}
+}
+
+const (
+	KB = 1024
+	MB = 1024 * KB
+)
+
+// formatSize
+func formatSize[T int | uint64 | float64](size T) string {
+	switch {
+	case size < KB:
+		return fmt.Sprintf("%dB", size)
+	case size < MB:
+		return fmt.Sprintf("%.1fKB", float64(size)/KB)
+	default:
+		return fmt.Sprintf("%.1fMB", float64(size)/MB)
+	}
 }
