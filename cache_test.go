@@ -199,31 +199,6 @@ func TestCacheSet(t *testing.T) {
 		}
 	})
 
-	t.Run("RandomGet", func(t *testing.T) {
-		m := New(10)
-		m.RandomGet()
-
-		for i := 0; i < 100; i++ {
-			if i%2 == 0 {
-				m.SetEx(strconv.Itoa(i), str, sec)
-			} else {
-				m.Set(strconv.Itoa(i), str)
-			}
-		}
-
-		time.Sleep(sec * 2)
-
-		for i := 0; i < 100; i++ {
-			key, _, _, _ := m.RandomGet()
-			// if key is odd
-			if i%2 != 0 {
-				if _, err := strconv.Atoi(key); err != nil {
-					t.Fatalf("%+v", err)
-				}
-			}
-		}
-	})
-
 	t.Run("Scan", func(t *testing.T) {
 		assert := assert.New(t)
 		m := New(20)

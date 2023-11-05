@@ -8,8 +8,6 @@ import (
 	"time"
 	"unsafe"
 
-	"golang.org/x/exp/rand"
-
 	"github.com/dolthub/swiss"
 	"github.com/zeebo/xxh3"
 )
@@ -35,9 +33,6 @@ const (
 var (
 	// Reuse buffer to reduce memory allocation.
 	bpool = NewBytePoolCap(defaultShardsCount, 0, bufferSize)
-
-	// rand source
-	source = rand.NewSource(uint64(time.Now().UnixNano()))
 )
 
 // GigaCache return a new GigaCache instance.
@@ -63,6 +58,10 @@ type bucket struct {
 	bytes  []byte
 	items  []*item
 	sync.RWMutex
+
+	// for reused bytes
+	roffset int
+	rstart  int
 }
 
 type item struct {
@@ -149,32 +148,6 @@ func (c *GigaCache) Get(kstr string) (any, int64, bool) {
 	return nil, 0, false
 }
 
-// RandomGet returns a random unexpired key-value pair with ttl.
-func (c *GigaCache) RandomGet() (kstr string, val any, ts int64, ok bool) {
-	rdm := source.Uint64()
-
-	for i := uint64(0); i < uint64(len(c.buckets)); i++ {
-		b := c.buckets[(rdm+i)&c.mask]
-		b.Lock()
-		b.idx.Iter(func(k Key, v V) bool {
-			kstr, val, ts, ok = b.find(k, v)
-			// unexpired
-			if ok {
-				return true
-
-			} else {
-				b.idx.Delete(k)
-				return false
-			}
-		})
-		b.Unlock()
-		if ok {
-			return
-		}
-	}
-	return
-}
-
 // set store key-value pair into bucket.
 //
 //	 map[Key]Idx ----+
@@ -190,6 +163,19 @@ func (c *GigaCache) RandomGet() (kstr string, val any, ts int64, ok bool) {
 func (b *bucket) set(key Key, kstr string, val any, ts int64) {
 	bytes, ok := val.([]byte)
 	if ok {
+		// reuse.
+		if b.roffset >= len(kstr)+len(bytes) {
+			b.idx.Put(key, V{
+				Idx: newIdx(b.rstart, len(bytes), false),
+				TTL: ts,
+			})
+			copy(b.bytes[b.rstart:], kstr)
+			copy(b.bytes[b.rstart+len(kstr):], bytes)
+			b.resetReused()
+			return
+		}
+
+		// alloc new space.
 		b.idx.Put(key, V{
 			Idx: newIdx(len(b.bytes), len(bytes), false),
 			TTL: ts,
@@ -200,7 +186,7 @@ func (b *bucket) set(key Key, kstr string, val any, ts int64) {
 
 	} else {
 		v, ok := b.idx.Get(key)
-		// update inplace
+		// update inplace.
 		if ok && v.IsAny() {
 			b.idx.Put(key, V{Idx: v.Idx, TTL: ts})
 			b.items[v.start()].val = val
@@ -313,6 +299,19 @@ func (c *GigaCache) Keys() (keys []string) {
 	return
 }
 
+// updateReused
+func (b *bucket) updateReused(start, offset int) {
+	if offset > b.roffset {
+		b.roffset = offset
+		b.rstart = start
+	}
+}
+
+// resetReused
+func (b *bucket) resetReused() {
+	b.roffset = 0
+}
+
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
 	var failCont, pcount int64
@@ -321,6 +320,9 @@ func (b *bucket) eliminate() {
 	b.idx.Iter(func(k Key, v V) bool {
 		if v.expired() {
 			b.idx.Delete(k)
+			if !v.IsAny() {
+				b.updateReused(v.start(), k.klen()+v.offset())
+			}
 			failCont = 0
 			return false
 		}
@@ -373,6 +375,7 @@ func (b *bucket) migrate() {
 	b.items = nb.items
 	b.idx = nb.idx
 	b.alloc = nb.alloc
+	b.resetReused()
 	b.mtimes++
 }
 
