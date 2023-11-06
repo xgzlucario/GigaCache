@@ -16,22 +16,22 @@ import (
 
 /*
 	5secs 1024
-	[Cache] 201s / 99236w | len: 3126w | alloc: 4273w | bytes: 68195w | rate: 87.0% | mtime: 39936
-	[Mem] mem: 3257MB | sys: 5941MB | gc: 97 | gcpause: 238 us
+	[Cache] 201s | 96826w | len: 2817w | alloc: 566.8MB / 751.4MB | rate: 77.0% | mtime: 24697
+	[Mem] mem: 2558MB | sys: 6459MB | gc: 75 | gcpause: 255 us
 	[Latency]
-	avg: 0.44 | min: 0.14 | p50: 0.36 | p95: 0.70 | p99: 1.02 | max: 656.02
+	avg: 0.69 | min: 0.16 | p50: 0.41 | p95: 0.77 | p99: 1.30 | max: 3007.34
 
 	5secs 2048
-	[Cache] 201s / 103751w | len: 3228w | alloc: 4551w | bytes: 72911w | rate: 85.6% | mtime: 79872
-	[Mem] mem: 4078MB | sys: 6067MB | gc: 98 | gcpause: 273 us
+	[Cache] 201s | 100085w | len: 3247w | alloc: 586.5MB / 777.0MB | rate: 77.3% | mtime: 49209
+	[Mem] mem: 3549MB | sys: 6506MB | gc: 74 | gcpause: 268 us
 	[Latency]
-	avg: 0.46 | min: 0.14 | p50: 0.38 | p95: 0.74 | p99: 1.05 | max: 328.07
+	avg: 0.53 | min: 0.13 | p50: 0.42 | p95: 0.78 | p99: 1.10 | max: 1238.77
 
 	5secs 4096
-	[Cache] 201s / 104891w | len: 3330w | alloc: 4755w | bytes: 74831w | rate: 85.0% | mtime: 159745
-	[Mem] mem: 4289MB | sys: 6110MB | gc: 98 | gcpause: 272 us
+	[Cache] 201s | 96791w | len: 3074w | alloc: 568.2MB / 752.4MB | rate: 77.1% | mtime: 98946
+	[Mem] mem: 4497MB | sys: 5961MB | gc: 74 | gcpause: 297 us
 	[Latency]
-	avg: 0.41 | min: 0.11 | p50: 0.36 | p95: 0.66 | p99: 0.90 | max: 133.64
+	avg: 0.55 | min: 0.11 | p50: 0.39 | p95: 0.74 | p99: 1.03 | max: 1019.75
 */
 
 func main() {
@@ -44,7 +44,7 @@ func main() {
 	var avgRate, avgAlloc, avgInused, avgTime float64
 	var memStats runtime.MemStats
 
-	bc := cache.New()
+	bc := cache.New(4096)
 
 	// Stat
 	go func() {
