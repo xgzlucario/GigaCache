@@ -49,44 +49,6 @@ func TestCacheSet(t *testing.T) {
 		// has
 		assert.Equal(m.Has("foo100"), true)
 
-		// Rename
-		renameArgs := [][]string{
-			{"foo100", "foo100"},
-			{"foo100", "foo200"},
-			{"foo200", "foo100"},
-		}
-		for _, args := range renameArgs {
-			m.Rename(args[0], args[1])
-
-			if args[0] != args[1] {
-				val, ts, ok = m.Get(args[0])
-				assertCacheNil(assert, val, ts, ok)
-			}
-
-			val, ts, ok = m.Get(args[1])
-			assert.Equal(val, []byte("200"))
-			assert.Equal(ts, int64(0))
-			assert.Equal(ok, true)
-		}
-
-		// Rename not exist
-		m.Rename("not-exist", "not-exist")
-		val, ts, ok = m.Get("not-exist")
-		assertCacheNil(assert, val, ts, ok)
-
-		m.Rename("not-exist", "not-exist2")
-		for _, args := range []string{"not-exist", "not-exist2"} {
-			val, ts, ok = m.Get(args)
-			assertCacheNil(assert, val, ts, ok)
-		}
-
-		// Rename expired
-		m.SetEx("foo", []byte{1}, sec)
-		time.Sleep(sec * 2)
-		m.Rename("foo", "foo2")
-		val, ts, ok = m.Get("foo")
-		assertCacheNil(assert, val, ts, ok)
-
 		// get not exist
 		val, ts, ok = m.Get("not-exist")
 		assertCacheNil(assert, val, ts, ok)
@@ -157,23 +119,61 @@ func TestCacheSet(t *testing.T) {
 		assert.Equal(ok, true)
 	})
 
-	t.Run("Stat", func(t *testing.T) {
-		m := New(20)
-		for i := 0; i < 600; i++ {
-			m.Set(strconv.Itoa(i), str)
-		}
-		for i := 0; i < 200; i++ {
-			m.Set(strconv.Itoa(i), i)
-			m.Set("any"+strconv.Itoa(i), i)
+	t.Run("Alloc", func(t *testing.T) {
+		assert := assert.New(t)
+		m := New(10)
+
+		// init
+		var alloc, inused int
+
+		test := func() {
+			stat := m.Stat()
+			assert.Equal(stat.ExpRate(), float64(inused)/float64(alloc)*100)
+			assert.Equal(alloc, int(stat.BytesAlloc))
+			assert.Equal(inused, int(stat.BytesInused))
 		}
 
-		s := m.Stat()
-		if s.LenBytes != 7690 || s.Len != 800 || s.Alloc != 1000 || s.LenAny != 400 {
-			t.Fatalf("%+v", s)
+		// bytes
+		for i := 0; i < 1000; i++ {
+			k := "key" + strconv.Itoa(i)
+			m.Set(k, str)
+
+			alloc += (len(k) + len(str))
+			inused += (len(k) + len(str))
+			test()
 		}
-		if s.ExpRate() != 80 {
-			t.Fatalf("%+v", s.ExpRate())
+
+		// any
+		for i := 0; i < 1000; i++ {
+			k := "any" + strconv.Itoa(i)
+			m.Set(k, i)
+
+			alloc += 8
+			inused += 8
+			test()
 		}
+
+		// expired
+		for i := 0; i < 1000; i++ {
+			k := "exp" + strconv.Itoa(i)
+			m.SetEx(k, str, sec)
+
+			alloc += (len(k) + len(str))
+			inused += (len(k) + len(str))
+			test()
+		}
+
+		time.Sleep(sec * 2)
+
+		for i := 0; i < 1000; i++ {
+			k := "exp" + strconv.Itoa(i)
+			inused -= (len(k) + len(str))
+		}
+
+		m.Migrate()
+
+		stat := m.Stat()
+		assert.Equal(inused, int(stat.BytesInused))
 	})
 
 	t.Run("Keys", func(t *testing.T) {
@@ -196,31 +196,6 @@ func TestCacheSet(t *testing.T) {
 		keys = m.Keys()
 		if len(keys) != 400 {
 			t.Fatalf("%+v", len(keys))
-		}
-	})
-
-	t.Run("RandomGet", func(t *testing.T) {
-		m := New(10)
-		m.RandomGet()
-
-		for i := 0; i < 100; i++ {
-			if i%2 == 0 {
-				m.SetEx(strconv.Itoa(i), str, sec)
-			} else {
-				m.Set(strconv.Itoa(i), str)
-			}
-		}
-
-		time.Sleep(sec * 2)
-
-		for i := 0; i < 100; i++ {
-			key, _, _, _ := m.RandomGet()
-			// if key is odd
-			if i%2 != 0 {
-				if _, err := strconv.Atoi(key); err != nil {
-					t.Fatalf("%+v", err)
-				}
-			}
 		}
 	})
 
@@ -274,77 +249,6 @@ func TestCacheSet(t *testing.T) {
 		})
 	})
 
-	t.Run("Migrate-small", func(t *testing.T) {
-		m := New()
-		m.buckets[0].eliminate()
-
-		for i := 0; i < 50; i++ {
-			m.Set("noexpired"+strconv.Itoa(i), []byte{1, 2, 3})
-		}
-		for i := 0; i < 50; i++ {
-			m.SetEx("expired"+strconv.Itoa(i), []byte{1, 2, 3}, sec)
-		}
-
-		// check
-		s := m.Stat()
-		if s.LenBytes != 1280 || s.Len != 100 || s.Alloc != 100 {
-			t.Fatalf("%+v", s)
-		}
-
-		time.Sleep(sec * 2)
-		// trigger migrate
-		for i := 0; i < 9999; i++ {
-			m.Set("just-for-trig", []byte{})
-		}
-
-		// check2
-		s = m.Stat()
-		if s.LenBytes != 1293 || s.Len != 101 {
-			t.Fatalf("%+v", s)
-		}
-	})
-
-	t.Run("Migrate", func(t *testing.T) {
-		m := New()
-		m.buckets[0].eliminate()
-
-		for i := 0; i < 100; i++ {
-			m.Set("noexpired"+strconv.Itoa(i), []byte{1, 2, 3})
-		}
-		for i := 0; i < 200; i++ {
-			m.SetEx("expired"+strconv.Itoa(i), []byte{1, 2, 3}, sec)
-		}
-		for i := 0; i < 300; i++ {
-			m.Set("noexpired-any"+strconv.Itoa(i), i)
-		}
-		for i := 0; i < 400; i++ {
-			m.SetEx("expired-any"+strconv.Itoa(i), 123, sec)
-		}
-
-		// check
-		s := m.Stat()
-		if s.LenBytes != 3880 || s.Len != 1000 || s.Alloc != 1000 || s.LenAny != 700 {
-			t.Fatalf("%+v", s)
-		}
-
-		time.Sleep(sec * 2)
-		m.Migrate()
-
-		// check2
-		s = m.Stat()
-		if s.LenBytes != 1390 || s.Len != 400 || s.Alloc != 400 || s.LenAny != 300 {
-			t.Fatalf("%+v", s)
-		}
-
-		// check3
-		m.Scan(func(k string, a any, i int64) bool {
-			if k[:3] == "exp" {
-				t.Fatal(k)
-			}
-			return true
-		})
-	})
-
 	t.Run("marshal", func(t *testing.T) {
 		assert := assert.New(t)
 		m := New()
@@ -377,21 +281,59 @@ func TestCacheSet(t *testing.T) {
 	})
 
 	t.Run("eliminate", func(t *testing.T) {
-		m := New(100)
-		for i := 0; i < 1000; i++ {
+		m := New()
+		for i := 0; i < 10000; i++ {
 			m.SetEx(strconv.Itoa(i), i, sec)
 		}
-		for i := 0; i < 1000; i++ {
-			m.SetEx("t"+strconv.Itoa(i), []byte{1}, sec)
+		for i := 0; i < 10000; i++ {
+			m.SetEx("t"+strconv.Itoa(i), str, sec)
 		}
-		for i := 0; i < 1000; i++ {
-			m.SetEx("x"+strconv.Itoa(i), []byte{1}, sec*999)
+		for i := 0; i < 10000; i++ {
+			m.SetEx("x"+strconv.Itoa(i), str, sec*999)
 		}
 
 		time.Sleep(sec * 2)
-		for i := 0; i < 1000; i++ {
+
+		for i := 0; i < 10000; i++ {
 			m.Set("just-for-trig", []byte{})
 		}
+	})
+
+	t.Run("alloc", func(t *testing.T) {
+		assert := assert.New(t)
+		m := New(1)
+		b := m.buckets[0]
+
+		m.Set("foo", []byte("bar"))
+
+		assert.Equal(b.bytes[0:3], []byte("foo"))
+		assert.Equal(b.bytes[3:6], []byte("bar"))
+
+		m.SetEx("exp", []byte("abcd"), sec)
+		assert.Equal(b.bytes[6:9], []byte("exp"))
+		assert.Equal(b.bytes[9:13], []byte("abcd"))
+
+		time.Sleep(sec * 2)
+
+		m.Set("trig", []byte("123")) // "trig" will replace positon of "exp".
+
+		assert.Equal(b.bytes[6:10], []byte("trig"))
+		assert.Equal(b.bytes[10:13], []byte("123"))
+
+		// stat
+		stat := m.Stat()
+		assert.Equal(int(stat.BytesAlloc), 13)
+		assert.Equal(int(stat.BytesInused), 13)
+
+		m.Set("res", []byte("type"))
+
+		// delete
+		ok := m.Delete("foo")
+		assert.True(ok)
+
+		stat = m.Stat()
+		assert.Equal(int(stat.BytesAlloc), 20)
+		assert.Equal(int(stat.BytesInused), 14)
 	})
 }
 
