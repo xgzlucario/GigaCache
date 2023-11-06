@@ -41,7 +41,7 @@ func main() {
 	pset := cache.NewPercentile()
 
 	var count int64
-	var avgRate, avgBytes, avgTime float64
+	var avgRate, avgAlloc, avgInused, avgTime float64
 	var memStats runtime.MemStats
 
 	bc := cache.New()
@@ -56,16 +56,17 @@ func main() {
 				stat := bc.Stat()
 
 				avgRate += stat.ExpRate()
-				avgBytes += float64(stat.BytesAlloc)
+				avgAlloc += float64(stat.BytesAlloc)
+				avgInused += float64(stat.BytesInused)
 				avgTime++
 
 				// Stats
-				fmt.Printf("[Cache] %.0fs / %dw | len: %dw | alloc: %v | bytes: %v | rate: %.1f%% | mtime: %d\n",
+				fmt.Printf("[Cache] %.0fs | %dw | len: %dw | alloc: %v / %v | rate: %.1f%% | mtime: %d\n",
 					time.Since(start).Seconds(),
 					count/1e4,
 					stat.Len/1e4,
-					formatSize(stat.BytesAlloc),
-					formatSize(avgBytes/avgTime),
+					formatSize(avgInused/avgTime),
+					formatSize(avgAlloc/avgTime),
 					avgRate/avgTime,
 					stat.MigrateTimes)
 
@@ -120,10 +121,10 @@ const (
 )
 
 // formatSize
-func formatSize[T int | uint64 | float64](size T) string {
+func formatSize(size float64) string {
 	switch {
 	case size < KB:
-		return fmt.Sprintf("%dB", size)
+		return fmt.Sprintf("%.0fB", size)
 	case size < MB:
 		return fmt.Sprintf("%.1fKB", float64(size)/KB)
 	default:

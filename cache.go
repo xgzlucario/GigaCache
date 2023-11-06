@@ -3,7 +3,6 @@ package cache
 import (
 	"bytes"
 	"encoding/gob"
-	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -112,11 +111,12 @@ func (b *bucket) find(k Key, v V, nocopy ...bool) (string, any, int64, bool) {
 		return n.kstr, n.val, v.TTL, true
 
 	} else {
-		kstr := getSlice(b.bytes, v.start(), k.klen())
-		bytes := getSlice(b.bytes, v.start()+k.klen(), v.offset())
+		vpos := v.start() + k.klen()
+		kstr := b.bytes[v.start():vpos]
+		bytes := b.bytes[vpos : vpos+v.offset()]
 
 		// nocopy
-		if len(nocopy) > 0 && nocopy[0] {
+		if len(nocopy) > 0 {
 			return *b2s(kstr), bytes, v.TTL, true
 		}
 		return string(kstr), slices.Clone(bytes), v.TTL, true
@@ -209,8 +209,8 @@ func (b *bucket) set(key Key, kstr string, val any, ts int64) {
 func (c *GigaCache) SetTx(kstr string, val any, ts int64) {
 	b, key := c.getShard(kstr)
 	b.Lock()
-	b.set(key, kstr, val, ts)
 	b.eliminate()
+	b.set(key, kstr, val, ts)
 	b.Unlock()
 }
 
@@ -228,7 +228,11 @@ func (c *GigaCache) SetEx(kstr string, val any, dur time.Duration) {
 func (c *GigaCache) Delete(kstr string) bool {
 	b, key := c.getShard(kstr)
 	b.Lock()
-	ok := b.idx.Delete(key)
+	idx, ok := b.idx.Get(key)
+	if ok {
+		b.idx.Delete(key)
+		b.inused -= uint64(key.klen() + idx.offset())
+	}
 	b.eliminate()
 	b.Unlock()
 
@@ -327,30 +331,8 @@ func (c *GigaCache) Migrate() {
 	}
 }
 
-// reuse   200s migrate 36.254602356s 24870 1.457764ms
-// default 200s migrate 51.892735467s 39936 1.299397ms
-// 0.65    200s migrate 43.748878171s 31532 1.387443ms
-
-var (
-	as time.Duration
-	cs int
-)
-
-func init() {
-	go func() {
-		for {
-			time.Sleep(time.Second * 3)
-			if cs == 0 {
-				continue
-			}
-			fmt.Println("migrate", as, cs, as/time.Duration(cs))
-		}
-	}()
-}
-
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket) migrate() {
-	ss := time.Now()
 	nb := &bucket{
 		idx:   swiss.NewMap[Key, V](uint32(b.idx.Count())),
 		bytes: bpool.Get(),
@@ -377,8 +359,6 @@ func (b *bucket) migrate() {
 	b.inused = nb.inused
 	b.resetReused()
 	b.mgtimes++
-	as += time.Since(ss)
-	cs++
 }
 
 // cacheJSON
@@ -473,10 +453,6 @@ func (c *GigaCache) Stat() (s CacheStat) {
 // ExpRate
 func (s CacheStat) ExpRate() float64 {
 	return float64(s.BytesInused) / float64(s.BytesAlloc) * 100
-}
-
-func getSlice(b []byte, start int, offset int) []byte {
-	return b[start : start+offset]
 }
 
 // Bytes convert to string unsafe

@@ -298,6 +298,43 @@ func TestCacheSet(t *testing.T) {
 			m.Set("just-for-trig", []byte{})
 		}
 	})
+
+	t.Run("alloc", func(t *testing.T) {
+		assert := assert.New(t)
+		m := New(1)
+		b := m.buckets[0]
+
+		m.Set("foo", []byte("bar"))
+
+		assert.Equal(b.bytes[0:3], []byte("foo"))
+		assert.Equal(b.bytes[3:6], []byte("bar"))
+
+		m.SetEx("exp", []byte("abcd"), sec)
+		assert.Equal(b.bytes[6:9], []byte("exp"))
+		assert.Equal(b.bytes[9:13], []byte("abcd"))
+
+		time.Sleep(sec * 2)
+
+		m.Set("trig", []byte("123")) // "trig" will replace positon of "exp".
+
+		assert.Equal(b.bytes[6:10], []byte("trig"))
+		assert.Equal(b.bytes[10:13], []byte("123"))
+
+		// stat
+		stat := m.Stat()
+		assert.Equal(int(stat.BytesAlloc), 13)
+		assert.Equal(int(stat.BytesInused), 13)
+
+		m.Set("res", []byte("type"))
+
+		// delete
+		ok := m.Delete("foo")
+		assert.True(ok)
+
+		stat = m.Stat()
+		assert.Equal(int(stat.BytesAlloc), 20)
+		assert.Equal(int(stat.BytesInused), 14)
+	})
 }
 
 func FuzzSet(f *testing.F) {
