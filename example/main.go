@@ -44,7 +44,7 @@ func main() {
 	var avgRate, avgAlloc, avgInused, avgTime float64
 	var memStats runtime.MemStats
 
-	bc := cache.New(4096)
+	bc := cache.New()
 
 	// Stat
 	go func() {
@@ -61,13 +61,15 @@ func main() {
 				avgTime++
 
 				// Stats
-				fmt.Printf("[Cache] %.0fs | %dw | len: %dw | alloc: %v / %v | rate: %.1f%% | mtime: %d\n",
+				fmt.Printf("[Cache] %.0fs | %dw | len: %dw | alloc: %v / %v (%.1f%%)\n",
 					time.Since(start).Seconds(),
 					count/1e4,
 					stat.Len/1e4,
-					formatSize(avgInused/avgTime),
-					formatSize(avgAlloc/avgTime),
+					formatSize(avgInused/avgTime), formatSize(avgAlloc/avgTime),
 					avgRate/avgTime,
+				)
+				fmt.Printf("[EVICT] probe: %vw / %vw (%.1f%%) | mtime: %d\n",
+					stat.EvictCount/1e5, stat.ProbeCount/1e5, stat.EvictRate(),
 					stat.MigrateTimes)
 
 				// mem stats
