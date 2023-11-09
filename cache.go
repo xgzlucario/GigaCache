@@ -22,8 +22,9 @@ const (
 	bufferSize         = 1024
 
 	// eliminate probing
-	probeCount   = 100
-	maxFailCount = 3
+	maxProbeCount = 10000
+	maxFailCount  = 10
+	probemsecs    = 10
 
 	// migrateThres defines the conditions necessary to trigger a migrate operation.
 	// Ratio recommended between 0.6 and 0.7, see bench data for details.
@@ -65,6 +66,7 @@ type bucket struct {
 	mgtimes    uint64
 	evictCount uint64
 	probeCount uint64
+	lastEvict  time.Time
 
 	// for reused bytes.
 	roffset int
@@ -293,7 +295,11 @@ func (b *bucket) resetReused() {
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
-	var failed, pcount int64
+	if time.Since(b.lastEvict).Milliseconds() < probemsecs {
+		return
+	}
+	var pcount int
+	var failed byte
 
 	// probing
 	b.idx.Iter(func(k Key, v V) bool {
@@ -320,8 +326,10 @@ func (b *bucket) eliminate() {
 		}
 
 		pcount++
-		return pcount > probeCount
+		return pcount > maxProbeCount
 	})
+
+	b.lastEvict = time.Now()
 
 	// on migrate threshold
 	if rate := float64(b.inused) / float64(b.alloc); rate <= migrateThresRatio {

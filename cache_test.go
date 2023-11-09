@@ -334,6 +334,7 @@ func TestCacheSet(t *testing.T) {
 		stat = m.Stat()
 		assert.Equal(int(stat.BytesAlloc), 20)
 		assert.Equal(int(stat.BytesInused), 14)
+		_ = stat.EvictRate()
 	})
 }
 
