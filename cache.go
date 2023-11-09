@@ -13,17 +13,15 @@ import (
 )
 
 const (
-	noTTL = 0
-
-	// for ttl
-	timeCarry = 1e9
-
+	noTTL              = 0
+	timeCarry          = 1e9
 	defaultShardsCount = 1024
 	bufferSize         = 1024
 
 	// eliminate probing
-	probeCount   = 100
-	maxFailCount = 3
+	maxProbeCount = 10000
+	maxFailCount  = 10
+	probemsecs    = 10
 
 	// migrateThres defines the conditions necessary to trigger a migrate operation.
 	// Ratio recommended between 0.6 and 0.7, see bench data for details.
@@ -59,10 +57,13 @@ type bucket struct {
 	bytes []byte
 	items []*item
 
-	// stat for alloc.
-	alloc   uint64
-	inused  uint64
-	mgtimes uint64
+	// stat for runtime.
+	alloc      uint64
+	inused     uint64
+	mgtimes    uint64
+	evictCount uint64
+	probeCount uint64
+	lastEvict  time.Time
 
 	// for reused bytes.
 	roffset int
@@ -291,12 +292,20 @@ func (b *bucket) resetReused() {
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
-	var failed, pcount int64
+	if time.Since(b.lastEvict).Milliseconds() < probemsecs {
+		return
+	}
+	var pcount int
+	var failed byte
 
 	// probing
 	b.idx.Iter(func(k Key, v V) bool {
+		b.probeCount++
+
 		if v.expired() {
 			b.idx.Delete(k)
+			b.evictCount++
+
 			// release mem space.
 			used := k.klen() + v.offset()
 			b.inused -= uint64(used)
@@ -304,6 +313,7 @@ func (b *bucket) eliminate() {
 				b.updateReused(v.start(), used)
 			}
 			failed = 0
+
 			return false
 		}
 
@@ -313,8 +323,10 @@ func (b *bucket) eliminate() {
 		}
 
 		pcount++
-		return pcount > probeCount
+		return pcount > maxProbeCount
 	})
+
+	b.lastEvict = time.Now()
 
 	// on migrate threshold
 	if rate := float64(b.inused) / float64(b.alloc); rate <= migrateThresRatio {
@@ -435,6 +447,8 @@ type CacheStat struct {
 	BytesAlloc   uint64
 	BytesInused  uint64
 	MigrateTimes uint64
+	EvictCount   uint64
+	ProbeCount   uint64
 }
 
 // Stat return the runtime statistics of Gigacache.
@@ -442,9 +456,11 @@ func (c *GigaCache) Stat() (s CacheStat) {
 	for _, b := range c.buckets {
 		b.RLock()
 		s.Len += uint64(b.idx.Count())
-		s.BytesAlloc += uint64(b.alloc)
-		s.BytesInused += uint64(b.inused)
-		s.MigrateTimes += uint64(b.mgtimes)
+		s.BytesAlloc += b.alloc
+		s.BytesInused += b.inused
+		s.MigrateTimes += b.mgtimes
+		s.EvictCount += b.evictCount
+		s.ProbeCount += b.probeCount
 		b.RUnlock()
 	}
 	return
@@ -453,6 +469,11 @@ func (c *GigaCache) Stat() (s CacheStat) {
 // ExpRate
 func (s CacheStat) ExpRate() float64 {
 	return float64(s.BytesInused) / float64(s.BytesAlloc) * 100
+}
+
+// EvictRate
+func (s CacheStat) EvictRate() float64 {
+	return float64(s.EvictCount) / float64(s.ProbeCount) * 100
 }
 
 // Bytes convert to string unsafe

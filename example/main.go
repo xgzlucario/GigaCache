@@ -15,23 +15,19 @@ import (
 )
 
 /*
-	5secs 1024
-	[Cache] 201s | 96826w | len: 2817w | alloc: 566.8MB / 751.4MB | rate: 77.0% | mtime: 24697
-	[Mem] mem: 2558MB | sys: 6459MB | gc: 75 | gcpause: 255 us
+	(lastEvict 20ms)
+	[Cache] 201s | 74094w | len: 2403w | alloc: 485.4MB / 627.6MB (78.7%)
+	[Evict] probe: 4862w / 13071w (37.2%) | mtime: 25754
+	[Mem] mem: 2850MB | sys: 5619MB | gc: 72 | gcpause: 386 us
 	[Latency]
-	avg: 0.69 | min: 0.16 | p50: 0.41 | p95: 0.77 | p99: 1.30 | max: 3007.34
+	avg: 1.07 | min: 0.20 | p50: 0.62 | p95: 0.99 | p99: 1.88 | max: 2934.09
 
-	5secs 2048
-	[Cache] 201s | 100085w | len: 3247w | alloc: 586.5MB / 777.0MB | rate: 77.3% | mtime: 49209
-	[Mem] mem: 3549MB | sys: 6506MB | gc: 74 | gcpause: 268 us
+	(default)
+	[Cache] 201s | 71051w | len: 2037w | alloc: 455.9MB / 591.0MB (79.7%)
+	[Evict] probe: 4841w / 15215w (31.8%) | mtime: 27650
+	[Mem] mem: 4205MB | sys: 5410MB | gc: 73 | gcpause: 369 us
 	[Latency]
-	avg: 0.53 | min: 0.13 | p50: 0.42 | p95: 0.78 | p99: 1.10 | max: 1238.77
-
-	5secs 4096
-	[Cache] 201s | 96791w | len: 3074w | alloc: 568.2MB / 752.4MB | rate: 77.1% | mtime: 98946
-	[Mem] mem: 4497MB | sys: 5961MB | gc: 74 | gcpause: 297 us
-	[Latency]
-	avg: 0.55 | min: 0.11 | p50: 0.39 | p95: 0.74 | p99: 1.03 | max: 1019.75
+	avg: 1.57 | min: 0.20 | p50: 0.69 | p95: 1.27 | p99: 3.01 | max: 2089.43
 */
 
 func main() {
@@ -44,7 +40,7 @@ func main() {
 	var avgRate, avgAlloc, avgInused, avgTime float64
 	var memStats runtime.MemStats
 
-	bc := cache.New(4096)
+	bc := cache.New()
 
 	// Stat
 	go func() {
@@ -61,13 +57,15 @@ func main() {
 				avgTime++
 
 				// Stats
-				fmt.Printf("[Cache] %.0fs | %dw | len: %dw | alloc: %v / %v | rate: %.1f%% | mtime: %d\n",
+				fmt.Printf("[Cache] %.0fs | %dw | len: %dw | alloc: %v / %v (%.1f%%)\n",
 					time.Since(start).Seconds(),
 					count/1e4,
 					stat.Len/1e4,
-					formatSize(avgInused/avgTime),
-					formatSize(avgAlloc/avgTime),
+					formatSize(avgInused/avgTime), formatSize(avgAlloc/avgTime),
 					avgRate/avgTime,
+				)
+				fmt.Printf("[Evict] probe: %vw / %vw (%.1f%%) | mtime: %d\n",
+					stat.EvictCount/1e5, stat.ProbeCount/1e5, stat.EvictRate(),
 					stat.MigrateTimes)
 
 				// mem stats
