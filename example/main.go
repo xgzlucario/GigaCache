@@ -85,11 +85,13 @@ func main() {
 		}
 	}()
 
+	source := rand.NewSource(uint64(time.Now().UnixNano()))
+
 	// 8 clients set concurrent
 	for i := 0; i < 8; i++ {
 		go func() {
 			for {
-				k := strconv.Itoa(int(rand.Uint32()))
+				k := strconv.Itoa(int(source.Uint64() >> 32))
 				now := time.Now()
 
 				bc.SetEx(k, []byte(k), time.Second*5)
