@@ -36,7 +36,7 @@ func TestIndex(t *testing.T) {
 
 			key := newKey(hash, keylen)
 
-			assert.Equal(key.hash(), hash>>16)
+			assert.Equal(key.hash(), hash>>klenbits)
 			assert.Equal(key.klen(), keylen)
 		}
 	})
@@ -61,13 +61,13 @@ func TestIndex(t *testing.T) {
 	})
 
 	t.Run("panic-keylen", func(t *testing.T) {
-		newKey(0, math.MaxUint16)
+		newKey(0, klenMask)
 
 		defer func() {
 			if r := recover(); r == nil {
 				t.Fatal("should panic")
 			}
 		}()
-		newKey(0, math.MaxUint16+1)
+		newKey(0, klenMask+1+1)
 	})
 }
