@@ -13,11 +13,8 @@ import (
 )
 
 const (
-	noTTL = 0
-
-	// for ttl
-	timeCarry = 1e9
-
+	noTTL              = 0
+	timeCarry          = 1e9
 	defaultShardsCount = 1024
 	bufferSize         = 1024
 
