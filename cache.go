@@ -14,7 +14,6 @@ import (
 
 const (
 	noTTL              = 0
-	timeCarry          = 1e9
 	defaultShardsCount = 1024
 	bufferSize         = 1024
 
@@ -399,7 +398,7 @@ func (c *GigaCache) MarshalBytesFunc(cb func(string, any, int64)) ([]byte, error
 			if bytes, ok := val.([]byte); ok {
 				data.K = append(data.K, kstr)
 				data.V = append(data.V, bytes)
-				data.T = append(data.T, ts/timeCarry) // ns -> s
+				data.T = append(data.T, ts)
 			} else if cb != nil {
 				cb(kstr, val, ts)
 			}
@@ -420,7 +419,7 @@ func (c *GigaCache) UnmarshalBytes(src []byte) error {
 		return err
 	}
 	for i, k := range data.K {
-		c.SetTx(k, data.V[i], data.T[i]*timeCarry)
+		c.SetTx(k, data.V[i], data.T[i])
 	}
 
 	return nil
