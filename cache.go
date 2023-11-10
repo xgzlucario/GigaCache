@@ -1,15 +1,15 @@
 package cache
 
 import (
-	"bytes"
-	"encoding/gob"
 	"slices"
 	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/dolthub/swiss"
+	bproto "github.com/xgzlucario/GigaCache/proto"
 	"github.com/zeebo/xxh3"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -373,13 +373,6 @@ func (b *bucket) migrate() {
 	b.mgtimes++
 }
 
-// cacheJSON
-type cacheJSON struct {
-	K []string
-	V [][]byte
-	T []int64
-}
-
 // MarshalBytes
 func (c *GigaCache) MarshalBytes() ([]byte, error) {
 	return c.MarshalBytesFunc(nil)
@@ -388,8 +381,7 @@ func (c *GigaCache) MarshalBytes() ([]byte, error) {
 // MarshalBytesFunc serializes all key-value pairs with a value of []byte,
 // and calls the callback function when value is any.
 func (c *GigaCache) MarshalBytesFunc(cb func(string, any, int64)) ([]byte, error) {
-	var data cacheJSON
-	gob.Register(data)
+	var data bproto.Cache
 
 	for _, b := range c.buckets {
 		b.RLock()
@@ -408,7 +400,6 @@ func (c *GigaCache) MarshalBytesFunc(cb func(string, any, int64)) ([]byte, error
 				data.K = append(data.K, kstr)
 				data.V = append(data.V, bytes)
 				data.T = append(data.T, ts/timeCarry) // ns -> s
-
 			} else if cb != nil {
 				cb(kstr, val, ts)
 			}
@@ -418,22 +409,16 @@ func (c *GigaCache) MarshalBytesFunc(cb func(string, any, int64)) ([]byte, error
 		b.RUnlock()
 	}
 
-	// encode
-	buf := bytes.NewBuffer(nil)
-	gob.NewEncoder(buf).Encode(data)
-
-	return buf.Bytes(), nil
+	return proto.Marshal(&data)
 }
 
 // UnmarshalBytes
 func (c *GigaCache) UnmarshalBytes(src []byte) error {
-	var data cacheJSON
-	gob.Register(data)
+	var data bproto.Cache
 
-	if err := gob.NewDecoder(bytes.NewBuffer(src)).Decode(&data); err != nil {
+	if err := proto.Unmarshal(src, &data); err != nil {
 		return err
 	}
-
 	for i, k := range data.K {
 		c.SetTx(k, data.V[i], data.T[i]*timeCarry)
 	}

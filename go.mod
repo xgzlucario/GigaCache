@@ -7,6 +7,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/exp v0.0.0-20231108232855-2478ac86f678
+	google.golang.org/protobuf v1.31.0
 )
 
 require (
