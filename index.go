@@ -6,24 +6,25 @@ import (
 
 // Key is the key of GigaCache.
 // +--------------------------------+----------------+
-// |            hash(48)            |    klen(16)    |
+// |            hash(52)            |    klen(12)    |
 // +--------------------------------+----------------+
 
 type Key uint64
 
 const (
-	klenMask = math.MaxUint16
+	klenMask = 0xfff
+	klenbits = 12
 )
 
 func newKey(hash uint64, keylen int) Key {
 	if keylen > klenMask {
-		panic("key length overflow")
+		panic("key length overflow of 4KB")
 	}
-	return Key((hash >> 16 << 16) | uint64(keylen))
+	return Key((hash >> klenbits << klenbits) | uint64(keylen))
 }
 
 func (k Key) hash() uint64 {
-	return uint64(k >> 16)
+	return uint64(k >> klenbits)
 }
 
 func (k Key) klen() int {

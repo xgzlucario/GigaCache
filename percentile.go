@@ -73,7 +73,7 @@ func (p *Percentile) Avg() float64 {
 }
 
 // Print
-func (p *Percentile) Print(scale ...float64) {
+func (p *Percentile) Print() {
 	p.Lock()
 	defer p.Unlock()
 
