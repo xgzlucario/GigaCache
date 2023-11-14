@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/exp/rand"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 
+	"github.com/influxdata/tdigest"
 	cache "github.com/xgzlucario/GigaCache"
 )
 
@@ -30,11 +32,13 @@ import (
 	avg: 1.57 | min: 0.20 | p50: 0.69 | p95: 1.27 | p99: 3.01 | max: 2089.43
 */
 
+var tdlock sync.Mutex
+
 func main() {
 	go http.ListenAndServe("localhost:6060", nil)
 
 	start := time.Now()
-	pset := cache.NewPercentile()
+	td := tdigest.NewWithCompression(1000)
 
 	var count int64
 	var avgRate, avgAlloc, avgInused, avgTime float64
@@ -76,9 +80,13 @@ func main() {
 					memStats.NumGC,
 					float64(memStats.PauseTotalNs)/float64(memStats.NumGC)/1000)
 
-				// latency
-				fmt.Println("[Latency]")
-				pset.Print()
+				// compute quantiles
+				tdlock.Lock()
+				fmt.Printf("50th = %.2f ms\n", td.Quantile(0.5))
+				fmt.Printf("75th = %.2f ms\n", td.Quantile(0.75))
+				fmt.Printf("90th = %.2f ms\n", td.Quantile(0.9))
+				fmt.Printf("99th = %.2f ms\n", td.Quantile(0.99))
+				tdlock.Unlock()
 
 				fmt.Println("-----------------------------------------------------")
 			}
@@ -97,7 +105,9 @@ func main() {
 				bc.SetEx(k, []byte(k), time.Second*5)
 				count++
 
-				pset.Add(float64(time.Since(now)) / float64(time.Microsecond))
+				tdlock.Lock()
+				td.Add(float64(time.Since(now))/float64(time.Microsecond), 1)
+				tdlock.Unlock()
 			}
 		}()
 	}

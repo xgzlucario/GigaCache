@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/dolthub/swiss v0.2.1
+	github.com/influxdata/tdigest v0.0.1
 	github.com/stretchr/testify v1.8.4
 	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/exp v0.0.0-20231108232855-2478ac86f678
