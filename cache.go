@@ -50,6 +50,7 @@ func (v V) expired() bool {
 // bucket
 type bucket struct {
 	sync.RWMutex
+	id int
 
 	// index and data.
 	idx   *swiss.Map[Key, V]
@@ -67,6 +68,10 @@ type bucket struct {
 	// for reused bytes.
 	roffset int
 	rstart  int
+
+	// for rehash.
+	rehash bool
+	nb     *bucket
 }
 
 type item struct {
@@ -86,6 +91,7 @@ func New(shard ...int) *GigaCache {
 	}
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket{
+			id:    i,
 			idx:   swiss.NewMap[Key, V](8),
 			bytes: bpool.Get(),
 			items: make([]*item, 0),
@@ -158,6 +164,11 @@ func (c *GigaCache) Get(kstr string) (any, int64, bool) {
 //
 // set stores key and value in an array of bytes and returns their index positions.
 func (b *bucket) set(key Key, kstr string, val any, ts int64) {
+	if b.rehash {
+		b.nb.set(key, kstr, val, ts)
+		return
+	}
+
 	bytes, ok := val.([]byte)
 	if ok {
 		need := len(kstr) + len(bytes)
@@ -291,6 +302,11 @@ func (b *bucket) resetReused() {
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
+	if b.rehash {
+		b.migrate()
+		return
+	}
+
 	if time.Since(b.lastEvict).Milliseconds() < probemsecs {
 		return
 	}
@@ -335,39 +351,59 @@ func (b *bucket) eliminate() {
 
 // Migrate call migrate force.
 func (c *GigaCache) Migrate() {
-	for _, b := range c.buckets {
-		b.Lock()
-		b.migrate()
-		b.Unlock()
-	}
+	// for _, b := range c.buckets {
+	// 	b.Lock()
+	// 	b.migrate()
+	// 	b.Unlock()
+	// }
 }
 
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket) migrate() {
-	nb := &bucket{
-		idx:   swiss.NewMap[Key, V](uint32(b.idx.Count())),
-		bytes: bpool.Get(),
-		items: make([]*item, 0),
+	if !b.rehash {
+		// init
+		b.rehash = true
+		b.nb = &bucket{
+			idx:   swiss.NewMap[Key, V](uint32(b.idx.Count())),
+			bytes: bpool.Get(),
+			items: make([]*item, 0),
+		}
+		return
 	}
 
+	var count int
 	b.idx.Iter(func(key Key, v V) bool {
 		kstr, val, ts, ok := b.find(key, v, true)
 		if ok {
-			nb.set(key, kstr, val, ts)
+			b.nb.set(key, kstr, val, ts)
 		}
-		return false
+		b.idx.Delete(key)
+
+		count++
+		return count >= 100
 	})
+
+	// Debug
+	if b.id == 10 {
+		// fmt.Println("migrate", b.idx.Count(), b.nb.idx.Count())
+	}
+
+	// not finish yet.
+	if b.idx.Count() > 0 {
+		return
+	}
 
 	// release bytes.
 	b.bytes = b.bytes[:0]
 	bpool.Put(b.bytes)
 
 	// swap buckets.
-	b.bytes = nb.bytes
-	b.items = nb.items
-	b.idx = nb.idx
-	b.alloc = nb.alloc
-	b.inused = nb.inused
+	b.bytes = b.nb.bytes
+	b.items = b.nb.items
+	b.alloc = b.nb.alloc
+	b.inused = b.nb.inused
+	b.nb = nil
+	b.rehash = false
 	b.resetReused()
 	b.mgtimes++
 }

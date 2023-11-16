@@ -16,22 +16,6 @@ import (
 	cache "github.com/xgzlucario/GigaCache"
 )
 
-/*
-	(lastEvict 20ms)
-	[Cache] 201s | 74094w | len: 2403w | alloc: 485.4MB / 627.6MB (78.7%)
-	[Evict] probe: 4862w / 13071w (37.2%) | mtime: 25754
-	[Mem] mem: 2850MB | sys: 5619MB | gc: 72 | gcpause: 386 us
-	[Latency]
-	avg: 1.07 | min: 0.20 | p50: 0.62 | p95: 0.99 | p99: 1.88 | max: 2934.09
-
-	(default)
-	[Cache] 201s | 71051w | len: 2037w | alloc: 455.9MB / 591.0MB (79.7%)
-	[Evict] probe: 4841w / 15215w (31.8%) | mtime: 27650
-	[Mem] mem: 4205MB | sys: 5410MB | gc: 73 | gcpause: 369 us
-	[Latency]
-	avg: 1.57 | min: 0.20 | p50: 0.69 | p95: 1.27 | p99: 3.01 | max: 2089.43
-*/
-
 var tdlock sync.Mutex
 
 func main() {
@@ -82,9 +66,9 @@ func main() {
 
 				// compute quantiles
 				tdlock.Lock()
-				fmt.Printf("90th = %.2f ms\n", td.Quantile(0.9))
-				fmt.Printf("99th = %.2f ms\n", td.Quantile(0.99))
-				fmt.Printf("100th = %.2f ms\n", td.Quantile(0.9999))
+				fmt.Printf("90th = %.2f us\n", td.Quantile(0.9))
+				fmt.Printf("99th = %.2f us\n", td.Quantile(0.99))
+				fmt.Printf("100th = %.2f us\n", td.Quantile(0.9999))
 				tdlock.Unlock()
 
 				fmt.Println("-----------------------------------------------------")
@@ -117,8 +101,6 @@ func main() {
 	// 		fmt.Println("Marshal cost:", time.Since(a))
 	// 	}
 	// }()
-
-	select {}
 }
 
 const (
