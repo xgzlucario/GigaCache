@@ -82,10 +82,9 @@ func main() {
 
 				// compute quantiles
 				tdlock.Lock()
-				fmt.Printf("50th = %.2f ms\n", td.Quantile(0.5))
-				fmt.Printf("75th = %.2f ms\n", td.Quantile(0.75))
 				fmt.Printf("90th = %.2f ms\n", td.Quantile(0.9))
 				fmt.Printf("99th = %.2f ms\n", td.Quantile(0.99))
+				fmt.Printf("100th = %.2f ms\n", td.Quantile(0.9999))
 				tdlock.Unlock()
 
 				fmt.Println("-----------------------------------------------------")
@@ -95,21 +94,18 @@ func main() {
 
 	source := rand.NewSource(uint64(time.Now().UnixNano()))
 
-	// 8 clients set concurrent
-	for i := 0; i < 8; i++ {
-		go func() {
-			for {
-				k := strconv.Itoa(int(source.Uint64() >> 32))
-				now := time.Now()
+	// set test
+	for j := 0; ; j++ {
+		k := strconv.Itoa(int(source.Uint64() >> 32))
+		now := time.Now()
 
-				bc.SetEx(k, []byte(k), time.Second*5)
-				count++
+		bc.SetEx(k, []byte(k), time.Second*5)
+		count++
 
-				tdlock.Lock()
-				td.Add(float64(time.Since(now))/float64(time.Microsecond), 1)
-				tdlock.Unlock()
-			}
-		}()
+		cost := float64(time.Since(now)) / float64(time.Microsecond)
+		tdlock.Lock()
+		td.Add(cost, 1)
+		tdlock.Unlock()
 	}
 
 	// Marshal test
