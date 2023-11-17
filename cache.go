@@ -19,17 +19,11 @@ const (
 
 	// eliminate probing
 	maxProbeCount = 10000
-	maxFailCount  = 10
-	probemsecs    = 10
+	maxFailCount  = 3
 
 	// migrateThres defines the conditions necessary to trigger a migrate operation.
 	// Ratio recommended between 0.6 and 0.7, see bench data for details.
 	migrateThresRatio = 0.6
-)
-
-var (
-	// Reuse buffer to reduce memory allocation.
-	bpool = NewBytePoolCap(defaultShardsCount, 0, bufferSize)
 )
 
 // GigaCache return a new GigaCache instance.
@@ -50,7 +44,6 @@ func (v V) expired() bool {
 // bucket
 type bucket struct {
 	sync.RWMutex
-	id int
 
 	// index and data.
 	idx   *swiss.Map[Key, V]
@@ -63,7 +56,6 @@ type bucket struct {
 	mgtimes    uint64
 	evictCount uint64
 	probeCount uint64
-	lastEvict  time.Time
 
 	// for reused bytes.
 	roffset int
@@ -91,9 +83,8 @@ func New(shard ...int) *GigaCache {
 	}
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket{
-			id:    i,
 			idx:   swiss.NewMap[Key, V](8),
-			bytes: bpool.Get(),
+			bytes: make([]byte, 0, 1024),
 			items: make([]*item, 0),
 		}
 	}
@@ -307,9 +298,6 @@ func (b *bucket) eliminate() {
 		return
 	}
 
-	if time.Since(b.lastEvict).Milliseconds() < probemsecs {
-		return
-	}
 	var pcount int
 	var failed byte
 
@@ -333,7 +321,7 @@ func (b *bucket) eliminate() {
 		}
 
 		failed++
-		if failed > maxFailCount {
+		if failed >= maxFailCount {
 			return true
 		}
 
@@ -341,21 +329,10 @@ func (b *bucket) eliminate() {
 		return pcount > maxProbeCount
 	})
 
-	b.lastEvict = time.Now()
-
 	// on migrate threshold
 	if rate := float64(b.inused) / float64(b.alloc); rate <= migrateThresRatio {
 		b.migrate()
 	}
-}
-
-// Migrate call migrate force.
-func (c *GigaCache) Migrate() {
-	// for _, b := range c.buckets {
-	// 	b.Lock()
-	// 	b.migrate()
-	// 	b.Unlock()
-	// }
 }
 
 // migrate move valid key-value pairs to the new container to save memory.
@@ -365,7 +342,7 @@ func (b *bucket) migrate() {
 		b.rehash = true
 		b.nb = &bucket{
 			idx:   swiss.NewMap[Key, V](uint32(b.idx.Count())),
-			bytes: bpool.Get(),
+			bytes: make([]byte, 0, len(b.bytes)),
 			items: make([]*item, 0),
 		}
 		return
@@ -383,19 +360,10 @@ func (b *bucket) migrate() {
 		return count >= 100
 	})
 
-	// Debug
-	if b.id == 10 {
-		// fmt.Println("migrate", b.idx.Count(), b.nb.idx.Count())
-	}
-
 	// not finish yet.
 	if b.idx.Count() > 0 {
 		return
 	}
-
-	// release bytes.
-	b.bytes = b.bytes[:0]
-	bpool.Put(b.bytes)
 
 	// swap buckets.
 	b.bytes = b.nb.bytes

@@ -170,8 +170,6 @@ func TestCacheSet(t *testing.T) {
 			inused -= (len(k) + len(str))
 		}
 
-		m.Migrate()
-
 		stat := m.Stat()
 		assert.Equal(inused, int(stat.BytesInused))
 	})
