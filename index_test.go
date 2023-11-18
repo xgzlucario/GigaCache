@@ -13,17 +13,10 @@ func TestIndex(t *testing.T) {
 		assert := assert.New(t)
 
 		for i := 0; i < 1e6; i++ {
-			a, b := int(rand.Uint32()>>1), int(rand.Uint32()>>1)
-			idx := newIdx(a, b, i%2 == 0)
-
+			a, b := int(rand.Uint32()), int(rand.Uint32())
+			idx := newIdx(a, b)
 			assert.Equal(idx.start(), a)
 			assert.Equal(idx.offset(), b)
-
-			if i%2 == 0 {
-				assert.True(idx.IsAny())
-			} else {
-				assert.False(idx.IsAny())
-			}
 		}
 	})
 
@@ -47,7 +40,7 @@ func TestIndex(t *testing.T) {
 				t.Fatal("should panic")
 			}
 		}()
-		newIdx(math.MaxInt, 0, false)
+		newIdx(math.MaxInt, 0)
 	})
 
 	t.Run("panic-offset", func(t *testing.T) {
@@ -57,7 +50,7 @@ func TestIndex(t *testing.T) {
 				t.Fatal("should panic")
 			}
 		}()
-		newIdx(0, math.MaxInt, false)
+		newIdx(0, math.MaxInt)
 	})
 
 	t.Run("panic-keylen", func(t *testing.T) {

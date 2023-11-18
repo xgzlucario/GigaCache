@@ -1,371 +1,286 @@
 package cache
 
 import (
-	"math"
+	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-)
-
-const (
-	num = 10000
+	"golang.org/x/exp/maps"
 )
 
 var (
-	str = []byte("0123456789")
-	sec = time.Second / 20
+	dur = time.Second / 10
 )
 
-func assertCacheNil(a *assert.Assertions, val any, ts int64, ok bool) {
-	a.Equal(val, nil)
-	a.Equal(ts, int64(0))
-	a.Equal(ok, false)
-}
-
-func TestCacheSet(t *testing.T) {
-	t.Run("Set/Get", func(t *testing.T) {
-		assert := assert.New(t)
-
-		m := New(100)
-		for i := 0; i < num; i++ {
-			m.Set("foo"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
-		}
-
-		// get exist
-		val, ts, ok := m.Get("foo123")
-		assert.Equal(val, []byte("123"))
-		assert.Equal(ts, int64(0))
-		assert.Equal(ok, true)
-
-		// update get
-		m.Set("foo100", []byte("200"))
-		val, ts, ok = m.Get("foo100")
-		assert.Equal(val, []byte("200"))
-		assert.Equal(ts, int64(0))
-		assert.Equal(ok, true)
-
-		// has
-		assert.Equal(m.Has("foo100"), true)
-
-		// get not exist
-		val, ts, ok = m.Get("not-exist")
-		assertCacheNil(assert, val, ts, ok)
-
-		// set negetive number
-		m.SetTx("no", []byte{1}, -9)
-		val, ts, ok = m.Get("no")
-		assertCacheNil(assert, val, ts, ok)
-
-		// get deleted
-		ok = m.Delete("foo5")
-		assert.Equal(ok, true, "delete error")
-
-		val, ts, ok = m.Get("foo5")
-		assertCacheNil(assert, val, ts, ok)
-
-		// get expired
-		m.SetEx("test", []byte{1}, sec)
-		time.Sleep(sec * 2)
-		val, ts, ok = m.Get("test")
-		assertCacheNil(assert, val, ts, ok)
-
-		{
-			m := New(1)
-			// test set inplace
-			m.Set("myInt", 1)
-			assert.Equal(len(m.buckets[0].items), 1)
-			m.Set("myInt", 2)
-			assert.Equal(len(m.buckets[0].items), 1)
-			m.Set("myInt2", 3)
-			assert.Equal(len(m.buckets[0].items), 2)
-		}
-	})
-
-	t.Run("Nocopy", func(t *testing.T) {
-		assert := assert.New(t)
-		m := New(1)
-
-		// get nocopy
-		m.SetEx("nocopy", []byte{1, 2, 3, 4}, time.Minute)
-
-		m.buckets[0].scan(func(k string, val any, i int64) bool {
-			if val, ok := val.([]byte); ok {
-				copy(val, []byte{8, 8, 8, 8})
-			}
-			return true
-		}, true)
-
-		val, ts, ok := m.Get("nocopy")
-		assert.Equal(val, []byte{8, 8, 8, 8})
-		assert.GreaterOrEqual(ts, GetClock())
-		assert.Equal(ok, true)
-
-		// get copy
-		m = New(1)
-		m.SetEx("copy", []byte{1, 2, 3, 4}, time.Minute)
-
-		m.buckets[0].scan(func(k string, val any, i int64) bool {
-			if val, ok := val.([]byte); ok {
-				copy(val, []byte{8, 8, 8, 8})
-			}
-			return true
-		})
-
-		val, ts, ok = m.Get("copy")
-		assert.Equal(val, []byte{1, 2, 3, 4})
-		assert.GreaterOrEqual(ts, GetClock())
-		assert.Equal(ok, true)
-	})
-
-	t.Run("Alloc", func(t *testing.T) {
-		assert := assert.New(t)
-		m := New(10)
-
-		// init
-		var alloc, inused int
-
-		test := func() {
-			stat := m.Stat()
-			assert.Equal(stat.ExpRate(), float64(inused)/float64(alloc)*100)
-			assert.Equal(alloc, int(stat.BytesAlloc))
-			assert.Equal(inused, int(stat.BytesInused))
-		}
-
-		// bytes
-		for i := 0; i < 1000; i++ {
-			k := "key" + strconv.Itoa(i)
-			m.Set(k, str)
-
-			alloc += (len(k) + len(str))
-			inused += (len(k) + len(str))
-			test()
-		}
-
-		// any
-		for i := 0; i < 1000; i++ {
-			k := "any" + strconv.Itoa(i)
-			m.Set(k, i)
-
-			alloc += 8
-			inused += 8
-			test()
-		}
-
-		// expired
-		for i := 0; i < 1000; i++ {
-			k := "exp" + strconv.Itoa(i)
-			m.SetEx(k, str, sec)
-
-			alloc += (len(k) + len(str))
-			inused += (len(k) + len(str))
-			test()
-		}
-
-		time.Sleep(sec * 2)
-
-		for i := 0; i < 1000; i++ {
-			k := "exp" + strconv.Itoa(i)
-			inused -= (len(k) + len(str))
-		}
-
-		m.Migrate()
-
-		stat := m.Stat()
-		assert.Equal(inused, int(stat.BytesInused))
-	})
-
-	t.Run("Keys", func(t *testing.T) {
-		m := New(20)
-		for i := 0; i < 200; i++ {
-			m.Set("noexp"+strconv.Itoa(i), str)
-			m.SetEx(strconv.Itoa(i), str, sec)
-		}
-		for i := 0; i < 200; i++ {
-			m.Set("any"+strconv.Itoa(i), i)
-		}
-
-		keys := m.Keys()
-		if len(keys) != 600 {
-			t.Fatalf("%+v", len(keys))
-		}
-
-		time.Sleep(sec * 2)
-
-		keys = m.Keys()
-		if len(keys) != 400 {
-			t.Fatalf("%+v", len(keys))
-		}
-	})
-
-	t.Run("Scan", func(t *testing.T) {
-		assert := assert.New(t)
-		m := New(20)
-
-		for i := 0; i < 1000; i++ {
-			m.Set("a"+strconv.Itoa(i), []byte(strconv.Itoa(i)))
-			m.SetEx("b"+strconv.Itoa(i), []byte(strconv.Itoa(i)), sec)
-			m.Set("c"+strconv.Itoa(i), i)
-			m.SetEx("d"+strconv.Itoa(i), i, sec)
-		}
-
-		m.Scan(func(k string, a any, i int64) bool {
-			id := k[1:]
-			switch k[0] {
-			case 'a':
-				assert.Equal(string(a.([]byte)), id)
-
-			case 'b':
-				assert.Equal(string(a.([]byte)), id)
-
-			case 'c':
-				n, _ := strconv.Atoi(id)
-				assert.Equal(a, n)
-
-			case 'd':
-				n, _ := strconv.Atoi(id)
-				assert.Equal(a, n)
-			}
-			return true
-		})
-
-		time.Sleep(sec * 2)
-
-		m.Scan(func(k string, a any, i int64) bool {
-			id := k[1:]
-			switch k[0] {
-			case 'a':
-				assert.Equal(string(a.([]byte)), id)
-
-			case 'c':
-				n, _ := strconv.Atoi(id)
-				assert.Equal(a, n)
-
-			case 'b', 'd':
-				t.Fatalf("want expired, got %v", a)
-			}
-			return true
-		})
-	})
-
-	t.Run("marshal", func(t *testing.T) {
-		assert := assert.New(t)
-		m := New()
-
-		for i := 0; i < num; i++ {
-			key := strconv.Itoa(i)
-			value := []byte(key)
-
-			m.SetEx("any"+key, i, time.Minute)
-			m.SetEx(key, value, time.Minute)
-		}
-
-		{
-			var anyCount int
-			_, err := m.MarshalBytesFunc(func(k string, a any, i int64) {
-				anyCount++
-			})
-			assert.Nil(err)
-			assert.Equal(anyCount, num)
-		}
-
-		src, err := m.MarshalBytes()
-		assert.Nil(err)
-
-		m1 := New()
-		assert.Nil(m1.UnmarshalBytes(src))
-
-		// unmarshal error
-		assert.NotNil(m.UnmarshalBytes([]byte("fake news")))
-	})
-
-	t.Run("eliminate", func(t *testing.T) {
-		m := New()
-		for i := 0; i < 10000; i++ {
-			m.SetEx(strconv.Itoa(i), i, sec)
-		}
-		for i := 0; i < 10000; i++ {
-			m.SetEx("t"+strconv.Itoa(i), str, sec)
-		}
-		for i := 0; i < 10000; i++ {
-			m.SetEx("x"+strconv.Itoa(i), str, sec*999)
-		}
-
-		time.Sleep(sec * 2)
-
-		for i := 0; i < 10000; i++ {
-			m.Set("just-for-trig", []byte{})
-		}
-	})
-
-	t.Run("alloc", func(t *testing.T) {
-		assert := assert.New(t)
-		m := New(1)
-		b := m.buckets[0]
-
-		m.Set("foo", []byte("bar"))
-
-		assert.Equal(b.bytes[0:3], []byte("foo"))
-		assert.Equal(b.bytes[3:6], []byte("bar"))
-
-		m.SetEx("exp", []byte("abcd"), sec)
-		assert.Equal(b.bytes[6:9], []byte("exp"))
-		assert.Equal(b.bytes[9:13], []byte("abcd"))
-
-		time.Sleep(sec * 2)
-
-		m.Set("trig", []byte("123")) // "trig" will replace positon of "exp".
-
-		assert.Equal(b.bytes[6:10], []byte("trig"))
-		assert.Equal(b.bytes[10:13], []byte("123"))
-
-		// stat
-		stat := m.Stat()
-		assert.Equal(int(stat.BytesAlloc), 13)
-		assert.Equal(int(stat.BytesInused), 13)
-
-		m.Set("res", []byte("type"))
-
-		// delete
-		ok := m.Delete("foo")
+func TestSet(t *testing.T) {
+	assert := assert.New(t)
+
+	m := New(64)
+	m2 := map[string][]byte{}
+
+	// Set fake datas.
+	for i := 0; i < 10000; i++ {
+		key := "key" + strconv.Itoa(i)
+		value := []byte(key)
+
+		m.Set(key, value)
+		m2[key] = value
+	}
+
+	// Check datas.
+	for k, v := range m2 {
+		// Get
+		val, ts, ok := m.Get(k)
+		assert.Equal(v, val)
 		assert.True(ok)
+		assert.Equal(ts, int64(0))
 
-		stat = m.Stat()
-		assert.Equal(int(stat.BytesAlloc), 20)
-		assert.Equal(int(stat.BytesInused), 14)
-		_ = stat.EvictRate()
-	})
+		// Get none.
+		val, ts, ok = m.Get("none")
+		assert.Nil(val)
+		assert.False(ok)
+		assert.Equal(ts, int64(0))
+
+		// Has
+		assert.True(m.Has(k))
+
+		// Has none.
+		assert.False(m.Has("none"))
+	}
+
+	// Remove datas.
+	for k := range m2 {
+		assert.True(m.Delete(k))
+		assert.False(m.Delete(k))
+		assert.False(m.Delete("none"))
+	}
 }
 
-func FuzzSet(f *testing.F) {
-	m := New()
+func TestRehash(t *testing.T) {
+	assert := assert.New(t)
 
-	f.Fuzz(func(t *testing.T, key string, val []byte, ts int64) {
-		f := func(ts int64) {
-			now := GetClock()
-			m.SetTx(key, val, ts)
-			v, ttl, ok := m.Get(key)
+	m := New(1)
+	for i := 0; i < 5; i++ {
+		m.Set(strconv.Itoa(i), []byte{','})
+	}
 
-			// no ttl
-			if ts == 0 {
-				assert.Equal(t, v, val)
-				assert.Equal(t, ttl, int64(0))
-				assert.Equal(t, ok, true)
+	assert.Equal(m.buckets[0].data, []byte{
+		'0', ',', '1', ',', '2', ',', '3', ',', '4', ',',
+	})
 
-				// expired
-			} else if ts < now {
-				assertCacheNil(assert.New(t), v, ttl, ok)
+	// remove 3
+	m.Delete(strconv.Itoa(3))
 
-				// not expired
-			} else if ts > now {
-				assert.Equal(t, v, val)
-				assert.Equal(t, ts, ttl)
-				assert.Equal(t, ok, true)
-			}
+	m.buckets[0].rehash = true
+	m.buckets[0].initRehashBucket()
+
+	m.Set(strconv.Itoa(9), []byte{','})
+
+	values := strings.Split(string(m.buckets[0].data), ",")
+	values = values[:len(values)-1]
+
+	// should be [0, 1, 2, 4, 9]
+	assert.ElementsMatch(values, []string{"0", "1", "2", "4", "9"})
+}
+
+func TestExpired(t *testing.T) {
+	assert := assert.New(t)
+
+	m := New(64)
+	m2 := map[string][]byte{}
+
+	for i := 0; i < 1000; i++ {
+		key := "key" + strconv.Itoa(i)
+		m.SetEx(key, []byte(key), dur*999)
+		m2[key] = []byte(key)
+	}
+
+	// SetEx
+	for i := 1000; i < 2000; i++ {
+		key := "exp" + strconv.Itoa(i)
+		m.SetEx(key, []byte(key), dur)
+	}
+
+	// Wait to expire.
+	time.Sleep(dur * 2)
+
+	// Scan
+	count := 0
+	m.Scan(func(s []byte, b []byte, i int64) bool {
+		assert.True(strings.HasPrefix(string(s), "key"))
+		count++
+		return false
+	})
+
+	assert.Equal(1000, count)
+
+	// Keys
+	assert.ElementsMatch(m.Keys(), maps.Keys(m2))
+}
+
+func TestMarshal(t *testing.T) {
+	assert := assert.New(t)
+
+	m := New(64)
+	m2 := map[string][]byte{}
+
+	for i := 0; i < 1000; i++ {
+		key := "key" + strconv.Itoa(i)
+		m.Set(key, []byte(key))
+		m2[key] = []byte(key)
+	}
+
+	for i := 1000; i < 2000; i++ {
+		key := "exp" + strconv.Itoa(i)
+		m.SetEx(key, []byte(key), dur)
+	}
+
+	time.Sleep(dur * 2)
+
+	// Marshal
+	data, err := m.MarshalBinary()
+	assert.Nil(err)
+
+	// Unmarshal
+	m3 := New(64)
+	assert.Nil(m3.UnmarshalBinary(data))
+
+	// Check
+	for k, v := range m2 {
+		val, ts, ok := m3.Get(k)
+		assert.Equal(v, val)
+		assert.True(ok)
+		assert.Equal(ts, int64(0))
+	}
+
+	// Error
+	err = m3.UnmarshalBinary([]byte("fake news"))
+	assert.NotNil(err)
+}
+
+func TestStat(t *testing.T) {
+	assert := assert.New(t)
+
+	m := New(1)
+
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("%03d", i)
+		m.Set(key, []byte(key))
+	}
+
+	stat := m.Stat()
+	assert.Equal(uint64(100), stat.Len)
+	assert.Equal(uint64(3*100+3*100), stat.BytesAlloc)
+	assert.Equal(uint64(3*100+3*100), stat.BytesInused)
+	assert.Equal(uint64(0), stat.MigrateTimes)
+	assert.Equal(uint64(0), stat.EvictCount)
+	assert.Equal(uint64(99*3), stat.ProbeCount)
+	assert.Equal(float64(100), stat.ExpRate())
+	assert.Equal(float64(0), stat.EvictRate())
+
+	// Delete
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("%03d", i)
+		assert.True(m.Delete(key))
+	}
+
+	stat = m.Stat()
+	assert.Equal(uint64(90), stat.Len)
+	assert.Equal(uint64(3*100+3*100), stat.BytesAlloc)
+	assert.Equal(uint64(3*90+3*90), stat.BytesInused)
+	assert.Equal(uint64(0), stat.MigrateTimes)
+	assert.Equal(uint64(0), stat.EvictCount)
+	assert.Equal(uint64(10*3+99*3), stat.ProbeCount)
+	assert.Equal(float64(90), stat.ExpRate())
+	assert.Equal(float64(0), stat.EvictRate())
+
+	// Reuse
+	m.Set("000", []byte("000"))
+
+	stat = m.Stat()
+	assert.Equal(uint64(91), stat.Len)
+	assert.Equal(uint64(3*100+3*100), stat.BytesAlloc)
+	assert.Equal(uint64(3*91+3*91), stat.BytesInused)
+	assert.Equal(uint64(0), stat.MigrateTimes)
+	assert.Equal(uint64(0), stat.EvictCount)
+	assert.Equal(uint64(10*3+100*3), stat.ProbeCount)
+	assert.Equal(float64(91), stat.ExpRate())
+	assert.Equal(float64(0), stat.EvictRate())
+}
+
+func TestMigrate(t *testing.T) {
+	assert := assert.New(t)
+
+	m := New(1)
+
+	for i := 0; i < 1000; i++ {
+		k1 := "key" + strconv.Itoa(i)
+		m.Set(k1, []byte(k1))
+
+		k2 := "exp" + strconv.Itoa(i)
+		m.SetEx(k2, []byte(k2), dur)
+	}
+
+	time.Sleep(dur * 2)
+
+	testCheck := func() {
+		for i := 0; i < 1000; i++ {
+			key := "key" + strconv.Itoa(i)
+			// Has
+			assert.True(m.Has(key))
+			// Get
+			v, ts, ok := m.Get(key)
+			assert.Equal([]byte(key), v)
+			assert.True(ok)
+			assert.Equal(ts, int64(0))
+			// Delete
+			assert.False(m.Delete("none"))
 		}
 
-		f(ts)
-		f(math.MaxInt64 - ts)
-	})
+		for i := 0; i < 1000; i++ {
+			key := "exp" + strconv.Itoa(i)
+			// Has
+			assert.False(m.Has(key))
+			// Get
+			v, ts, ok := m.Get(key)
+			assert.Nil(v)
+			assert.False(ok)
+			assert.Equal(ts, int64(0))
+			// Delete
+			assert.False(m.Delete("none"))
+		}
+	}
+
+	// Migrate.
+	m.buckets[0].migrate()
+	for i := 0; i < 10; i++ {
+		testCheck()
+		m.buckets[0].migrate()
+	}
+
+	// Check stats.
+	stat := m.Stat()
+	assert.Equal(1000, int(stat.Len))
+	assert.Greater(int(stat.MigrateTimes), 0)
+}
+
+func TestEvict(t *testing.T) {
+	assert := assert.New(t)
+	m := New(1)
+
+	for i := 0; i < 8000; i++ {
+		key := fmt.Sprintf("%04d", i)
+		m.SetEx(key, []byte(key), time.Millisecond/2)
+		// if rehashing
+		if m.buckets[0].rehash {
+			m.Delete(key)
+		}
+		time.Sleep(time.Millisecond / 2)
+	}
+
+	stat := m.Stat()
+	assert.Greater(stat.MigrateTimes, uint64(0))
 }

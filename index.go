@@ -32,43 +32,32 @@ func (k Key) klen() int {
 }
 
 // Idx is the index of GigaCache.
-// +----------+-----------------+--------------------+
-// | isAny(1) |    start(31)    |     offset(32)     |
-// +----------+-----------------+--------------------+
+// +-----------------------+------------------------+
+// |       start(32)       |       offset(32)       |
+// +-----------------------+------------------------+
 
 type Idx uint64
 
 const (
-	maxStart   = math.MaxUint32 >> 1
+	maxStart   = math.MaxUint32
 	offsetMask = math.MaxUint32
-
-	anyMask = 1 << 63
 )
 
 func (i Idx) start() int {
-	return int(i << 1 >> 1 >> 32)
+	return int(i >> 32)
 }
 
 func (i Idx) offset() int {
 	return int(i & offsetMask)
 }
 
-func (i Idx) IsAny() bool {
-	return i&anyMask == anyMask
-}
-
-func newIdx(start, offset int, isAny bool) Idx {
+func newIdx(start, offset int) Idx {
 	if start > maxStart {
-		panic("start overflow")
+		panic("start overflows the limit of uint32")
 	}
 	if offset > offsetMask {
-		panic("offset overflow")
+		panic("offset overflows the limit of uint32")
 	}
 
-	idx := Idx(start<<32 | offset)
-	if isAny {
-		idx |= anyMask
-	}
-
-	return idx
+	return Idx(start<<32 | offset)
 }
