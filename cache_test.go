@@ -94,7 +94,7 @@ func TestExpired(t *testing.T) {
 
 	for i := 0; i < 1000; i++ {
 		key := "key" + strconv.Itoa(i)
-		m.SetEx(key, []byte(key), dur*10)
+		m.SetEx(key, []byte(key), dur*999)
 		m2[key] = []byte(key)
 	}
 
@@ -184,7 +184,7 @@ func TestStat(t *testing.T) {
 	// Delete
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("%03d", i)
-		m.Delete(key)
+		assert.True(m.Delete(key))
 	}
 
 	stat = m.Stat()
@@ -193,7 +193,7 @@ func TestStat(t *testing.T) {
 	assert.Equal(uint64(3*90+3*90), stat.BytesInused)
 	assert.Equal(uint64(0), stat.MigrateTimes)
 	assert.Equal(uint64(0), stat.EvictCount)
-	assert.Equal(uint64(99*3), stat.ProbeCount)
+	assert.Equal(uint64(10*3+99*3), stat.ProbeCount)
 	assert.Equal(float64(90), stat.ExpRate())
 	assert.Equal(float64(0), stat.EvictRate())
 
@@ -206,7 +206,81 @@ func TestStat(t *testing.T) {
 	assert.Equal(uint64(3*91+3*91), stat.BytesInused)
 	assert.Equal(uint64(0), stat.MigrateTimes)
 	assert.Equal(uint64(0), stat.EvictCount)
-	assert.Equal(uint64(100*3), stat.ProbeCount)
+	assert.Equal(uint64(10*3+100*3), stat.ProbeCount)
 	assert.Equal(float64(91), stat.ExpRate())
 	assert.Equal(float64(0), stat.EvictRate())
+}
+
+func TestMigrate(t *testing.T) {
+	assert := assert.New(t)
+
+	m := New(1)
+
+	for i := 0; i < 1000; i++ {
+		k1 := "key" + strconv.Itoa(i)
+		m.Set(k1, []byte(k1))
+
+		k2 := "exp" + strconv.Itoa(i)
+		m.SetEx(k2, []byte(k2), dur)
+	}
+
+	time.Sleep(dur * 2)
+
+	testCheck := func() {
+		for i := 0; i < 1000; i++ {
+			key := "key" + strconv.Itoa(i)
+			// Has
+			assert.True(m.Has(key))
+			// Get
+			v, ts, ok := m.Get(key)
+			assert.Equal([]byte(key), v)
+			assert.True(ok)
+			assert.Equal(ts, int64(0))
+			// Delete
+			assert.False(m.Delete("none"))
+		}
+
+		for i := 0; i < 1000; i++ {
+			key := "exp" + strconv.Itoa(i)
+			// Has
+			assert.False(m.Has(key))
+			// Get
+			v, ts, ok := m.Get(key)
+			assert.Nil(v)
+			assert.False(ok)
+			assert.Equal(ts, int64(0))
+			// Delete
+			assert.False(m.Delete("none"))
+		}
+	}
+
+	// Migrate.
+	m.buckets[0].migrate()
+	for i := 0; i < 10; i++ {
+		testCheck()
+		m.buckets[0].migrate()
+	}
+
+	// Check stats.
+	stat := m.Stat()
+	assert.Equal(1000, int(stat.Len))
+	assert.Greater(int(stat.MigrateTimes), 0)
+}
+
+func TestEvict(t *testing.T) {
+	assert := assert.New(t)
+	m := New(1)
+
+	for i := 0; i < 8000; i++ {
+		key := fmt.Sprintf("%04d", i)
+		m.SetEx(key, []byte(key), time.Millisecond/2)
+		// if rehashing
+		if m.buckets[0].rehash {
+			m.Delete(key)
+		}
+		time.Sleep(time.Millisecond / 2)
+	}
+
+	stat := m.Stat()
+	assert.Greater(stat.MigrateTimes, uint64(0))
 }

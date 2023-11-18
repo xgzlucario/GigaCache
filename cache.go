@@ -109,10 +109,18 @@ func (c *GigaCache) Has(kstr string) bool {
 	b.RLock()
 	defer b.RUnlock()
 
-	if b.rehash && b.nb.idx.Has(key) {
-		return true
+	if b.rehash {
+		if b.nb.has(key) {
+			return true
+		}
 	}
-	return b.idx.Has(key)
+	return b.has(key)
+}
+
+// has
+func (b *bucket) has(k Key) bool {
+	v, ok := b.idx.Get(k)
+	return ok && !v.expired()
 }
 
 // Get returns value with expiration time by the key.
@@ -121,8 +129,11 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 	b.RLock()
 	defer b.RUnlock()
 
-	if b.rehash && b.nb.idx.Has(key) {
-		return b.nb.get(key)
+	if b.rehash {
+		v, ts, ok := b.nb.get(key)
+		if ok {
+			return v, ts, ok
+		}
 	}
 	return b.get(key)
 }
@@ -130,11 +141,11 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 // get
 func (b *bucket) get(k Key) ([]byte, int64, bool) {
 	v, ok := b.idx.Get(k)
-	if ok {
-		_, val, ok := b.find(k, v)
-		return slices.Clone(val), v.TTL, ok
+	if !ok || v.expired() {
+		return nil, 0, false
 	}
-	return nil, 0, false
+	_, val, ok := b.find(k, v)
+	return slices.Clone(val), v.TTL, ok
 }
 
 // set store key-value pair into bucket.
@@ -205,22 +216,26 @@ func (c *GigaCache) SetEx(kstr string, val []byte, dur time.Duration) {
 func (c *GigaCache) Delete(kstr string) bool {
 	b, k := c.getShard(kstr)
 	b.Lock()
+	b.eliminate()
 	defer b.Unlock()
 
-	if b.rehash && b.nb.delete(k) {
-		return true
+	if b.rehash {
+		v, ok := b.nb.idx.Get(k)
+		if ok {
+			b.nb.idx.Delete(k)
+			b.nb.updateEvict(k, v)
+			return !v.expired()
+		}
 	}
-	return b.delete(k)
-}
 
-// delete
-func (b *bucket) delete(k Key) bool {
 	v, ok := b.idx.Get(k)
 	if ok {
-		b.updateEvict(k, v)
 		b.idx.Delete(k)
+		b.updateEvict(k, v)
+		return !v.expired()
 	}
-	return ok
+
+	return false
 }
 
 // scan
@@ -346,19 +361,17 @@ func (b *bucket) migrate() {
 		return count >= 100
 	})
 
-	// not finish yet.
-	if b.idx.Count() > 0 {
-		return
+	// finish rehash.
+	if b.idx.Count() == 0 {
+		b.idx = b.nb.idx
+		b.data = b.nb.data
+		b.alloc = b.nb.alloc
+		b.inused = b.nb.inused
+		b.nb = nil
+		b.rehash = false
+		b.resetReused()
+		b.mgtimes++
 	}
-
-	// swap buckets.
-	b.data = b.nb.data
-	b.alloc = b.nb.alloc
-	b.inused = b.nb.inused
-	b.nb = nil
-	b.rehash = false
-	b.resetReused()
-	b.mgtimes++
 }
 
 // MarshalBinary
