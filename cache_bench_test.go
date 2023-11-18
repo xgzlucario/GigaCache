@@ -7,6 +7,11 @@ import (
 	"github.com/dolthub/swiss"
 )
 
+var (
+	num = 10 * 10000
+	str = []byte("Hello World")
+)
+
 func getStdmap() map[string][]byte {
 	m := map[string][]byte{}
 	for i := 0; i < num; i++ {

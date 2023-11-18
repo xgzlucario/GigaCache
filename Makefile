@@ -11,7 +11,6 @@ gc-trace-run:
 test:
 	go clean -testcache && go test .
 
-# 生成 html 覆盖率文件
 test-cover:
 	go test -race -coverprofile=coverage.txt -covermode=atomic
 	go tool cover -html=coverage.txt -o coverage.html
@@ -19,11 +18,27 @@ test-cover:
 bench:
 	go test -bench .
 
-pprof:
-	go tool pprof -http=:18081 "http://localhost:6060/debug/pprof/profile?seconds=60"
-
-heap:
-	go tool pprof http://localhost:6060/debug/pprof/heap
-
 gen-proto:
 	rm -rf proto && protoc --go_out=. --go_opt=Mcache.proto=proto/ cache.proto
+
+# pprof relatived.
+# cpu analysis.
+web-profile:
+	go tool pprof -http=:18081 "http://localhost:6060/debug/pprof/profile?seconds=60"
+
+# mem analysis.
+cmd-heap:
+	go tool pprof "http://localhost:6060/debug/pprof/heap"
+web-heap:
+	go tool pprof -http=:18082 "http://localhost:6060/debug/pprof/heap?seconds=60"
+
+cmd-allocs:
+	go tool pprof "http://localhost:6060/debug/pprof/allocs"
+web-allocs:
+	go tool pprof -http=:18083 "http://localhost:6060/debug/pprof/allocs?seconds=60"
+
+# heap object analysis.
+web-mutex:
+	go tool pprof -http=:18084 "http://localhost:6060/debug/pprof/mutex?seconds=60"
+web-block:
+	go tool pprof -http=:18085 "http://localhost:6060/debug/pprof/block?seconds=60"
