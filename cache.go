@@ -23,7 +23,7 @@ const (
 	// migrateThres defines the conditions necessary to trigger a migrate operation.
 	// Ratio recommended is 0.6, see bench data for details.
 	migrateThresRatio = 0.6
-	migrateDelta      = 0
+	migrateDelta      = 1024
 )
 
 // GigaCache return a new GigaCache instance.
@@ -109,10 +109,8 @@ func (c *GigaCache) Has(kstr string) bool {
 	b.RLock()
 	defer b.RUnlock()
 
-	if b.rehash {
-		if b.nb.idx.Has(key) {
-			return true
-		}
+	if b.rehash && b.nb.idx.Has(key) {
+		return true
 	}
 	return b.idx.Has(key)
 }
@@ -123,11 +121,8 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 	b.RLock()
 	defer b.RUnlock()
 
-	if b.rehash {
-		v, ts, ok := b.nb.get(key)
-		if ok {
-			return v, ts, ok
-		}
+	if b.rehash && b.nb.idx.Has(key) {
+		return b.nb.get(key)
 	}
 	return b.get(key)
 }
@@ -323,15 +318,19 @@ func (b *bucket) eliminate() {
 	}
 }
 
+// initRehashBucket
+func (b *bucket) initRehashBucket() {
+	b.nb = &bucket{
+		idx:  swiss.NewMap[Key, V](uint32(float64(b.idx.Count()) * 1.5)),
+		data: make([]byte, 0, len(b.data)*2),
+	}
+}
+
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket) migrate() {
 	if !b.rehash {
-		// init
 		b.rehash = true
-		b.nb = &bucket{
-			idx:  swiss.NewMap[Key, V](uint32(float64(b.idx.Count()) * 1.5)),
-			data: make([]byte, 0, len(b.data)*2),
-		}
+		b.initRehashBucket()
 		return
 	}
 
@@ -362,22 +361,26 @@ func (b *bucket) migrate() {
 	b.mgtimes++
 }
 
-// MarshalBytes
-func (c *GigaCache) MarshalBytes() ([]byte, error) {
+// MarshalBinary
+func (c *GigaCache) MarshalBinary() ([]byte, error) {
 	var data bproto.Cache
 	for _, b := range c.buckets {
 		b.RLock()
 		// init
 		if data.K == nil {
 			n := len(c.buckets) * b.idx.Count()
-			data.K = make([]string, 0, n)
+			data.K = make([][]byte, 0, n)
 			data.V = make([][]byte, 0, n)
 			data.T = make([]int64, 0, n)
 		}
-		b.scan(func(kstr string, val []byte, ts int64) bool {
-			data.K = append(data.K, kstr)
-			data.V = append(data.V, val)
-			data.T = append(data.T, ts)
+
+		b.idx.Iter(func(k Key, v V) bool {
+			kstr, val, ok := b.find(k, v)
+			if ok {
+				data.K = append(data.K, kstr)
+				data.V = append(data.V, val)
+				data.T = append(data.T, v.TTL)
+			}
 			return false
 		})
 
@@ -387,15 +390,15 @@ func (c *GigaCache) MarshalBytes() ([]byte, error) {
 	return proto.Marshal(&data)
 }
 
-// UnmarshalBytes
-func (c *GigaCache) UnmarshalBytes(src []byte) error {
+// UnmarshalBinary
+func (c *GigaCache) UnmarshalBinary(src []byte) error {
 	var data bproto.Cache
 
 	if err := proto.Unmarshal(src, &data); err != nil {
 		return err
 	}
 	for i, k := range data.K {
-		c.SetTx(k, data.V[i], data.T[i])
+		c.SetTx(*b2s(k), data.V[i], data.T[i])
 	}
 
 	return nil
