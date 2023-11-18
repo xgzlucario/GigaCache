@@ -83,7 +83,7 @@ func main() {
 		k := strconv.Itoa(int(source.Uint64() >> 32))
 		now := time.Now()
 
-		bc.SetEx(k, []byte(k), time.Second*5)
+		bc.SetEx(k, []byte(k), time.Second*10)
 		count++
 
 		cost := float64(time.Since(now)) / float64(time.Microsecond)

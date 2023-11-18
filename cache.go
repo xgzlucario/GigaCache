@@ -238,23 +238,25 @@ func (c *GigaCache) Delete(kstr string) bool {
 	return false
 }
 
+type Walker func(key []byte, value []byte, ttl int64) bool
+
 // scan
-func (b *bucket) scan(f func(string, []byte, int64) bool) {
+func (b *bucket) scan(f Walker) {
 	b.idx.Iter(func(k Key, v V) bool {
 		kstr, val, ok := b.find(k, v)
 		if ok {
-			return f(string(kstr), val, v.TTL)
+			return f(kstr, val, v.TTL)
 		}
 		return false
 	})
 }
 
 // Scan walk all key-value pairs.
-func (c *GigaCache) Scan(f func(string, []byte, int64) bool) {
+func (c *GigaCache) Scan(f Walker) {
 	for _, b := range c.buckets {
 		b.RLock()
-		b.scan(func(s string, b []byte, i int64) bool {
-			return f(s, slices.Clone(b), i)
+		b.scan(func(s []byte, b []byte, i int64) bool {
+			return f(s, b, i)
 		})
 		b.RUnlock()
 	}
@@ -267,8 +269,8 @@ func (c *GigaCache) Keys() (keys []string) {
 		if keys == nil {
 			keys = make([]string, 0, len(c.buckets)*b.idx.Count())
 		}
-		b.scan(func(key string, _ []byte, _ int64) bool {
-			keys = append(keys, key)
+		b.scan(func(key []byte, _ []byte, _ int64) bool {
+			keys = append(keys, string(key))
 			return false
 		})
 		b.RUnlock()

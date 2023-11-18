@@ -72,6 +72,47 @@ func BenchmarkGet(b *testing.B) {
 	})
 }
 
+func BenchmarkIter(b *testing.B) {
+	b.Run("stdmap", func(b *testing.B) {
+		m := getStdmap()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			for k, v := range m {
+				_, _ = k, v
+			}
+		}
+	})
+
+	b.Run("GigaCache", func(b *testing.B) {
+		m := New()
+		for i := 0; i < num; i++ {
+			m.Set(strconv.Itoa(i), str)
+		}
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			m.Scan(func(s []byte, b []byte, i int64) bool {
+				return false
+			})
+		}
+	})
+
+	b.Run("swissmap", func(b *testing.B) {
+		m := swiss.NewMap[string, []byte](8)
+		for i := 0; i < num; i++ {
+			m.Put(strconv.Itoa(i), str)
+		}
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			m.Iter(func(k string, v []byte) bool {
+				return false
+			})
+		}
+	})
+}
+
 func BenchmarkDelete(b *testing.B) {
 	b.Run("stdmap", func(b *testing.B) {
 		m := getStdmap()

@@ -109,8 +109,8 @@ func TestExpired(t *testing.T) {
 
 	// Scan
 	count := 0
-	m.Scan(func(s string, b []byte, i int64) bool {
-		assert.True(strings.HasPrefix(s, "key"))
+	m.Scan(func(s []byte, b []byte, i int64) bool {
+		assert.True(strings.HasPrefix(string(s), "key"))
 		count++
 		return false
 	})
