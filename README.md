@@ -93,6 +93,21 @@ Gigache Set operation has better performance than stdmap.
 | Delete/GigaCache-20    | 22143832 | 49.78 ns/op |	8 B/op	 | 1 allocs/op |
 | Delete/swissmap-20     | 50007508	| 24.14 ns/op |	7 B/op	 | 0 allocs/op |
 
+**Latency**
+
+Insert 49010*10000 pieces of data in 200s, p90 is 0.36us, p99 is 0.69us, p9999 is 51.12us.
+
+```sh
+[Cache] 200s | 49010w | len: 3200w | alloc: 577.3MB / 772.9MB (76.0%)
+[Evict] probe: 3549w / 20431w (17.4%) | mtime: 9824
+[Mem] mem: 5859MB | sys: 8348MB | gc: 38 | gcpause: 86 us
+50th = 0.22 us
+75th = 0.27 us
+90th = 0.36 us
+99th = 0.69 us
+9999th = 51.12 us
+```
+
 **GC pause time**（Reference to [allegro/bigcache-bench](https://github.com/allegro/bigcache-bench)）
 
 ```go
@@ -121,3 +136,17 @@ Value size:         100
 Heap Objects Total: 471
 GC pause for startup:  10.828795ms
 ```
+
+# 🛸Internal
+
+GigaCache structure.
+
+![p1](p1.png)
+
+Key & Idx Defination.
+
+![p2](p2.png)
+
+Bucket structure.
+
+![p3](p3.png)

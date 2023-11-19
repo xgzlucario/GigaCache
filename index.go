@@ -32,11 +32,19 @@ func (k Key) klen() int {
 }
 
 // Idx is the index of GigaCache.
+// h1:
 // +-----------------------+------------------------+
 // |       start(32)       |       offset(32)       |
 // +-----------------------+------------------------+
+// h2:
+// +-----------------------+------------------------+
+// |                   ttl(int64)                   |
+// +-----------------------+------------------------+
 
-type Idx uint64
+type Idx struct {
+	h1 uint64
+	h2 int64
+}
 
 const (
 	maxStart   = math.MaxUint32
@@ -44,20 +52,33 @@ const (
 )
 
 func (i Idx) start() int {
-	return int(i >> 32)
+	return int(i.h1 >> 32)
 }
 
 func (i Idx) offset() int {
-	return int(i & offsetMask)
+	return int(i.h1 & offsetMask)
 }
 
-func newIdx(start, offset int) Idx {
+func (i Idx) expired() bool {
+	return i.h2 > noTTL && i.h2 < GetClock()
+}
+
+func (i Idx) TTL() int64 {
+	return i.h2
+}
+
+func newIdx(start, offset int, ttl int64) Idx {
 	if start > maxStart {
 		panic("start overflows the limit of uint32")
 	}
 	if offset > offsetMask {
 		panic("offset overflows the limit of uint32")
 	}
-
-	return Idx(start<<32 | offset)
+	if ttl < 0 {
+		panic("ttl is negetive")
+	}
+	return Idx{
+		h1: uint64(start<<32 | offset),
+		h2: ttl,
+	}
 }

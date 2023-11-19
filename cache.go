@@ -32,35 +32,26 @@ type GigaCache struct {
 	buckets []*bucket
 }
 
-type V struct {
-	Idx
-	TTL int64
-}
-
-func (v V) expired() bool {
-	return v.TTL != noTTL && v.TTL < GetClock()
-}
-
-// bucket
+// bucket is the container for key-value pairs..
 type bucket struct {
 	sync.RWMutex
 
-	// idx is Indexes, and data is where the data is actually stored.
-	idx  *swiss.Map[Key, V]
+	// Key & idx is Indexes, and data is where the data is actually stored.
+	idx  *swiss.Map[Key, Idx]
 	data []byte
 
-	// stat for runtime.
+	// Stat for runtime.
 	alloc      uint64
 	inused     uint64
 	mgtimes    uint64
 	evictCount uint64
 	probeCount uint64
 
-	// for reused bytes.
+	// Reuse sharded space to save memory.
 	roffset int
 	rstart  int
 
-	// for rehash.
+	// For rehash migrate.
 	rehash bool
 	nb     *bucket
 }
@@ -77,7 +68,7 @@ func New(shard ...int) *GigaCache {
 	}
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket{
-			idx:  swiss.NewMap[Key, V](8),
+			idx:  swiss.NewMap[Key, Idx](8),
 			data: make([]byte, 0, bufferSize),
 		}
 	}
@@ -91,19 +82,19 @@ func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
 }
 
 // find return values by given Key and Idx.
-func (b *bucket) find(k Key, v V) ([]byte, []byte, bool) {
-	if v.expired() {
+func (b *bucket) find(key Key, idx Idx) ([]byte, []byte, bool) {
+	if idx.expired() {
 		return nil, nil, false
 	}
 
-	pos := v.start() + k.klen()
-	kstr := b.data[v.start():pos]
-	data := b.data[pos : pos+v.offset()]
+	pos := idx.start() + key.klen()
+	kstr := b.data[idx.start():pos]
+	data := b.data[pos : pos+idx.offset()]
 
 	return kstr, data, true
 }
 
-// Has
+// Has return the key exists or not.
 func (c *GigaCache) Has(kstr string) bool {
 	b, key := c.getShard(kstr)
 	b.RLock()
@@ -139,13 +130,13 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 }
 
 // get
-func (b *bucket) get(k Key) ([]byte, int64, bool) {
-	v, ok := b.idx.Get(k)
-	if !ok || v.expired() {
+func (b *bucket) get(key Key) ([]byte, int64, bool) {
+	idx, ok := b.idx.Get(key)
+	if !ok || idx.expired() {
 		return nil, 0, false
 	}
-	_, val, ok := b.find(k, v)
-	return slices.Clone(val), v.TTL, ok
+	_, val, ok := b.find(key, idx)
+	return slices.Clone(val), idx.TTL(), ok
 }
 
 // set store key-value pair into bucket.
@@ -169,10 +160,7 @@ func (b *bucket) set(key Key, kstr []byte, bytes []byte, ts int64) {
 	need := len(kstr) + len(bytes)
 	// reuse space.
 	if b.roffset >= need {
-		b.idx.Put(key, V{
-			Idx: newIdx(b.rstart, len(bytes)),
-			TTL: ts,
-		})
+		b.idx.Put(key, newIdx(b.rstart, len(bytes), ts))
 		copy(b.data[b.rstart:], kstr)
 		copy(b.data[b.rstart+len(kstr):], bytes)
 
@@ -182,10 +170,7 @@ func (b *bucket) set(key Key, kstr []byte, bytes []byte, ts int64) {
 	}
 
 	// alloc new space.
-	b.idx.Put(key, V{
-		Idx: newIdx(len(b.data), len(bytes)),
-		TTL: ts,
-	})
+	b.idx.Put(key, newIdx(len(b.data), len(bytes), ts))
 	b.data = append(b.data, kstr...)
 	b.data = append(b.data, bytes...)
 
@@ -238,20 +223,21 @@ func (c *GigaCache) Delete(kstr string) bool {
 	return false
 }
 
+// Walker is the callback function for iterator.
 type Walker func(key []byte, value []byte, ttl int64) bool
 
 // scan
 func (b *bucket) scan(f Walker) {
-	b.idx.Iter(func(k Key, v V) bool {
-		kstr, val, ok := b.find(k, v)
+	b.idx.Iter(func(key Key, idx Idx) bool {
+		kstr, val, ok := b.find(key, idx)
 		if ok {
-			return f(kstr, val, v.TTL)
+			return f(kstr, val, idx.TTL())
 		}
 		return false
 	})
 }
 
-// Scan walk all key-value pairs.
+// Scan walk all alive key-value pairs.
 func (c *GigaCache) Scan(f Walker) {
 	for _, b := range c.buckets {
 		b.RLock()
@@ -262,7 +248,7 @@ func (c *GigaCache) Scan(f Walker) {
 	}
 }
 
-// Keys returns all keys.
+// Keys returns all alive keys in cache.
 func (c *GigaCache) Keys() (keys []string) {
 	for _, b := range c.buckets {
 		b.RLock()
@@ -280,13 +266,13 @@ func (c *GigaCache) Keys() (keys []string) {
 }
 
 // updateEvict
-func (b *bucket) updateEvict(k Key, v V) {
-	used := k.klen() + v.offset()
+func (b *bucket) updateEvict(key Key, idx Idx) {
+	used := key.klen() + idx.offset()
 	b.inused -= uint64(used)
 
 	if used > b.roffset {
 		b.roffset = used
-		b.rstart = v.start()
+		b.rstart = idx.start()
 	}
 }
 
@@ -301,13 +287,13 @@ func (b *bucket) eliminate() {
 	var failed byte
 
 	// probing
-	b.idx.Iter(func(k Key, v V) bool {
+	b.idx.Iter(func(key Key, idx Idx) bool {
 		b.probeCount++
 
-		if v.expired() {
-			b.idx.Delete(k)
+		if idx.expired() {
+			b.idx.Delete(key)
 			b.evictCount++
-			b.updateEvict(k, v)
+			b.updateEvict(key, idx)
 			failed = 0
 
 			return false
@@ -338,7 +324,7 @@ func (b *bucket) eliminate() {
 // initRehashBucket
 func (b *bucket) initRehashBucket() {
 	b.nb = &bucket{
-		idx:  swiss.NewMap[Key, V](uint32(float64(b.idx.Count()) * 1.5)),
+		idx:  swiss.NewMap[Key, Idx](uint32(float64(b.idx.Count()) * 1.5)),
 		data: make([]byte, 0, len(b.data)*2),
 	}
 }
@@ -352,10 +338,11 @@ func (b *bucket) migrate() {
 	}
 
 	var count int
-	b.idx.Iter(func(key Key, v V) bool {
-		kstr, val, ok := b.find(key, v)
+	// fewer key-value pairs moved in a single migrate operation.
+	b.idx.Iter(func(key Key, idx Idx) bool {
+		kstr, val, ok := b.find(key, idx)
 		if ok {
-			b.nb.set(key, kstr, val, v.TTL)
+			b.nb.set(key, kstr, val, idx.TTL())
 		}
 		b.idx.Delete(key)
 
@@ -376,7 +363,7 @@ func (b *bucket) migrate() {
 	}
 }
 
-// MarshalBinary
+// MarshalBinary serialize the cache to binary data.
 func (c *GigaCache) MarshalBinary() ([]byte, error) {
 	var data bproto.Cache
 	for _, b := range c.buckets {
@@ -389,12 +376,12 @@ func (c *GigaCache) MarshalBinary() ([]byte, error) {
 			data.T = make([]int64, 0, n)
 		}
 
-		b.idx.Iter(func(k Key, v V) bool {
-			kstr, val, ok := b.find(k, v)
+		b.idx.Iter(func(key Key, idx Idx) bool {
+			kstr, val, ok := b.find(key, idx)
 			if ok {
 				data.K = append(data.K, kstr)
 				data.V = append(data.V, val)
-				data.T = append(data.T, v.TTL)
+				data.T = append(data.T, idx.TTL())
 			}
 			return false
 		})
@@ -405,7 +392,7 @@ func (c *GigaCache) MarshalBinary() ([]byte, error) {
 	return proto.Marshal(&data)
 }
 
-// UnmarshalBinary
+// UnmarshalBinary deserialize the cache from binary data.
 func (c *GigaCache) UnmarshalBinary(src []byte) error {
 	var data bproto.Cache
 
