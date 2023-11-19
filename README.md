@@ -93,6 +93,14 @@ Gigache Set operation has better performance than stdmap.
 | Delete/GigaCache-20    | 22143832 | 49.78 ns/op |	8 B/op	 | 1 allocs/op |
 | Delete/swissmap-20     | 50007508	| 24.14 ns/op |	7 B/op	 | 0 allocs/op |
 
+**Iter** from 100k entries.
+
+| Benchmark                   | Iter     | time/op       | bytes/op | alloc/op    |
+| --------------------------- | -------- | ------------- | -------- | ----------- |
+| BenchmarkIter/stdmap-20     |      496 | 2451833 ns/op |	 0 B/op	| 0 allocs/op |
+| BenchmarkIter/GigaCache-20  |     1998 |  579076 ns/op |	 0 B/op | 0 allocs/op |
+| BenchmarkIter/swissmap-20   | 	5544 |  201880 ns/op |	 0 B/op | 0 allocs/op |
+
 **Latency**
 
 Insert 49010*10000 pieces of data in 200s, p90 is 0.36us, p99 is 0.69us, p9999 is 51.12us.
