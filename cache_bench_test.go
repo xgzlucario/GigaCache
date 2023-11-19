@@ -147,3 +147,14 @@ func BenchmarkDelete(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkInternal(b *testing.B) {
+	b.Run("iter/8", func(b *testing.B) {
+		m := [8]int{0, 0, 0, 0, 0, 0, 0, 0}
+		for i := 0; i < b.N; i++ {
+			for a, b := range m {
+				_, _ = a, b
+			}
+		}
+	})
+}

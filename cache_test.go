@@ -177,7 +177,7 @@ func TestStat(t *testing.T) {
 	assert.Equal(uint64(3*100+3*100), stat.BytesInused)
 	assert.Equal(uint64(0), stat.MigrateTimes)
 	assert.Equal(uint64(0), stat.EvictCount)
-	assert.Equal(uint64(99*3), stat.ProbeCount)
+	assert.Equal(uint64(98*3), stat.ProbeCount)
 	assert.Equal(float64(100), stat.ExpRate())
 	assert.Equal(float64(0), stat.EvictRate())
 
@@ -193,7 +193,7 @@ func TestStat(t *testing.T) {
 	assert.Equal(uint64(3*90+3*90), stat.BytesInused)
 	assert.Equal(uint64(0), stat.MigrateTimes)
 	assert.Equal(uint64(0), stat.EvictCount)
-	assert.Equal(uint64(10*3+99*3), stat.ProbeCount)
+	assert.Equal(uint64(10*3+98*3), stat.ProbeCount)
 	assert.Equal(float64(90), stat.ExpRate())
 	assert.Equal(float64(0), stat.EvictRate())
 
@@ -206,7 +206,7 @@ func TestStat(t *testing.T) {
 	assert.Equal(uint64(3*91+3*91), stat.BytesInused)
 	assert.Equal(uint64(0), stat.MigrateTimes)
 	assert.Equal(uint64(0), stat.EvictCount)
-	assert.Equal(uint64(10*3+100*3), stat.ProbeCount)
+	assert.Equal(uint64(10*3+99*3), stat.ProbeCount)
 	assert.Equal(float64(91), stat.ExpRate())
 	assert.Equal(float64(0), stat.EvictRate())
 }
@@ -271,16 +271,60 @@ func TestEvict(t *testing.T) {
 	assert := assert.New(t)
 	m := New(1)
 
-	for i := 0; i < 8000; i++ {
+	// init
+	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("%04d", i)
-		m.SetEx(key, []byte(key), time.Millisecond/2)
+		m.SetEx(key, []byte(key), time.Millisecond)
+	}
+	m.buckets[0].migrate()
+
+	time.Sleep(time.Millisecond * 2)
+
+	for i := 1000; i < 2000; i++ {
+		key := fmt.Sprintf("%04d", i)
+		m.SetEx(key, []byte(key), time.Millisecond)
 		// if rehashing
-		if m.buckets[0].rehash {
-			m.Delete(key)
-		}
-		time.Sleep(time.Millisecond / 2)
+		m.Delete(key)
 	}
 
 	stat := m.Stat()
 	assert.Greater(stat.MigrateTimes, uint64(0))
+}
+
+func TestReuse(t *testing.T) {
+	assert := assert.New(t)
+	m := New(1)
+	b := m.buckets[0]
+
+	m.Set("foo", []byte("bar"))
+
+	assert.Equal(b.data[0:3], []byte("foo"))
+	assert.Equal(b.data[3:6], []byte("bar"))
+
+	m.SetEx("exp", []byte("abcd"), dur)
+	assert.Equal(b.data[6:9], []byte("exp"))
+	assert.Equal(b.data[9:13], []byte("abcd"))
+
+	time.Sleep(dur * 2)
+
+	m.Set("trig", []byte("123")) // "trig" will replace positon of "exp".
+
+	assert.Equal(b.data[6:10], []byte("trig"))
+	assert.Equal(b.data[10:13], []byte("123"))
+
+	// stat
+	stat := m.Stat()
+	assert.Equal(int(stat.BytesAlloc), 13)
+	assert.Equal(int(stat.BytesInused), 13)
+
+	m.Set("res", []byte("type"))
+
+	// delete
+	ok := m.Delete("foo")
+	assert.True(ok)
+
+	stat = m.Stat()
+	assert.Equal(int(stat.BytesAlloc), 20)
+	assert.Equal(int(stat.BytesInused), 14)
+	_ = stat.EvictRate()
 }
