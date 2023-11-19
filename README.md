@@ -121,3 +121,17 @@ Value size:         100
 Heap Objects Total: 471
 GC pause for startup:  10.828795ms
 ```
+
+# 🛸Internal
+
+GigaCache structure.
+
+![p1](p1.png)
+
+Key & Idx Defination.
+
+![p2](p2.png)
+
+Bucket structure.
+
+![p3](p3.png)
