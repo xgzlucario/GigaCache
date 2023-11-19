@@ -16,9 +16,12 @@ const (
 	defaultShardsCount = 1024
 	bufferSize         = 1024
 
-	// eliminate probing
+	// eliminate probing.
 	maxProbeCount = 1000
 	maxFailCount  = 3
+
+	// reuse space count.
+	reuseSpace = 8
 
 	// migrateThres defines the conditions necessary to trigger a migrate operation.
 	// Ratio recommended is 0.6, see bench data for details.
@@ -32,7 +35,7 @@ type GigaCache struct {
 	buckets []*bucket
 }
 
-// bucket is the container for key-value pairs..
+// bucket is the container for key-value pairs.
 type bucket struct {
 	sync.RWMutex
 
@@ -48,8 +51,8 @@ type bucket struct {
 	probeCount uint64
 
 	// Reuse sharded space to save memory.
-	roffset int
-	rstart  int
+	reuseDataLength [reuseSpace]int
+	reuseDataPos    [reuseSpace]int
 
 	// For rehash migrate.
 	rehash bool
@@ -94,26 +97,6 @@ func (b *bucket) find(key Key, idx Idx) ([]byte, []byte, bool) {
 	return kstr, data, true
 }
 
-// Has return the key exists or not.
-func (c *GigaCache) Has(kstr string) bool {
-	b, key := c.getShard(kstr)
-	b.RLock()
-	defer b.RUnlock()
-
-	if b.rehash {
-		if b.nb.has(key) {
-			return true
-		}
-	}
-	return b.has(key)
-}
-
-// has
-func (b *bucket) has(k Key) bool {
-	v, ok := b.idx.Get(k)
-	return ok && !v.expired()
-}
-
 // Get returns value with expiration time by the key.
 func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 	b, key := c.getShard(kstr)
@@ -153,20 +136,29 @@ func (b *bucket) get(key Key) ([]byte, int64, bool) {
 // set stores key and value in an array of bytes and returns their index positions.
 func (b *bucket) set(key Key, kstr []byte, bytes []byte, ts int64) {
 	if b.rehash {
+		// prevent duplicate keys in old and new buckets.
+		if idx, ok := b.idx.Get(key); ok {
+			b.idx.Delete(key)
+			b.updateEvict(key, idx)
+		}
 		b.nb.set(key, kstr, bytes, ts)
 		return
 	}
 
 	need := len(kstr) + len(bytes)
-	// reuse space.
-	if b.roffset >= need {
-		b.idx.Put(key, newIdx(b.rstart, len(bytes), ts))
-		copy(b.data[b.rstart:], kstr)
-		copy(b.data[b.rstart+len(kstr):], bytes)
+	// reuse empty space.
+	for i, offset := range b.reuseDataLength {
+		if offset >= need {
+			start := b.reuseDataPos[i]
 
-		b.inused += uint64(need)
-		b.resetReused()
-		return
+			b.idx.Put(key, newIdx(start, len(bytes), ts))
+			copy(b.data[start:], kstr)
+			copy(b.data[start+len(kstr):], bytes)
+
+			b.inused += uint64(need)
+			b.resetReused(i)
+			return
+		}
 	}
 
 	// alloc new space.
@@ -182,8 +174,8 @@ func (b *bucket) set(key Key, kstr []byte, bytes []byte, ts int64) {
 func (c *GigaCache) SetTx(kstr string, val []byte, ts int64) {
 	b, key := c.getShard(kstr)
 	b.Lock()
-	b.set(key, s2b(&kstr), val, ts)
 	b.eliminate()
+	b.set(key, s2b(&kstr), val, ts)
 	b.Unlock()
 }
 
@@ -199,25 +191,23 @@ func (c *GigaCache) SetEx(kstr string, val []byte, dur time.Duration) {
 
 // Delete removes the key-value pair by the key.
 func (c *GigaCache) Delete(kstr string) bool {
-	b, k := c.getShard(kstr)
+	b, key := c.getShard(kstr)
 	b.Lock()
 	b.eliminate()
 	defer b.Unlock()
 
 	if b.rehash {
-		v, ok := b.nb.idx.Get(k)
-		if ok {
-			b.nb.idx.Delete(k)
-			b.nb.updateEvict(k, v)
-			return !v.expired()
+		if idx, ok := b.nb.idx.Get(key); ok {
+			b.nb.idx.Delete(key)
+			b.nb.updateEvict(key, idx)
+			return !idx.expired()
 		}
 	}
 
-	v, ok := b.idx.Get(k)
-	if ok {
-		b.idx.Delete(k)
-		b.updateEvict(k, v)
-		return !v.expired()
+	if idx, ok := b.idx.Get(key); ok {
+		b.idx.Delete(key)
+		b.updateEvict(key, idx)
+		return !idx.expired()
 	}
 
 	return false
@@ -228,6 +218,12 @@ type Walker func(key []byte, value []byte, ttl int64) bool
 
 // scan
 func (b *bucket) scan(f Walker) {
+	// if rehashing, scan the new bucket first.
+	// because set() will check the old bucket, there will be no duplicate keys in the old and new buckets.
+	if b.rehash {
+		b.nb.scan(f)
+	}
+
 	b.idx.Iter(func(key Key, idx Idx) bool {
 		kstr, val, ok := b.find(key, idx)
 		if ok {
@@ -270,15 +266,18 @@ func (b *bucket) updateEvict(key Key, idx Idx) {
 	used := key.klen() + idx.offset()
 	b.inused -= uint64(used)
 
-	if used > b.roffset {
-		b.roffset = used
-		b.rstart = idx.start()
+	for i, length := range b.reuseDataLength {
+		if used > length {
+			b.reuseDataLength[i] = used
+			b.reuseDataPos[i] = idx.start()
+			return
+		}
 	}
 }
 
 // resetReused
-func (b *bucket) resetReused() {
-	b.roffset = 0
+func (b *bucket) resetReused(i int) {
+	b.reuseDataLength[i] = 0
 }
 
 // eliminate the expired key-value pairs.
@@ -358,7 +357,8 @@ func (b *bucket) migrate() {
 		b.inused = b.nb.inused
 		b.nb = nil
 		b.rehash = false
-		b.resetReused()
+		b.reuseDataLength = [reuseSpace]int{}
+		b.reuseDataPos = [reuseSpace]int{}
 		b.mgtimes++
 	}
 }
