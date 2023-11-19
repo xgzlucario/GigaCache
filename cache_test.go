@@ -327,4 +327,30 @@ func TestReuse(t *testing.T) {
 	assert.Equal(int(stat.BytesAlloc), 20)
 	assert.Equal(int(stat.BytesInused), 14)
 	_ = stat.EvictRate()
+
+	// reuse max space.
+	m = New(1)
+
+	for i := 0; i < reuseSpace; i++ {
+		m.SetEx("res"+strconv.Itoa(i), []byte("type"), dur)
+	}
+	time.Sleep(dur * 2)
+
+	m.Set("trig", []byte("1"))
+
+	stat = m.Stat()
+	assert.Equal(int(stat.BytesAlloc), (4+4)*8)
+	assert.Equal(int(stat.BytesInused), 5)
+
+	m.Set("reuse1", []byte("xx"))
+
+	stat = m.Stat()
+	assert.Equal(int(stat.BytesAlloc), (4+4)*8)
+	assert.Equal(int(stat.BytesInused), 13)
+
+	m.Set("reuse2", []byte("xx"))
+
+	stat = m.Stat()
+	assert.Equal(int(stat.BytesAlloc), (4+4)*8)
+	assert.Equal(int(stat.BytesInused), 21)
 }
