@@ -43,12 +43,6 @@ func TestSet(t *testing.T) {
 		assert.Nil(val)
 		assert.False(ok)
 		assert.Equal(ts, int64(0))
-
-		// Has
-		assert.True(m.Has(k))
-
-		// Has none.
-		assert.False(m.Has("none"))
 	}
 
 	// Remove datas.
@@ -229,8 +223,6 @@ func TestMigrate(t *testing.T) {
 	testCheck := func() {
 		for i := 0; i < 1000; i++ {
 			key := "key" + strconv.Itoa(i)
-			// Has
-			assert.True(m.Has(key))
 			// Get
 			v, ts, ok := m.Get(key)
 			assert.Equal([]byte(key), v)
@@ -242,8 +234,6 @@ func TestMigrate(t *testing.T) {
 
 		for i := 0; i < 1000; i++ {
 			key := "exp" + strconv.Itoa(i)
-			// Has
-			assert.False(m.Has(key))
 			// Get
 			v, ts, ok := m.Get(key)
 			assert.Nil(v)
@@ -353,4 +343,33 @@ func TestReuse(t *testing.T) {
 	stat = m.Stat()
 	assert.Equal(int(stat.BytesAlloc), (4+4)*8)
 	assert.Equal(int(stat.BytesInused), 21)
+}
+
+func TestDuplicateScan(t *testing.T) {
+	assert := assert.New(t)
+	m := New(1)
+
+	for i := 0; i < 10000; i++ {
+		key := "key" + strconv.Itoa(i)
+		m.Set(key, []byte(key))
+	}
+
+	m.buckets[0].migrate()
+
+	for i := 0; i < 10000; i += 500 {
+		key := "key" + strconv.Itoa(i)
+		m.Set(key, []byte("new_"+key))
+	}
+
+	m.Scan(func(key, value []byte, ttl int64) bool {
+		keyInt := strings.TrimPrefix(string(key), "key")
+		num, _ := strconv.ParseInt(keyInt, 10, 64)
+
+		if num%500 == 0 {
+			assert.Equal("new_"+string(key), string(value))
+		} else {
+			assert.Equal(string(key), string(value))
+		}
+		return false
+	})
 }

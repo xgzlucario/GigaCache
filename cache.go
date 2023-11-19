@@ -97,26 +97,6 @@ func (b *bucket) find(key Key, idx Idx) ([]byte, []byte, bool) {
 	return kstr, data, true
 }
 
-// Has return the key exists or not.
-func (c *GigaCache) Has(kstr string) bool {
-	b, key := c.getShard(kstr)
-	b.RLock()
-	defer b.RUnlock()
-
-	if b.rehash {
-		if b.nb.has(key) {
-			return true
-		}
-	}
-	return b.has(key)
-}
-
-// has
-func (b *bucket) has(k Key) bool {
-	v, ok := b.idx.Get(k)
-	return ok && !v.expired()
-}
-
 // Get returns value with expiration time by the key.
 func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 	b, key := c.getShard(kstr)
@@ -156,12 +136,17 @@ func (b *bucket) get(key Key) ([]byte, int64, bool) {
 // set stores key and value in an array of bytes and returns their index positions.
 func (b *bucket) set(key Key, kstr []byte, bytes []byte, ts int64) {
 	if b.rehash {
+		// prevent duplicate keys in old and new buckets.
+		if idx, ok := b.idx.Get(key); ok {
+			b.idx.Delete(key)
+			b.updateEvict(key, idx)
+		}
 		b.nb.set(key, kstr, bytes, ts)
 		return
 	}
 
 	need := len(kstr) + len(bytes)
-	// reuse space.
+	// reuse empty space.
 	for i, offset := range b.reuseDataLength {
 		if offset >= need {
 			start := b.reuseDataPos[i]
@@ -206,25 +191,23 @@ func (c *GigaCache) SetEx(kstr string, val []byte, dur time.Duration) {
 
 // Delete removes the key-value pair by the key.
 func (c *GigaCache) Delete(kstr string) bool {
-	b, k := c.getShard(kstr)
+	b, key := c.getShard(kstr)
 	b.Lock()
 	b.eliminate()
 	defer b.Unlock()
 
 	if b.rehash {
-		v, ok := b.nb.idx.Get(k)
-		if ok {
-			b.nb.idx.Delete(k)
-			b.nb.updateEvict(k, v)
-			return !v.expired()
+		if idx, ok := b.nb.idx.Get(key); ok {
+			b.nb.idx.Delete(key)
+			b.nb.updateEvict(key, idx)
+			return !idx.expired()
 		}
 	}
 
-	v, ok := b.idx.Get(k)
-	if ok {
-		b.idx.Delete(k)
-		b.updateEvict(k, v)
-		return !v.expired()
+	if idx, ok := b.idx.Get(key); ok {
+		b.idx.Delete(key)
+		b.updateEvict(key, idx)
+		return !idx.expired()
 	}
 
 	return false
@@ -235,6 +218,12 @@ type Walker func(key []byte, value []byte, ttl int64) bool
 
 // scan
 func (b *bucket) scan(f Walker) {
+	// if rehashing, scan the new bucket first.
+	// because set() will check the old bucket, there will be no duplicate keys in the old and new buckets.
+	if b.rehash {
+		b.nb.scan(f)
+	}
+
 	b.idx.Iter(func(key Key, idx Idx) bool {
 		kstr, val, ok := b.find(key, idx)
 		if ok {

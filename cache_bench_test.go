@@ -157,4 +157,28 @@ func BenchmarkInternal(b *testing.B) {
 			}
 		}
 	})
+
+	b.Run("idx/Get", func(b *testing.B) {
+		bucket := New(1).buckets[0]
+		for i := 0; i < 1000; i++ {
+			bucket.idx.Put(Key(i), Idx{uint64(i), int64(i)})
+		}
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			bucket.idx.Get(Key(i % 1000))
+		}
+	})
+
+	b.Run("idx/Has", func(b *testing.B) {
+		bucket := New(1).buckets[0]
+		for i := 0; i < 1000; i++ {
+			bucket.idx.Put(Key(i), Idx{uint64(i), int64(i)})
+		}
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			bucket.idx.Has(Key(i % 1000))
+		}
+	})
 }
