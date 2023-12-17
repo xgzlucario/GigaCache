@@ -115,46 +115,6 @@ func TestExpired(t *testing.T) {
 	assert.ElementsMatch(m.Keys(), maps.Keys(m2))
 }
 
-func TestMarshal(t *testing.T) {
-	assert := assert.New(t)
-
-	m := New(64)
-	m2 := map[string][]byte{}
-
-	for i := 0; i < 1000; i++ {
-		key := "key" + strconv.Itoa(i)
-		m.Set(key, []byte(key))
-		m2[key] = []byte(key)
-	}
-
-	for i := 1000; i < 2000; i++ {
-		key := "exp" + strconv.Itoa(i)
-		m.SetEx(key, []byte(key), dur)
-	}
-
-	time.Sleep(dur * 2)
-
-	// Marshal
-	data, err := m.MarshalBinary()
-	assert.Nil(err)
-
-	// Unmarshal
-	m3 := New(64)
-	assert.Nil(m3.UnmarshalBinary(data))
-
-	// Check
-	for k, v := range m2 {
-		val, ts, ok := m3.Get(k)
-		assert.Equal(v, val)
-		assert.True(ok)
-		assert.Equal(ts, int64(0))
-	}
-
-	// Error
-	err = m3.UnmarshalBinary([]byte("fake news"))
-	assert.NotNil(err)
-}
-
 func TestStat(t *testing.T) {
 	assert := assert.New(t)
 

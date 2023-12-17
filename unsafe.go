@@ -10,8 +10,3 @@ func s2b(str *string) []byte {
 	}
 	return *(*[]byte)(unsafe.Pointer(&byteSliceHeader))
 }
-
-// b2s is bytes convert to string unsafe.
-func b2s(buf []byte) *string {
-	return (*string)(unsafe.Pointer(&buf))
-}

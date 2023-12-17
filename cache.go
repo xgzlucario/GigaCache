@@ -6,9 +6,7 @@ import (
 	"time"
 
 	"github.com/dolthub/swiss"
-	bproto "github.com/xgzlucario/GigaCache/proto"
 	"github.com/zeebo/xxh3"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -210,7 +208,7 @@ func (c *GigaCache) Delete(kstr string) bool {
 }
 
 // Walker is the callback function for iterator.
-type Walker func(key []byte, value []byte, ttl int64) bool
+type Walker func(key []byte, value []byte, ttl int64) (stop bool)
 
 // scan
 func (b *bucket) scan(f Walker) {
@@ -345,49 +343,6 @@ func (b *bucket) migrate() {
 		b.reuseSlice = newReuseSlice(reuseSpace)
 		b.mgtimes++
 	}
-}
-
-// MarshalBinary serialize the cache to binary data.
-func (c *GigaCache) MarshalBinary() ([]byte, error) {
-	var data bproto.Cache
-	for _, b := range c.buckets {
-		b.RLock()
-		// init
-		if data.K == nil {
-			n := len(c.buckets) * b.idx.Count()
-			data.K = make([][]byte, 0, n)
-			data.V = make([][]byte, 0, n)
-			data.T = make([]uint32, 0, n)
-		}
-
-		b.idx.Iter(func(key Key, idx Idx) bool {
-			kstr, val, ok := b.find(key, idx)
-			if ok {
-				data.K = append(data.K, kstr)
-				data.V = append(data.V, val)
-				data.T = append(data.T, idx.h2)
-			}
-			return false
-		})
-
-		b.RUnlock()
-	}
-
-	return proto.Marshal(&data)
-}
-
-// UnmarshalBinary deserialize the cache from binary data.
-func (c *GigaCache) UnmarshalBinary(src []byte) error {
-	var data bproto.Cache
-
-	if err := proto.Unmarshal(src, &data); err != nil {
-		return err
-	}
-	for i, k := range data.K {
-		c.SetTx(*b2s(k), data.V[i], int64(data.T[i])*timeCarry)
-	}
-
-	return nil
 }
 
 // CacheStat is the runtime statistics of Gigacache.
