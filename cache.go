@@ -51,8 +51,7 @@ type bucket struct {
 	probeCount uint64
 
 	// Reuse sharded space to save memory.
-	reuseDataLength [reuseSpace]int
-	reuseDataPos    [reuseSpace]int
+	reuseSlice *reuseSlice
 
 	// For rehash migrate.
 	rehash bool
@@ -71,8 +70,9 @@ func New(shard ...int) *GigaCache {
 	}
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket{
-			idx:  swiss.NewMap[Key, Idx](8),
-			data: make([]byte, 0, bufferSize),
+			idx:        swiss.NewMap[Key, Idx](8),
+			data:       make([]byte, 0, bufferSize),
+			reuseSlice: newReuseSlice(reuseSpace),
 		}
 	}
 	return cache
@@ -147,18 +147,14 @@ func (b *bucket) set(key Key, kstr []byte, bytes []byte, ts int64) {
 
 	need := len(kstr) + len(bytes)
 	// reuse empty space.
-	for i, offset := range b.reuseDataLength {
-		if offset >= need {
-			start := b.reuseDataPos[i]
+	start, ok := b.reuseSlice.pop(need)
+	if ok {
+		b.idx.Put(key, newIdx(start, len(bytes), ts))
+		copy(b.data[start:], kstr)
+		copy(b.data[start+len(kstr):], bytes)
 
-			b.idx.Put(key, newIdx(start, len(bytes), ts))
-			copy(b.data[start:], kstr)
-			copy(b.data[start+len(kstr):], bytes)
-
-			b.inused += uint64(need)
-			b.resetReused(i)
-			return
-		}
+		b.inused += uint64(need)
+		return
 	}
 
 	// alloc new space.
@@ -186,7 +182,7 @@ func (c *GigaCache) Set(kstr string, val []byte) {
 
 // SetEx store key-value pair with expired duration.
 func (c *GigaCache) SetEx(kstr string, val []byte, dur time.Duration) {
-	c.SetTx(kstr, val, GetClock()+int64(dur))
+	c.SetTx(kstr, val, GetNanoSec()+int64(dur))
 }
 
 // Delete removes the key-value pair by the key.
@@ -265,19 +261,7 @@ func (c *GigaCache) Keys() (keys []string) {
 func (b *bucket) updateEvict(key Key, idx Idx) {
 	used := key.klen() + idx.offset()
 	b.inused -= uint64(used)
-
-	for i, length := range b.reuseDataLength {
-		if used > length {
-			b.reuseDataLength[i] = used
-			b.reuseDataPos[i] = idx.start()
-			return
-		}
-	}
-}
-
-// resetReused
-func (b *bucket) resetReused(i int) {
-	b.reuseDataLength[i] = 0
+	b.reuseSlice.push(used, idx.start())
 }
 
 // eliminate the expired key-value pairs.
@@ -323,8 +307,9 @@ func (b *bucket) eliminate() {
 // initRehashBucket
 func (b *bucket) initRehashBucket() {
 	b.nb = &bucket{
-		idx:  swiss.NewMap[Key, Idx](uint32(float64(b.idx.Count()) * 1.5)),
-		data: make([]byte, 0, len(b.data)*2),
+		idx:        swiss.NewMap[Key, Idx](uint32(float64(b.idx.Count()) * 1.5)),
+		data:       make([]byte, 0, uint32(float64(len(b.data))*1.5)),
+		reuseSlice: newReuseSlice(reuseSpace),
 	}
 }
 
@@ -357,8 +342,7 @@ func (b *bucket) migrate() {
 		b.inused = b.nb.inused
 		b.nb = nil
 		b.rehash = false
-		b.reuseDataLength = [reuseSpace]int{}
-		b.reuseDataPos = [reuseSpace]int{}
+		b.reuseSlice = newReuseSlice(reuseSpace)
 		b.mgtimes++
 	}
 }

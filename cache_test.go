@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	dur = time.Second / 10
+	dur = time.Second
 )
 
 func TestSet(t *testing.T) {

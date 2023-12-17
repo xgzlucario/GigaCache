@@ -38,17 +38,19 @@ func (k Key) klen() int {
 // +-----------------------+------------------------+
 // h2:
 // +-----------------------+------------------------+
-// |                   ttl(int64)                   |
+// |                   ttl(uint32)                  |
 // +-----------------------+------------------------+
 
 type Idx struct {
 	h1 uint64
-	h2 int64
+	h2 uint32
 }
 
 const (
 	maxStart   = math.MaxUint32
 	offsetMask = math.MaxUint32
+
+	timeCarry = 1e9
 )
 
 func (i Idx) start() int {
@@ -60,11 +62,11 @@ func (i Idx) offset() int {
 }
 
 func (i Idx) expired() bool {
-	return i.h2 > noTTL && i.h2 < GetClock()
+	return i.h2 > noTTL && i.h2 < GetSec()
 }
 
 func (i Idx) TTL() int64 {
-	return i.h2
+	return int64(i.h2) * timeCarry
 }
 
 func newIdx(start, offset int, ttl int64) Idx {
@@ -79,6 +81,6 @@ func newIdx(start, offset int, ttl int64) Idx {
 	}
 	return Idx{
 		h1: uint64(start<<32 | offset),
-		h2: ttl,
+		h2: uint32(ttl / timeCarry),
 	}
 }

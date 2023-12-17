@@ -161,7 +161,7 @@ func BenchmarkInternal(b *testing.B) {
 	b.Run("idx/Get", func(b *testing.B) {
 		bucket := New(1).buckets[0]
 		for i := 0; i < 1000; i++ {
-			bucket.idx.Put(Key(i), Idx{uint64(i), int64(i)})
+			bucket.idx.Put(Key(i), Idx{uint64(i), uint32(i)})
 		}
 		b.ResetTimer()
 
@@ -173,7 +173,7 @@ func BenchmarkInternal(b *testing.B) {
 	b.Run("idx/Has", func(b *testing.B) {
 		bucket := New(1).buckets[0]
 		for i := 0; i < 1000; i++ {
-			bucket.idx.Put(Key(i), Idx{uint64(i), int64(i)})
+			bucket.idx.Put(Key(i), Idx{uint64(i), uint32(i)})
 		}
 		b.ResetTimer()
 
