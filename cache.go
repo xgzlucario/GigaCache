@@ -357,7 +357,7 @@ func (c *GigaCache) MarshalBinary() ([]byte, error) {
 			n := len(c.buckets) * b.idx.Count()
 			data.K = make([][]byte, 0, n)
 			data.V = make([][]byte, 0, n)
-			data.T = make([]int64, 0, n)
+			data.T = make([]uint32, 0, n)
 		}
 
 		b.idx.Iter(func(key Key, idx Idx) bool {
@@ -365,7 +365,7 @@ func (c *GigaCache) MarshalBinary() ([]byte, error) {
 			if ok {
 				data.K = append(data.K, kstr)
 				data.V = append(data.V, val)
-				data.T = append(data.T, idx.TTL())
+				data.T = append(data.T, idx.h2)
 			}
 			return false
 		})
@@ -384,7 +384,7 @@ func (c *GigaCache) UnmarshalBinary(src []byte) error {
 		return err
 	}
 	for i, k := range data.K {
-		c.SetTx(*b2s(k), data.V[i], data.T[i])
+		c.SetTx(*b2s(k), data.V[i], int64(data.T[i])*timeCarry)
 	}
 
 	return nil

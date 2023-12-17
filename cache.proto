@@ -5,5 +5,5 @@ option go_package = "github.com/xgzlucario/GigaCache/proto";
 message Cache {
   repeated bytes K = 1;
   repeated bytes V = 2;
-  repeated int64 T = 3;
+  repeated uint32 T = 3;
 }
