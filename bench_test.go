@@ -3,8 +3,6 @@ package cache
 import (
 	"strconv"
 	"testing"
-
-	"github.com/dolthub/swiss"
 )
 
 var (
@@ -34,13 +32,6 @@ func BenchmarkSet(b *testing.B) {
 			m.Set(strconv.Itoa(i), str)
 		}
 	})
-
-	b.Run("swissmap", func(b *testing.B) {
-		m := swiss.NewMap[string, []byte](8)
-		for i := 0; i < b.N; i++ {
-			m.Put(strconv.Itoa(i), str)
-		}
-	})
 }
 
 func BenchmarkGet(b *testing.B) {
@@ -58,16 +49,6 @@ func BenchmarkGet(b *testing.B) {
 	b.Run("GigaCache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m2.Get(strconv.Itoa(i))
-		}
-	})
-
-	m3 := swiss.NewMap[string, []byte](8)
-	for i := 0; i < num; i++ {
-		m3.Put(strconv.Itoa(i), str)
-	}
-	b.Run("swissmap", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m3.Get(strconv.Itoa(i))
 		}
 	})
 }
@@ -97,20 +78,6 @@ func BenchmarkIter(b *testing.B) {
 			})
 		}
 	})
-
-	b.Run("swissmap", func(b *testing.B) {
-		m := swiss.NewMap[string, []byte](8)
-		for i := 0; i < num; i++ {
-			m.Put(strconv.Itoa(i), str)
-		}
-		b.ResetTimer()
-
-		for i := 0; i < b.N; i++ {
-			m.Iter(func(k string, v []byte) bool {
-				return false
-			})
-		}
-	})
 }
 
 func BenchmarkDelete(b *testing.B) {
@@ -134,18 +101,6 @@ func BenchmarkDelete(b *testing.B) {
 			m.Delete(strconv.Itoa(i))
 		}
 	})
-
-	b.Run("swissmap", func(b *testing.B) {
-		m := swiss.NewMap[string, []byte](8)
-		for i := 0; i < num; i++ {
-			m.Put(strconv.Itoa(i), str)
-		}
-		b.ResetTimer()
-
-		for i := 0; i < b.N; i++ {
-			m.Delete(strconv.Itoa(i))
-		}
-	})
 }
 
 func BenchmarkInternal(b *testing.B) {
@@ -161,7 +116,7 @@ func BenchmarkInternal(b *testing.B) {
 	b.Run("idx/Get", func(b *testing.B) {
 		bucket := New(1).buckets[0]
 		for i := 0; i < 1000; i++ {
-			bucket.idx.Put(Key(i), Idx{uint64(i), int64(i)})
+			bucket.idx.Put(Key(i), Idx{uint64(i), uint32(i)})
 		}
 		b.ResetTimer()
 
@@ -173,7 +128,7 @@ func BenchmarkInternal(b *testing.B) {
 	b.Run("idx/Has", func(b *testing.B) {
 		bucket := New(1).buckets[0]
 		for i := 0; i < 1000; i++ {
-			bucket.idx.Put(Key(i), Idx{uint64(i), int64(i)})
+			bucket.idx.Put(Key(i), Idx{uint64(i), uint32(i)})
 		}
 		b.ResetTimer()
 

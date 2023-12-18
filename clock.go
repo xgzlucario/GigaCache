@@ -7,21 +7,30 @@ import (
 
 var (
 	// now unixnano time
-	clock int64
+	nanosec atomic.Int64
+	sec     atomic.Uint32
 )
 
 func init() {
-	clock = time.Now().UnixNano()
+	now := time.Now()
+	nanosec.Store(now.UnixNano())
+	sec.Store(uint32(now.Unix()))
 
 	go func() {
-		ticker := time.NewTicker(time.Microsecond)
+		ticker := time.NewTicker(time.Millisecond)
 		for t := range ticker.C {
-			atomic.StoreInt64(&clock, t.UnixNano())
+			nanosec.Store(t.UnixNano())
+			sec.Store(uint32(t.Unix()))
 		}
 	}()
 }
 
-// GetClock return now unixnano time.
-func GetClock() int64 {
-	return atomic.LoadInt64(&clock)
+// GetNanoSec returns the current unixnano time.
+func GetNanoSec() int64 {
+	return nanosec.Load()
+}
+
+// GetSec returns the current unix time.
+func GetSec() uint32 {
+	return sec.Load()
 }

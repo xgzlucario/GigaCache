@@ -83,7 +83,7 @@ func main() {
 		k := strconv.Itoa(int(source.Uint64() >> 32))
 		now := time.Now()
 
-		bc.SetEx(k, []byte(k), time.Second*10)
+		bc.SetEx(k, []byte(k), time.Second)
 		count++
 
 		cost := float64(time.Since(now)) / float64(time.Microsecond)
@@ -91,16 +91,6 @@ func main() {
 		td.Add(cost, 1)
 		tdlock.Unlock()
 	}
-
-	// Marshal test
-	// go func() {
-	// 	for {
-	// 		time.Sleep(time.Second * 8)
-	// 		a := time.Now()
-	// 		bc.MarshalBytes()
-	// 		fmt.Println("Marshal cost:", time.Since(a))
-	// 	}
-	// }()
 }
 
 const (
