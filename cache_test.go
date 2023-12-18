@@ -66,6 +66,28 @@ func TestSet(t *testing.T) {
 		k := fmt.Sprintf("%08x", i)
 		m.Delete(k)
 	}
+
+	// Check ttl
+	{
+		ttl := time.Now().Add(time.Second * 3).UnixNano()
+		m.SetTx("a", []byte("b"), ttl)
+		v, ts, ok := m.Get("a")
+		assert.Equal(v, []byte("b"))
+		assert.Equal(ts, (ttl/timeCarry)*timeCarry)
+		assert.True(ok)
+
+		time.Sleep(time.Second * 2)
+		v, ts, ok = m.Get("a")
+		assert.Equal(v, []byte("b"))
+		assert.Equal(ts, (ttl/timeCarry)*timeCarry)
+		assert.True(ok)
+
+		time.Sleep(time.Second * 2)
+		v, ts, ok = m.Get("a")
+		assert.Nil(v)
+		assert.Equal(ts, int64(0))
+		assert.False(ok)
+	}
 }
 
 func TestSetExpired(t *testing.T) {
