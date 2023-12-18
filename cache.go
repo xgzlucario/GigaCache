@@ -4,6 +4,7 @@ import (
 	"slices"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/dolthub/swiss"
 	"github.com/zeebo/xxh3"
@@ -11,7 +12,7 @@ import (
 
 const (
 	noTTL              = 0
-	defaultShardsCount = 1024
+	defaultShardsCount = 4096
 	bufferSize         = 1024
 
 	// eliminate probing.
@@ -26,6 +27,9 @@ const (
 	migrateThresRatio = 0.6
 	migrateDelta      = 1024
 )
+
+// bpool is a global buffer pool.
+var bpool = NewBufferPool(bufferSize)
 
 // GigaCache return a new GigaCache instance.
 type GigaCache struct {
@@ -49,11 +53,7 @@ type bucket struct {
 	probeCount uint64
 
 	// Reuse sharded space to save memory.
-	reuseSlice *reuseSlice
-
-	// For rehash migrate.
-	rehash bool
-	nb     *bucket
+	reuseSlice reuseSlice
 }
 
 // New returns new GigaCache instance.
@@ -67,13 +67,18 @@ func New(shard ...int) *GigaCache {
 		buckets: make([]*bucket, num),
 	}
 	for i := range cache.buckets {
-		cache.buckets[i] = &bucket{
-			idx:        swiss.NewMap[Key, Idx](8),
-			data:       make([]byte, 0, bufferSize),
-			reuseSlice: newReuseSlice(reuseSpace),
-		}
+		cache.buckets[i] = newBucket(64, bufferSize)
 	}
 	return cache
+}
+
+// newBucket returns a new bucket.
+func newBucket(idxSize, bufferSize int) *bucket {
+	return &bucket{
+		idx:        swiss.NewMap[Key, Idx](uint32(idxSize)),
+		data:       bpool.Get(bufferSize)[:0],
+		reuseSlice: newReuseSlice(reuseSpace),
+	}
 }
 
 // getShard returns the bucket and the real key by hash(kstr).
@@ -97,26 +102,19 @@ func (b *bucket) find(key Key, idx Idx) ([]byte, []byte, bool) {
 
 // Get returns value with expiration time by the key.
 func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
-	b, key := c.getShard(kstr)
-	b.RLock()
-	defer b.RUnlock()
-
-	if b.rehash {
-		v, ts, ok := b.nb.get(key)
-		if ok {
-			return v, ts, ok
-		}
-	}
-	return b.get(key)
-}
-
-// get
-func (b *bucket) get(key Key) ([]byte, int64, bool) {
-	idx, ok := b.idx.Get(key)
-	if !ok || idx.expired() {
+	bucket, key := c.getShard(kstr)
+	bucket.RLock()
+	defer bucket.RUnlock()
+	// find index map.
+	idx, ok := bucket.idx.Get(key)
+	if !ok {
 		return nil, 0, false
 	}
-	_, val, ok := b.find(key, idx)
+	// find data.
+	_, val, ok := bucket.find(key, idx)
+	if !ok {
+		return nil, 0, false
+	}
 	return slices.Clone(val), idx.TTL(), ok
 }
 
@@ -133,16 +131,6 @@ func (b *bucket) get(key Key) ([]byte, int64, bool) {
 //
 // set stores key and value in an array of bytes and returns their index positions.
 func (b *bucket) set(key Key, kstr []byte, bytes []byte, ts int64) {
-	if b.rehash {
-		// prevent duplicate keys in old and new buckets.
-		if idx, ok := b.idx.Get(key); ok {
-			b.idx.Delete(key)
-			b.updateEvict(key, idx)
-		}
-		b.nb.set(key, kstr, bytes, ts)
-		return
-	}
-
 	need := len(kstr) + len(bytes)
 	// reuse empty space.
 	start, ok := b.reuseSlice.pop(need)
@@ -184,27 +172,15 @@ func (c *GigaCache) SetEx(kstr string, val []byte, dur time.Duration) {
 }
 
 // Delete removes the key-value pair by the key.
-func (c *GigaCache) Delete(kstr string) bool {
+func (c *GigaCache) Delete(kstr string) {
 	b, key := c.getShard(kstr)
 	b.Lock()
-	b.eliminate()
-	defer b.Unlock()
-
-	if b.rehash {
-		if idx, ok := b.nb.idx.Get(key); ok {
-			b.nb.idx.Delete(key)
-			b.nb.updateEvict(key, idx)
-			return !idx.expired()
-		}
-	}
-
 	if idx, ok := b.idx.Get(key); ok {
 		b.idx.Delete(key)
 		b.updateEvict(key, idx)
-		return !idx.expired()
 	}
-
-	return false
+	b.eliminate()
+	b.Unlock()
 }
 
 // Walker is the callback function for iterator.
@@ -212,12 +188,6 @@ type Walker func(key []byte, value []byte, ttl int64) (stop bool)
 
 // scan
 func (b *bucket) scan(f Walker) {
-	// if rehashing, scan the new bucket first.
-	// because set() will check the old bucket, there will be no duplicate keys in the old and new buckets.
-	if b.rehash {
-		b.nb.scan(f)
-	}
-
 	b.idx.Iter(func(key Key, idx Idx) bool {
 		kstr, val, ok := b.find(key, idx)
 		if ok {
@@ -236,23 +206,6 @@ func (c *GigaCache) Scan(f Walker) {
 		})
 		b.RUnlock()
 	}
-}
-
-// Keys returns all alive keys in cache.
-func (c *GigaCache) Keys() (keys []string) {
-	for _, b := range c.buckets {
-		b.RLock()
-		if keys == nil {
-			keys = make([]string, 0, len(c.buckets)*b.idx.Count())
-		}
-		b.scan(func(key []byte, _ []byte, _ int64) bool {
-			keys = append(keys, string(key))
-			return false
-		})
-		b.RUnlock()
-	}
-
-	return
 }
 
 // updateEvict
@@ -289,11 +242,6 @@ func (b *bucket) eliminate() {
 		return pcount > maxProbeCount
 	})
 
-	if b.rehash {
-		b.migrate()
-		return
-	}
-
 	// on migrate threshold
 	rate := float64(b.inused) / float64(b.alloc)
 	delta := b.alloc - b.inused
@@ -302,47 +250,30 @@ func (b *bucket) eliminate() {
 	}
 }
 
-// initRehashBucket
-func (b *bucket) initRehashBucket() {
-	b.nb = &bucket{
-		idx:        swiss.NewMap[Key, Idx](uint32(float64(b.idx.Count()) * 1.5)),
-		data:       make([]byte, 0, uint32(float64(len(b.data))*1.5)),
-		reuseSlice: newReuseSlice(reuseSpace),
-	}
-}
-
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket) migrate() {
-	if !b.rehash {
-		b.rehash = true
-		b.initRehashBucket()
-		return
-	}
+	// create new bucket.
+	nb := newBucket(b.idx.Count(), len(b.data))
 
-	var count int
-	// fewer key-value pairs moved in a single migrate operation.
+	// migrate datas to new bucket.
 	b.idx.Iter(func(key Key, idx Idx) bool {
 		kstr, val, ok := b.find(key, idx)
 		if ok {
-			b.nb.set(key, kstr, val, idx.TTL())
+			nb.set(key, kstr, val, idx.TTL())
 		}
-		b.idx.Delete(key)
-
-		count++
-		return count >= 100
+		return false
 	})
 
-	// finish rehash.
-	if b.idx.Count() == 0 {
-		b.idx = b.nb.idx
-		b.data = b.nb.data
-		b.alloc = b.nb.alloc
-		b.inused = b.nb.inused
-		b.nb = nil
-		b.rehash = false
-		b.reuseSlice = newReuseSlice(reuseSpace)
-		b.mgtimes++
-	}
+	// reuse buffer.
+	bpool.Put(b.data)
+
+	// replace old bucket.
+	b.idx = nb.idx
+	b.data = nb.data
+	b.alloc = nb.alloc
+	b.inused = nb.inused
+	b.reuseSlice = nb.reuseSlice
+	b.mgtimes++
 }
 
 // CacheStat is the runtime statistics of Gigacache.
@@ -365,11 +296,6 @@ func (c *GigaCache) Stat() (s CacheStat) {
 		s.MigrateTimes += b.mgtimes
 		s.EvictCount += b.evictCount
 		s.ProbeCount += b.probeCount
-		if b.rehash {
-			s.Len += uint64(b.nb.idx.Count())
-			s.BytesAlloc += b.nb.alloc
-			s.BytesInused += b.nb.inused
-		}
 		b.RUnlock()
 	}
 	return
@@ -383,4 +309,13 @@ func (s CacheStat) ExpRate() float64 {
 // EvictRate
 func (s CacheStat) EvictRate() float64 {
 	return float64(s.EvictCount) / float64(s.ProbeCount) * 100
+}
+
+// s2b is string convert to bytes unsafe.
+func s2b(str *string) []byte {
+	strHeader := (*[2]uintptr)(unsafe.Pointer(str))
+	byteSliceHeader := [3]uintptr{
+		strHeader[0], strHeader[1], strHeader[1],
+	}
+	return *(*[]byte)(unsafe.Pointer(&byteSliceHeader))
 }

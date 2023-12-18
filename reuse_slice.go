@@ -7,8 +7,8 @@ type reuseSlice struct {
 	val []int
 }
 
-func newReuseSlice(size int) *reuseSlice {
-	return &reuseSlice{
+func newReuseSlice(size int) reuseSlice {
+	return reuseSlice{
 		key: make([]int, size),
 		val: make([]int, size),
 	}
