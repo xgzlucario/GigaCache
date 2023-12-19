@@ -19,7 +19,9 @@ import (
 var tdlock sync.Mutex
 
 func main() {
-	go http.ListenAndServe("localhost:6060", nil)
+	go func() {
+		_ = http.ListenAndServe("localhost:6060", nil)
+	}()
 
 	start := time.Now()
 	td := tdigest.NewWithCompression(1000)
