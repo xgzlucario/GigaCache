@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -144,8 +145,36 @@ func TestSetExpired(t *testing.T) {
 	}
 }
 
-func TestReuseSpace(t *testing.T) {
-	fmt.Println("===== TestReuseSpace =====")
+func TestOnEvict(t *testing.T) {
+	fmt.Println("===== TestSpaceCache =====")
+	assert := assert.New(t)
+	m := New(1)
+	m.SetOnEvict(func(key, value []byte) {
+		keyNum, _ := strconv.ParseInt(string(key), 10, 0)
+		assert.Equal(keyNum%2, int64(1))
+		assert.Equal(key, value)
+	})
+
+	// SetEx
+	for i := 0; i < 1000; i++ {
+		k := strconv.Itoa(i)
+		if i%2 == 1 {
+			m.SetEx(k, []byte(k), time.Second)
+		} else {
+			m.SetEx(k, []byte(k), time.Minute)
+		}
+	}
+
+	time.Sleep(time.Second * 2)
+
+	// trigger onEvict
+	for i := 0; i < 1000; i++ {
+		m.Set("trig", []byte("trig"))
+	}
+}
+
+func TestSpaceCache(t *testing.T) {
+	fmt.Println("===== TestSpaceCache =====")
 	assert := assert.New(t)
 	m := New(1)
 
@@ -241,7 +270,9 @@ func TestBufferPool(t *testing.T) {
 	bpool = NewBufferPool(128)
 	{
 		bpool.Put(make([]byte, 129))
-		bpool.Get(130)
+		bpool.Put(make([]byte, 130))
+		bpool.Get(131)
+		bpool.Get(132)
 	}
 	for i := 0; i < 1024; i++ {
 		buf := bpool.Get(i)
