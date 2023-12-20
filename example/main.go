@@ -27,10 +27,10 @@ func main() {
 	td := tdigest.NewWithCompression(1000)
 
 	var count int64
-	var avgRate, avgAlloc, avgInused, avgTime float64
+	var avgRate, avgAlloc, avgInused, avgReused, avgTime float64
 	var memStats runtime.MemStats
 
-	bc := cache.New()
+	bc := cache.New(cache.DefaultOption)
 
 	// Stat
 	go func() {
@@ -42,8 +42,9 @@ func main() {
 				stat := bc.Stat()
 
 				avgRate += stat.ExpRate()
-				avgAlloc += float64(stat.BytesAlloc)
-				avgInused += float64(stat.BytesInused)
+				avgAlloc += float64(stat.Alloc)
+				avgInused += float64(stat.Inused)
+				avgReused += float64(stat.Reused)
 				avgTime++
 
 				// Stats
@@ -54,9 +55,10 @@ func main() {
 					formatSize(avgInused/avgTime), formatSize(avgAlloc/avgTime),
 					avgRate/avgTime,
 				)
-				fmt.Printf("[Evict] probe: %vw / %vw (%.1f%%) | mtime: %d\n",
-					stat.EvictCount/1e5, stat.ProbeCount/1e5, stat.EvictRate(),
-					stat.MigrateTimes)
+				fmt.Printf("[Evict] probe: %vw / %vw (%.1f%%) | reused: %v | mgr: %d\n",
+					stat.Evict/1e5, stat.Probe/1e5, stat.EvictRate(),
+					formatSize(avgReused/avgTime),
+					stat.Migrates)
 
 				// mem stats
 				runtime.ReadMemStats(&memStats)

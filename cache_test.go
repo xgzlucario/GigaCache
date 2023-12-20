@@ -12,8 +12,11 @@ import (
 func TestSet(t *testing.T) {
 	fmt.Println("===== TestSet =====")
 	assert := assert.New(t)
-	m := New(1)
 	const num = 10000
+
+	opt := DefaultOption
+	opt.ShardCount = 1
+	m := New(opt)
 
 	// Set
 	for i := 0; i < num; i++ {
@@ -23,11 +26,11 @@ func TestSet(t *testing.T) {
 		// check stat
 		stat := m.Stat()
 		assert.Equal(i+1, int(stat.Len))
-		assert.Equal(16*(i+1), int(stat.BytesAlloc))
-		assert.Equal(16*(i+1), int(stat.BytesInused))
-		assert.Equal(0, int(stat.EvictCount))
-		assert.GreaterOrEqual(int(stat.ProbeCount), 0)
-		assert.Equal(0, int(stat.MigrateTimes))
+		assert.Equal(16*(i+1), int(stat.Alloc))
+		assert.Equal(16*(i+1), int(stat.Inused))
+		assert.Equal(0, int(stat.Evict))
+		assert.GreaterOrEqual(int(stat.Probe), 0)
+		assert.Equal(0, int(stat.Migrates))
 		assert.Equal(float64(100), stat.ExpRate())
 		if i > 0 {
 			assert.Equal(float64(0), stat.EvictRate())
@@ -94,9 +97,12 @@ func TestSet(t *testing.T) {
 func TestSetExpired(t *testing.T) {
 	fmt.Println("===== TestSetExpired =====")
 	assert := assert.New(t)
-	m := New(1)
 	const num = 10000
 	startUnix := time.Now().Add(time.Second*60).Unix() * timeCarry
+
+	opt := DefaultOption
+	opt.ShardCount = 1
+	m := New(opt)
 
 	// Set
 	for i := 0; i < num; i++ {
@@ -148,12 +154,15 @@ func TestSetExpired(t *testing.T) {
 func TestOnEvict(t *testing.T) {
 	fmt.Println("===== TestSpaceCache =====")
 	assert := assert.New(t)
-	m := New(1)
-	m.SetOnEvict(func(key, value []byte) {
+
+	opt := DefaultOption
+	opt.ShardCount = 1
+	opt.OnEvict = func(key, value []byte) {
 		keyNum, _ := strconv.ParseInt(string(key), 10, 0)
 		assert.Equal(keyNum%2, int64(1))
 		assert.Equal(key, value)
-	})
+	}
+	m := New(opt)
 
 	// SetEx
 	for i := 0; i < 1000; i++ {
@@ -176,7 +185,10 @@ func TestOnEvict(t *testing.T) {
 func TestSpaceCache(t *testing.T) {
 	fmt.Println("===== TestSpaceCache =====")
 	assert := assert.New(t)
-	m := New(1)
+
+	opt := DefaultOption
+	opt.ShardCount = 1
+	m := New(opt)
 
 	// Set
 	for i := 0; i < 1000; i++ {
@@ -192,20 +204,22 @@ func TestSpaceCache(t *testing.T) {
 
 	stat := m.Stat()
 	assert.Equal(800, int(stat.Len))
-	assert.Equal(1000*8, int(stat.BytesAlloc))
-	assert.Equal(800*8, int(stat.BytesInused))
-	assert.Equal(0, int(stat.EvictCount))
+	assert.Equal(1000*8, int(stat.Alloc))
+	assert.Equal(800*8, int(stat.Inused))
+	assert.Equal(0, int(stat.Reused))
+	assert.Equal(0, int(stat.Evict))
 
 	// Set in reuse space.
-	for i := 1; i <= reuseSpace; i++ {
+	for i := 1; i <= opt.SCacheSize; i++ {
 		k := fmt.Sprintf("%04x", i)
 		m.Set(k, []byte(k))
 
 		stat := m.Stat()
 		assert.Equal(800+i, int(stat.Len))
-		assert.Equal(1000*8, int(stat.BytesAlloc))
-		assert.Equal((800+i)*8, int(stat.BytesInused))
-		assert.Equal(0, int(stat.EvictCount))
+		assert.Equal(1000*8, int(stat.Alloc))
+		assert.Equal((800+i)*8, int(stat.Inused))
+		assert.Equal(i*8, int(stat.Reused))
+		assert.Equal(0, int(stat.Evict))
 	}
 
 	// Set in alloc new space.
@@ -213,16 +227,20 @@ func TestSpaceCache(t *testing.T) {
 	m.Set(k, []byte(k))
 
 	stat = m.Stat()
-	assert.Equal(800+reuseSpace+1, int(stat.Len))
-	assert.Equal(1000*8+8, int(stat.BytesAlloc))
-	assert.Equal((800+reuseSpace+1)*8, int(stat.BytesInused))
-	assert.Equal(0, int(stat.EvictCount))
+	assert.Equal(800+opt.SCacheSize+1, int(stat.Len))
+	assert.Equal(1000*8+8, int(stat.Alloc))
+	assert.Equal((800+opt.SCacheSize+1)*8, int(stat.Inused))
+	assert.Equal(8*8, int(stat.Reused))
+	assert.Equal(0, int(stat.Evict))
 }
 
 func TestMigrate(t *testing.T) {
 	fmt.Println("===== TestMigrate =====")
 	assert := assert.New(t)
-	m := New(1)
+
+	opt := DefaultOption
+	opt.ShardCount = 1
+	m := New(opt)
 
 	for i := 0; i < 1000; i++ {
 		k := fmt.Sprintf("%04x", i)
@@ -238,36 +256,36 @@ func TestMigrate(t *testing.T) {
 	// check stat before migrate.
 	stat := m.Stat()
 	assert.Equal(1000, int(stat.Len))
-	assert.Equal(1000*8, int(stat.BytesAlloc))
-	assert.Equal(1000*8, int(stat.BytesInused))
-	assert.Equal(0, int(stat.EvictCount))
+	assert.Equal(1000*8, int(stat.Alloc))
+	assert.Equal(1000*8, int(stat.Inused))
+	assert.Equal(0, int(stat.Evict))
 
 	// evict some.
 	for i := 0; i < 5; i++ {
 		m.buckets[0].eliminate()
 	}
 	stat = m.Stat()
-	evict := int(stat.EvictCount)
+	evict := int(stat.Evict)
 	assert.Equal(1000-evict, int(stat.Len))
-	assert.Equal(1000*8, int(stat.BytesAlloc))
-	assert.Equal((1000-evict)*8, int(stat.BytesInused))
-	assert.Equal(evict, int(stat.EvictCount))
+	assert.Equal(1000*8, int(stat.Alloc))
+	assert.Equal((1000-evict)*8, int(stat.Inused))
+	assert.Equal(evict, int(stat.Evict))
 
-	m.buckets[0].migrate()
+	m.Migrate()
 
 	// check stat after migrate.
 	stat = m.Stat()
 	assert.Equal(750, int(stat.Len))
-	assert.Equal(750*8, int(stat.BytesAlloc))
-	assert.Equal(750*8, int(stat.BytesInused))
-	assert.Equal(evict, int(stat.EvictCount))
+	assert.Equal(750*8, int(stat.Alloc))
+	assert.Equal(750*8, int(stat.Inused))
+	assert.Equal(evict, int(stat.Evict))
 }
 
 func TestBufferPool(t *testing.T) {
 	fmt.Println("===== TestBufferPool =====")
 	assert := assert.New(t)
 
-	bpool = NewBufferPool(128)
+	bpool := NewBufferPool(128)
 	{
 		bpool.Put(make([]byte, 129))
 		bpool.Put(make([]byte, 130))
@@ -291,5 +309,11 @@ func TestBufferPool(t *testing.T) {
 
 	assert.Panics(func() {
 		NewBufferPool(-1)
+	})
+
+	assert.Panics(func() {
+		opt := DefaultOption
+		opt.ShardCount = 0
+		New(opt)
 	})
 }

@@ -11,33 +11,14 @@ import (
 )
 
 const (
-	noTTL              = 0
-	defaultShardsCount = 4096
-	bufferSize         = 1024
-
-	// eliminate probing.
-	maxProbeCount = 1000
-	maxFailCount  = 3
-
-	// reuse space count.
-	reuseSpace = 8
-
-	// migrateThres defines the conditions necessary to trigger a migrate operation.
-	// Ratio recommended is 0.6, see bench data for details.
-	migrateThresRatio = 0.6
-	migrateDelta      = 1024
+	noTTL = 0
 )
-
-// bpool is a global buffer pool.
-var bpool = NewBufferPool(bufferSize)
-
-// OnEvictCallback is the callback function of evict key-value pair.
-// DO NOT EDIT the input params key value.
-type OnEvictCallback func(key, value []byte)
 
 // GigaCache defination.
 type GigaCache struct {
 	mask    uint64
+	opt     *Option
+	bpool   *BufferPool
 	buckets []*bucket
 }
 
@@ -45,53 +26,52 @@ type GigaCache struct {
 type bucket struct {
 	sync.RWMutex
 
+	opt  *Option
+	root *GigaCache
+
 	// Key & idx is Indexes, and data is where the data is actually stored.
 	idx  *swiss.Map[Key, Idx]
 	data []byte
 
 	// Stat for runtime.
-	alloc      uint64
-	inused     uint64
-	mgtimes    uint64
-	evictCount uint64
-	probeCount uint64
-	onEvict    OnEvictCallback
+	alloc    uint64
+	inused   uint64
+	reused   uint64
+	migrates uint64
+	evict    uint64
+	probe    uint64
 
 	// scache reuse sharded space to save memory.
 	scache spaceCache
 }
 
 // New returns new GigaCache instance.
-func New(shard ...int) *GigaCache {
-	num := defaultShardsCount
-	if len(shard) > 0 {
-		num = shard[0]
+func New(opt Option) *GigaCache {
+	shardCount := opt.ShardCount
+	if shardCount <= 0 {
+		panic("shard count must be greater than 0")
 	}
 	cache := &GigaCache{
-		mask:    uint64(num - 1),
-		buckets: make([]*bucket, num),
+		mask:    uint64(shardCount - 1),
+		opt:     &opt,
+		buckets: make([]*bucket, shardCount),
+		bpool:   NewBufferPool(opt.DefaultBufferSize),
 	}
+	// init buckets.
 	for i := range cache.buckets {
-		cache.buckets[i] = newBucket(64, bufferSize)
+		cache.buckets[i] = cache.newBucket(opt.DefaultIdxMapSize, opt.DefaultBufferSize)
 	}
 	return cache
 }
 
-// SetOnEvict
-func (c *GigaCache) SetOnEvict(f OnEvictCallback) {
-	for _, b := range c.buckets {
-		b.Lock()
-		b.onEvict = f
-		b.Unlock()
-	}
-}
-
 // newBucket returns a new bucket.
-func newBucket(idxSize, bufferSize int) *bucket {
+func (c *GigaCache) newBucket(idxSize, bufferSize int) *bucket {
 	return &bucket{
+		opt:    c.opt,
+		root:   c,
 		idx:    swiss.NewMap[Key, Idx](uint32(idxSize)),
-		data:   bpool.Get(bufferSize)[:0],
-		scache: newSpaceCache(reuseSpace),
+		data:   c.bpool.Get(bufferSize)[:0],
+		scache: newSpaceCache(c.opt.SCacheSize),
 	}
 }
 
@@ -114,17 +94,20 @@ func (b *bucket) find(key Key, idx Idx) ([]byte, []byte) {
 func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 	bucket, key := c.getShard(kstr)
 	bucket.RLock()
-	defer bucket.RUnlock()
 
 	// find index map.
 	idx, ok := bucket.idx.Get(key)
 	if !ok || idx.expired() {
+		bucket.RUnlock()
 		return nil, 0, false
 	}
 
 	// find data.
 	_, val := bucket.find(key, idx)
-	return slices.Clone(val), idx.TTL(), ok
+	val = slices.Clone(val)
+	bucket.RUnlock()
+
+	return val, idx.TTL(), ok
 }
 
 //	 map[Key]Idx ----+
@@ -148,6 +131,7 @@ func (b *bucket) set(key Key, kstr []byte, bytes []byte, ts int64) {
 		copy(b.data[start+len(kstr):], bytes)
 
 		b.inused += uint64(need)
+		b.reused += uint64(need)
 		return
 	}
 
@@ -216,6 +200,15 @@ func (c *GigaCache) Scan(f Walker) {
 	}
 }
 
+// Migrate move all data to new buckets.
+func (c *GigaCache) Migrate() {
+	for _, b := range c.buckets {
+		b.Lock()
+		b.migrate()
+		b.Unlock()
+	}
+}
+
 // updateEvict
 func (b *bucket) updateEvict(key Key, idx Idx) {
 	used := key.klen() + idx.offset()
@@ -223,42 +216,45 @@ func (b *bucket) updateEvict(key Key, idx Idx) {
 	b.scache.put(used, idx.start())
 }
 
+// OnEvictCallback is the callback function of evict key-value pair.
+// DO NOT EDIT the input params key value.
+type OnEvictCallback func(key, value []byte)
+
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
-	var pcount int
-	var failed byte
+	var failed, pcount int
 
 	// probing
 	b.idx.Iter(func(key Key, idx Idx) bool {
-		b.probeCount++
+		b.probe++
 
 		if idx.expired() {
 			// on evict
-			if b.onEvict != nil {
+			if b.opt.OnEvict != nil {
 				kstr, val := b.find(key, idx)
-				b.onEvict(kstr, val)
+				b.opt.OnEvict(kstr, val)
 			}
 			b.idx.Delete(key)
-			b.evictCount++
 			b.updateEvict(key, idx)
+			b.evict++
 			failed = 0
 
 			return false
 		}
 
 		failed++
-		if failed >= maxFailCount {
+		if failed >= b.opt.MaxFailCount {
 			return true
 		}
 
 		pcount++
-		return pcount > maxProbeCount
+		return pcount > b.opt.MaxProbeCount
 	})
 
 	// on migrate threshold
 	rate := float64(b.inused) / float64(b.alloc)
 	delta := b.alloc - b.inused
-	if delta >= migrateDelta && rate <= migrateThresRatio {
+	if delta >= b.opt.MigrateDelta && rate <= b.opt.MigrateThresRatio {
 		b.migrate()
 	}
 }
@@ -266,7 +262,7 @@ func (b *bucket) eliminate() {
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket) migrate() {
 	// create new bucket.
-	nb := newBucket(b.idx.Count(), len(b.data))
+	nb := b.root.newBucket(b.idx.Count(), len(b.data))
 
 	// migrate datas to new bucket.
 	b.idx.Iter(func(key Key, idx Idx) bool {
@@ -279,25 +275,27 @@ func (b *bucket) migrate() {
 	})
 
 	// reuse buffer.
-	bpool.Put(b.data)
+	b.root.bpool.Put(b.data)
 
 	// replace old bucket.
 	b.idx = nb.idx
 	b.data = nb.data
 	b.alloc = nb.alloc
 	b.inused = nb.inused
+	b.reused = nb.reused
 	b.scache = nb.scache
-	b.mgtimes++
+	b.migrates++
 }
 
 // CacheStat is the runtime statistics of Gigacache.
 type CacheStat struct {
-	Len          uint64
-	BytesAlloc   uint64
-	BytesInused  uint64
-	MigrateTimes uint64
-	EvictCount   uint64
-	ProbeCount   uint64
+	Len      uint64
+	Alloc    uint64
+	Inused   uint64
+	Reused   uint64
+	Migrates uint64
+	Evict    uint64
+	Probe    uint64
 }
 
 // Stat return the runtime statistics of Gigacache.
@@ -305,11 +303,12 @@ func (c *GigaCache) Stat() (s CacheStat) {
 	for _, b := range c.buckets {
 		b.RLock()
 		s.Len += uint64(b.idx.Count())
-		s.BytesAlloc += b.alloc
-		s.BytesInused += b.inused
-		s.MigrateTimes += b.mgtimes
-		s.EvictCount += b.evictCount
-		s.ProbeCount += b.probeCount
+		s.Alloc += b.alloc
+		s.Inused += b.inused
+		s.Reused += b.reused
+		s.Migrates += b.migrates
+		s.Evict += b.evict
+		s.Probe += b.probe
 		b.RUnlock()
 	}
 	return
@@ -317,12 +316,12 @@ func (c *GigaCache) Stat() (s CacheStat) {
 
 // ExpRate
 func (s CacheStat) ExpRate() float64 {
-	return float64(s.BytesInused) / float64(s.BytesAlloc) * 100
+	return float64(s.Inused) / float64(s.Alloc) * 100
 }
 
 // EvictRate
 func (s CacheStat) EvictRate() float64 {
-	return float64(s.EvictCount) / float64(s.ProbeCount) * 100
+	return float64(s.Evict) / float64(s.Probe) * 100
 }
 
 // s2b is string convert to bytes unsafe.
