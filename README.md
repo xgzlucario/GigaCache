@@ -75,7 +75,6 @@ Gigache Set operation has better performance than stdmap.
 | ---------------- | ------- | ----------- | -------- | ----------- |
 | Set/stdmap-20    | 4457132 | 296.9 ns/op | 183 B/op | 1 allocs/op |
 | Set/GigaCache-20 | 6852141 | 216.9 ns/op | 146 B/op | 1 allocs/op |
-| Set/swissmap-20  | 6700950 | 215.5 ns/op | 110 B/op | 0 allocs/op |
 
 **Get** from 100k entries.
 
@@ -83,7 +82,6 @@ Gigache Set operation has better performance than stdmap.
 | ---------------- | -------- | ----------- | -------- | ----------- |
 | Get/stdmap-20    | 22750813 | 52.25 ns/op | 7 B/op   | 0 allocs/op |
 | Get/GigaCache-20 | 20830256 | 52.62 ns/op | 8 B/op   | 1 allocs/op |
-| Get/swissmap-20  | 33340096 | 34.66 ns/op | 7 B/op   | 0 allocs/op |
 
 **Delete**
 
@@ -91,7 +89,6 @@ Gigache Set operation has better performance than stdmap.
 | ---------------------- | -------- | ----------- | -------- | ----------- |
 | Delete/stdmap-20       | 87499602 | 14.53 ns/op |	7 B/op	 | 0 allocs/op |
 | Delete/GigaCache-20    | 22143832 | 49.78 ns/op |	8 B/op	 | 1 allocs/op |
-| Delete/swissmap-20     | 50007508	| 24.14 ns/op |	7 B/op	 | 0 allocs/op |
 
 **Iter** from 100k entries.
 
@@ -99,50 +96,35 @@ Gigache Set operation has better performance than stdmap.
 | --------------------------- | -------- | ------------- | -------- | ----------- |
 | BenchmarkIter/stdmap-20     |      496 | 2451833 ns/op |	 0 B/op	| 0 allocs/op |
 | BenchmarkIter/GigaCache-20  |     1998 |  579076 ns/op |	 0 B/op | 0 allocs/op |
-| BenchmarkIter/swissmap-20   | 	5544 |  201880 ns/op |	 0 B/op | 0 allocs/op |
 
-**Latency**
+# 🎢Integrated Bench
 
-Insert 49010*10000 pieces of data in 200s, p90 is 0.36us, p99 is 0.69us, p9999 is 51.12us.
+Run bench with `go run example/*.go`.
 
-```sh
-[Cache] 200s | 49010w | len: 3200w | alloc: 577.3MB / 772.9MB (76.0%)
-[Evict] probe: 3549w / 20431w (17.4%) | mtime: 9824
-[Mem] mem: 5859MB | sys: 8348MB | gc: 38 | gcpause: 86 us
-50th = 0.22 us
-75th = 0.27 us
-90th = 0.36 us
-99th = 0.69 us
-9999th = 51.12 us
-```
-
-**GC pause time**（Reference to [allegro/bigcache-bench](https://github.com/allegro/bigcache-bench)）
+In the comprehensive test scenario (20 million entries inserted), GigaCache is significantly ahead of stdmap in terms of memory efficiency and faster insertion, but gc performance is slightly worse than stdmap.
 
 ```go
-Cache:              stdmap
-Number of entries:  20000000
-Number of repeats:  50
-Value size:         100
-Heap Objects Total: 446
-GC pause for startup:  2.948819ms
+gigacache
+entries: 20000000
+alloc: 1121 mb
+gcsys: 32 mb
+heap inuse: 1121 mb
+heap object: 1061 k
+gc: 18
+pause: 978.578µs
+cost: 12.879543968s
 ```
 
 ```go
-Cache:              bigcache
-Number of entries:  20000000
-Number of repeats:  50
-Value size:         100
-Heap Objects Total: 419
-GC pause for startup:  1.129539ms
-```
-
-```go
-Cache:              gigacache
-Number of entries:  20000000
-Number of repeats:  50
-Value size:         100
-Heap Objects Total: 471
-GC pause for startup:  10.828795ms
+stdmap
+entries: 20000000
+alloc: 2663 mb
+gcsys: 64 mb
+heap inuse: 2664 mb
+heap object: 29482 k
+gc: 11
+pause: 648.029µs
+cost: 14.195488627s
 ```
 
 # 🛸Internal

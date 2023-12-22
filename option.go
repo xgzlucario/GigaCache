@@ -1,6 +1,6 @@
 package cache
 
-// Option is the option of GigaCache.
+// Option is the configuration of GigaCache.
 type Option struct {
 	// ShardCount is shard numbers of GigaCache.
 	ShardCount int
