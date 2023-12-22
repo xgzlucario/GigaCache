@@ -27,7 +27,7 @@ func BenchmarkSet(b *testing.B) {
 	})
 
 	b.Run("GigaCache", func(b *testing.B) {
-		m := New()
+		m := New(DefaultOption)
 		for i := 0; i < b.N; i++ {
 			m.Set(strconv.Itoa(i), str)
 		}
@@ -42,7 +42,7 @@ func BenchmarkGet(b *testing.B) {
 		}
 	})
 
-	m2 := New()
+	m2 := New(DefaultOption)
 	for i := 0; i < num; i++ {
 		m2.Set(strconv.Itoa(i), str)
 	}
@@ -66,7 +66,7 @@ func BenchmarkIter(b *testing.B) {
 	})
 
 	b.Run("GigaCache", func(b *testing.B) {
-		m := New()
+		m := New(DefaultOption)
 		for i := 0; i < num; i++ {
 			m.Set(strconv.Itoa(i), str)
 		}
@@ -91,7 +91,7 @@ func BenchmarkDelete(b *testing.B) {
 	})
 
 	b.Run("GigaCache", func(b *testing.B) {
-		m := New()
+		m := New(DefaultOption)
 		for i := 0; i < num; i++ {
 			m.Set(strconv.Itoa(i), str)
 		}
@@ -99,41 +99,6 @@ func BenchmarkDelete(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			m.Delete(strconv.Itoa(i))
-		}
-	})
-}
-
-func BenchmarkInternal(b *testing.B) {
-	b.Run("iter/8", func(b *testing.B) {
-		m := [8]int{0, 0, 0, 0, 0, 0, 0, 0}
-		for i := 0; i < b.N; i++ {
-			for a, b := range m {
-				_, _ = a, b
-			}
-		}
-	})
-
-	b.Run("idx/Get", func(b *testing.B) {
-		bucket := New(1).buckets[0]
-		for i := 0; i < 1000; i++ {
-			bucket.idx.Put(Key(i), Idx{uint64(i), uint32(i)})
-		}
-		b.ResetTimer()
-
-		for i := 0; i < b.N; i++ {
-			bucket.idx.Get(Key(i % 1000))
-		}
-	})
-
-	b.Run("idx/Has", func(b *testing.B) {
-		bucket := New(1).buckets[0]
-		for i := 0; i < 1000; i++ {
-			bucket.idx.Put(Key(i), Idx{uint64(i), uint32(i)})
-		}
-		b.ResetTimer()
-
-		for i := 0; i < b.N; i++ {
-			bucket.idx.Has(Key(i % 1000))
 		}
 	})
 }
