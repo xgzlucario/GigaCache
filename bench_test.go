@@ -29,7 +29,7 @@ func BenchmarkSet(b *testing.B) {
 	b.Run("GigaCache", func(b *testing.B) {
 		m := New(DefaultOption)
 		for i := 0; i < b.N; i++ {
-			m.Set(strconv.Itoa(i), str)
+			m.Set([]byte(strconv.Itoa(i)), str)
 		}
 	})
 }
@@ -44,11 +44,11 @@ func BenchmarkGet(b *testing.B) {
 
 	m2 := New(DefaultOption)
 	for i := 0; i < num; i++ {
-		m2.Set(strconv.Itoa(i), str)
+		m2.Set([]byte(strconv.Itoa(i)), str)
 	}
 	b.Run("GigaCache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			m2.Get(strconv.Itoa(i))
+			m2.Get([]byte(strconv.Itoa(i)))
 		}
 	})
 }
@@ -68,7 +68,7 @@ func BenchmarkIter(b *testing.B) {
 	b.Run("GigaCache", func(b *testing.B) {
 		m := New(DefaultOption)
 		for i := 0; i < num; i++ {
-			m.Set(strconv.Itoa(i), str)
+			m.Set([]byte(strconv.Itoa(i)), str)
 		}
 		b.ResetTimer()
 
@@ -93,12 +93,12 @@ func BenchmarkDelete(b *testing.B) {
 	b.Run("GigaCache", func(b *testing.B) {
 		m := New(DefaultOption)
 		for i := 0; i < num; i++ {
-			m.Set(strconv.Itoa(i), str)
+			m.Set([]byte(strconv.Itoa(i)), str)
 		}
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			m.Delete(strconv.Itoa(i))
+			m.Delete([]byte(strconv.Itoa(i)))
 		}
 	})
 }

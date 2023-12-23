@@ -21,9 +21,9 @@ func gcPause() time.Duration {
 	return pause
 }
 
-func genKV(id int) (string, []byte) {
-	k := fmt.Sprintf("%08x", id)
-	return k, []byte(k)
+func genKV(id int) ([]byte, []byte) {
+	k := []byte(fmt.Sprintf("%08x", id))
+	return k, k
 }
 
 func main() {
@@ -48,7 +48,7 @@ func main() {
 		m := make(map[string][]byte)
 		for i := 0; i < entries; i++ {
 			k, v := genKV(i)
-			m[k] = v
+			m[string(k)] = v
 		}
 	}
 	cost := time.Since(start)

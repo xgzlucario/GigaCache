@@ -84,10 +84,12 @@ func main() {
 
 	// set test
 	for j := 0; ; j++ {
-		k := strconv.Itoa(int(source.Uint64() >> 32))
+		str := strconv.Itoa(int(source.Uint64() >> 32))
+		k := []byte(str)
+
 		now := time.Now()
 
-		bc.SetEx(k, []byte(k), time.Second)
+		bc.SetEx(k, k, time.Second)
 		count++
 
 		cost := float64(time.Since(now)) / float64(time.Microsecond)
