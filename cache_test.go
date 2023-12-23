@@ -297,24 +297,25 @@ func TestBufferPool(t *testing.T) {
 	bpool := NewBufferPool()
 
 	// miss
-	buf := bpool.Get(1024)
-	assert.Equal(1024, cap(buf))
-	assert.Equal(1024, len(buf))
+	buf := bpool.Get(32)
+	assert.Equal(32, cap(buf))
+	assert.Equal(32, len(buf))
 	assert.Equal(int(bpool.miss.Load()), 1)
 	bpool.Put(buf)
 
 	// hit
-	buf = bpool.Get(1022)
-	assert.Equal(1024, cap(buf))
-	assert.Equal(1022, len(buf))
+	buf = bpool.Get(30)
+	assert.Equal(32, cap(buf))
+	assert.Equal(30, len(buf))
 	assert.Equal(int(bpool.hit.Load()), 1)
+	bpool.Put(buf)
 
 	runtime.GC()
 
 	// miss
-	buf = bpool.Get(1024)
-	assert.Equal(1024, cap(buf))
-	assert.Equal(1024, len(buf))
+	buf = bpool.Get(32)
+	assert.Equal(32, cap(buf))
+	assert.Equal(32, len(buf))
 	assert.Equal(int(bpool.miss.Load()), 2)
 	bpool.Put(buf)
 
