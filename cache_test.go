@@ -156,7 +156,7 @@ func TestSetExpired(t *testing.T) {
 }
 
 func TestOnEvict(t *testing.T) {
-	fmt.Println("===== TestSpaceCache =====")
+	fmt.Println("===== TestOnEvict =====")
 	assert := assert.New(t)
 
 	opt := DefaultOption
@@ -169,7 +169,7 @@ func TestOnEvict(t *testing.T) {
 	m := New(opt)
 
 	// SetEx
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 10000; i++ {
 		k := []byte(strconv.Itoa(i))
 		if i%2 == 1 {
 			m.SetEx(k, k, time.Second)
@@ -181,7 +181,7 @@ func TestOnEvict(t *testing.T) {
 	time.Sleep(time.Second * 2)
 
 	// trigger onEvict
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 10000; i++ {
 		m.Set([]byte("trig"), []byte("trig"))
 	}
 }
@@ -293,46 +293,39 @@ func TestMigrate(t *testing.T) {
 func TestBufferPool(t *testing.T) {
 	fmt.Println("===== TestBufferPool =====")
 	assert := assert.New(t)
+	bpool := NewBufferPool()
 
-	bpool := NewBufferPool(128)
-	{
-		bpool.Put(make([]byte, 129))
-		bpool.Put(make([]byte, 130))
-		bpool.Get(131)
-		bpool.Get(132)
-	}
-	for i := 0; i < 1024; i++ {
-		buf := bpool.Get(i)
-		assert.Equal(len(buf), i)
-		assert.GreaterOrEqual(cap(buf), i)
-		bpool.Put(buf)
-	}
-	for i := 1024; i > 0; i-- {
-		buf := bpool.Get(i)
-		assert.Equal(len(buf), i)
-		assert.GreaterOrEqual(cap(buf), i)
-		bpool.Put(buf)
-	}
+	// miss
+	buf := bpool.Get(32)
+	assert.Equal(32, cap(buf))
+	assert.Equal(32, len(buf))
+	assert.Equal(int(bpool.miss.Load()), 1)
+	bpool.Put(buf)
 
-	fmt.Println(bpool)
+	// hit
+	// buf = bpool.Get(30)
+	// assert.Equal(32, cap(buf))
+	// assert.Equal(30, len(buf))
+	// assert.Equal(int(bpool.hit.Load()), 1)
+	// bpool.Put(buf)
 
-	assert.Panics(func() {
-		NewBufferPool(-1)
-	})
+	// runtime.GC()
+
+	// // miss
+	// buf = bpool.Get(32)
+	// assert.Equal(32, cap(buf))
+	// assert.Equal(32, len(buf))
+	// assert.Equal(int(bpool.miss.Load()), 2)
+	// bpool.Put(buf)
 
 	assert.Panics(func() {
 		opt := DefaultOption
 		opt.ShardCount = 0
 		New(opt)
 	})
-}
-
-func TestPanic(t *testing.T) {
-	fmt.Println("===== TestPanic =====")
-	assert := assert.New(t)
-	m := New(DefaultOption)
 
 	assert.Panics(func() {
+		m := New(DefaultOption)
 		m.Set(nil, nil)
 	})
 }

@@ -54,7 +54,7 @@ func New(opt Option) *GigaCache {
 		mask:    uint64(shardCount - 1),
 		opt:     &opt,
 		buckets: make([]*bucket, shardCount),
-		bpool:   NewBufferPool(opt.DefaultBufferSize),
+		bpool:   NewBufferPool(),
 	}
 	// init buckets.
 	for i := range cache.buckets {
