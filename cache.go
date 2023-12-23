@@ -4,7 +4,6 @@ import (
 	"slices"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/dolthub/swiss"
 	"github.com/zeebo/xxh3"
@@ -76,8 +75,8 @@ func (c *GigaCache) newBucket(idxSize, bufferSize int) *bucket {
 }
 
 // getShard returns the bucket and the real key by hash(kstr).
-func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
-	hash := xxh3.HashString(kstr)
+func (c *GigaCache) getShard(kstr []byte) (*bucket, Key) {
+	hash := xxh3.Hash(kstr)
 	return c.buckets[hash&c.mask], newKey(hash, len(kstr))
 }
 
@@ -91,7 +90,7 @@ func (b *bucket) find(key Key, idx Idx) ([]byte, []byte) {
 }
 
 // Get returns value with expiration time by the key.
-func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
+func (c *GigaCache) Get(kstr []byte) ([]byte, int64, bool) {
 	bucket, key := c.getShard(kstr)
 	bucket.RLock()
 
@@ -121,6 +120,10 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 //
 // set stores key-value pair into bucket.
 func (b *bucket) set(key Key, kstr []byte, bytes []byte, ts int64) {
+	// check valid key.
+	if len(kstr) == 0 {
+		panic("key should not be empty")
+	}
 	need := len(kstr) + len(bytes)
 
 	// attempt to fetch empty space.
@@ -145,26 +148,26 @@ func (b *bucket) set(key Key, kstr []byte, bytes []byte, ts int64) {
 }
 
 // SetTx store key-value pair with deadline.
-func (c *GigaCache) SetTx(kstr string, val []byte, ts int64) {
+func (c *GigaCache) SetTx(kstr, val []byte, ts int64) {
 	b, key := c.getShard(kstr)
 	b.Lock()
 	b.eliminate()
-	b.set(key, s2b(&kstr), val, ts)
+	b.set(key, kstr, val, ts)
 	b.Unlock()
 }
 
 // Set store key-value pair.
-func (c *GigaCache) Set(kstr string, val []byte) {
+func (c *GigaCache) Set(kstr, val []byte) {
 	c.SetTx(kstr, val, noTTL)
 }
 
 // SetEx store key-value pair with expired duration.
-func (c *GigaCache) SetEx(kstr string, val []byte, dur time.Duration) {
+func (c *GigaCache) SetEx(kstr, val []byte, dur time.Duration) {
 	c.SetTx(kstr, val, GetNanoSec()+int64(dur))
 }
 
 // Delete removes the key-value pair by the key.
-func (c *GigaCache) Delete(kstr string) {
+func (c *GigaCache) Delete(kstr []byte) {
 	b, key := c.getShard(kstr)
 	b.Lock()
 	if idx, ok := b.idx.Get(key); ok {
@@ -322,13 +325,4 @@ func (s CacheStat) ExpRate() float64 {
 // EvictRate
 func (s CacheStat) EvictRate() float64 {
 	return float64(s.Evict) / float64(s.Probe) * 100
-}
-
-// s2b is string convert to bytes unsafe.
-func s2b(str *string) []byte {
-	strHeader := (*[2]uintptr)(unsafe.Pointer(str))
-	byteSliceHeader := [3]uintptr{
-		strHeader[0], strHeader[1], strHeader[1],
-	}
-	return *(*[]byte)(unsafe.Pointer(&byteSliceHeader))
 }

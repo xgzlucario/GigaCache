@@ -9,6 +9,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func genKey(i int) []byte {
+	return []byte(fmt.Sprintf("%08x", i))
+}
+
 func TestSet(t *testing.T) {
 	fmt.Println("===== TestSet =====")
 	assert := assert.New(t)
@@ -20,8 +24,8 @@ func TestSet(t *testing.T) {
 
 	// Set
 	for i := 0; i < num; i++ {
-		k := fmt.Sprintf("%08x", i)
-		m.Set(k, []byte(k))
+		k := genKey(i)
+		m.Set(k, k)
 
 		// check stat
 		stat := m.Stat()
@@ -39,7 +43,7 @@ func TestSet(t *testing.T) {
 
 	// Get
 	for i := 0; i < num; i++ {
-		k := fmt.Sprintf("%08x", i)
+		k := genKey(i)
 		v, ts, ok := m.Get(k)
 		assert.True(ok)
 		assert.Equal([]byte(k), v)
@@ -58,7 +62,7 @@ func TestSet(t *testing.T) {
 
 	// Get none exist
 	for i := 0; i < num; i++ {
-		k := fmt.Sprintf("n-%08x", i)
+		k := []byte(fmt.Sprintf("n-%08x", i))
 		v, ts, ok := m.Get(k)
 		assert.False(ok)
 		assert.Nil(v)
@@ -67,27 +71,27 @@ func TestSet(t *testing.T) {
 
 	// Delete
 	for i := 0; i < num; i++ {
-		k := fmt.Sprintf("%08x", i)
+		k := genKey(i)
 		m.Delete(k)
 	}
 
 	// Check ttl
 	{
 		ttl := time.Now().Add(time.Second * 3).UnixNano()
-		m.SetTx("a", []byte("b"), ttl)
-		v, ts, ok := m.Get("a")
+		m.SetTx([]byte("a"), []byte("b"), ttl)
+		v, ts, ok := m.Get([]byte("a"))
 		assert.Equal(v, []byte("b"))
 		assert.Equal(ts, (ttl/timeCarry)*timeCarry)
 		assert.True(ok)
 
 		time.Sleep(time.Second * 2)
-		v, ts, ok = m.Get("a")
+		v, ts, ok = m.Get([]byte("a"))
 		assert.Equal(v, []byte("b"))
 		assert.Equal(ts, (ttl/timeCarry)*timeCarry)
 		assert.True(ok)
 
 		time.Sleep(time.Second * 2)
-		v, ts, ok = m.Get("a")
+		v, ts, ok = m.Get([]byte("a"))
 		assert.Nil(v)
 		assert.Equal(ts, int64(0))
 		assert.False(ok)
@@ -107,11 +111,11 @@ func TestSetExpired(t *testing.T) {
 	// Set
 	for i := 0; i < num; i++ {
 		// odd number will be expired.
-		k := fmt.Sprintf("%08x", i)
+		k := genKey(i)
 		if i%2 == 0 {
-			m.SetEx(k, []byte(k), time.Second*60)
+			m.SetEx(k, k, time.Second*60)
 		} else {
-			m.SetEx(k, []byte(k), time.Second)
+			m.SetEx(k, k, time.Second)
 		}
 	}
 
@@ -128,7 +132,7 @@ func TestSetExpired(t *testing.T) {
 
 	// Get
 	for i := 0; i < num; i++ {
-		k := fmt.Sprintf("%08x", i)
+		k := genKey(i)
 		v, ts, ok := m.Get(k)
 		if i%2 == 0 {
 			assert.True(ok)
@@ -143,7 +147,7 @@ func TestSetExpired(t *testing.T) {
 
 	// Get none exist
 	for i := 0; i < num; i++ {
-		k := fmt.Sprintf("n-%08x", i)
+		k := []byte(fmt.Sprintf("n-%08x", i))
 		v, ts, ok := m.Get(k)
 		assert.False(ok)
 		assert.Nil(v)
@@ -166,11 +170,11 @@ func TestOnEvict(t *testing.T) {
 
 	// SetEx
 	for i := 0; i < 1000; i++ {
-		k := strconv.Itoa(i)
+		k := []byte(strconv.Itoa(i))
 		if i%2 == 1 {
-			m.SetEx(k, []byte(k), time.Second)
+			m.SetEx(k, k, time.Second)
 		} else {
-			m.SetEx(k, []byte(k), time.Minute)
+			m.SetEx(k, k, time.Minute)
 		}
 	}
 
@@ -178,7 +182,7 @@ func TestOnEvict(t *testing.T) {
 
 	// trigger onEvict
 	for i := 0; i < 1000; i++ {
-		m.Set("trig", []byte("trig"))
+		m.Set([]byte("trig"), []byte("trig"))
 	}
 }
 
@@ -186,51 +190,53 @@ func TestSpaceCache(t *testing.T) {
 	fmt.Println("===== TestSpaceCache =====")
 	assert := assert.New(t)
 
+	// the key + value size is 16.
+	const size = 8 * 2
+
 	opt := DefaultOption
 	opt.ShardCount = 1
 	m := New(opt)
 
 	// Set
 	for i := 0; i < 1000; i++ {
-		k := fmt.Sprintf("%04x", i)
-		m.Set(k, []byte(k))
+		k := genKey(i)
+		m.Set(k, k)
 	}
-
 	// Delete some
 	for i := 0; i < 200; i++ {
-		k := fmt.Sprintf("%04x", i)
+		k := genKey(i)
 		m.Delete(k)
 	}
 
 	stat := m.Stat()
 	assert.Equal(800, int(stat.Len))
-	assert.Equal(1000*8, int(stat.Alloc))
-	assert.Equal(800*8, int(stat.Inused))
+	assert.Equal(1000*size, int(stat.Alloc))
+	assert.Equal(800*size, int(stat.Inused))
 	assert.Equal(0, int(stat.Reused))
 	assert.Equal(0, int(stat.Evict))
 
 	// Set in reuse space.
 	for i := 1; i <= opt.SCacheSize; i++ {
-		k := fmt.Sprintf("%04x", i)
-		m.Set(k, []byte(k))
+		k := genKey(i)
+		m.Set(k, k)
 
 		stat := m.Stat()
 		assert.Equal(800+i, int(stat.Len))
-		assert.Equal(1000*8, int(stat.Alloc))
-		assert.Equal((800+i)*8, int(stat.Inused))
-		assert.Equal(i*8, int(stat.Reused))
+		assert.Equal(1000*size, int(stat.Alloc))
+		assert.Equal((800+i)*size, int(stat.Inused))
+		assert.Equal(i*size, int(stat.Reused))
 		assert.Equal(0, int(stat.Evict))
 	}
 
 	// Set in alloc new space.
-	k := "abcd"
-	m.Set(k, []byte(k))
+	k := []byte("12345678")
+	m.Set(k, k)
 
 	stat = m.Stat()
 	assert.Equal(800+opt.SCacheSize+1, int(stat.Len))
-	assert.Equal(1000*8+8, int(stat.Alloc))
-	assert.Equal((800+opt.SCacheSize+1)*8, int(stat.Inused))
-	assert.Equal(8*8, int(stat.Reused))
+	assert.Equal(1000*size+16, int(stat.Alloc))
+	assert.Equal((800+opt.SCacheSize+1)*size, int(stat.Inused))
+	assert.Equal(16*8, int(stat.Reused))
 	assert.Equal(0, int(stat.Evict))
 }
 
@@ -238,16 +244,19 @@ func TestMigrate(t *testing.T) {
 	fmt.Println("===== TestMigrate =====")
 	assert := assert.New(t)
 
+	// the key + value size is 16.
+	const size = 8 * 2
+
 	opt := DefaultOption
 	opt.ShardCount = 1
 	m := New(opt)
 
 	for i := 0; i < 1000; i++ {
-		k := fmt.Sprintf("%04x", i)
+		k := genKey(i)
 		if i%4 == 0 {
-			m.SetEx(k, []byte(k), time.Second)
+			m.SetEx(k, k, time.Second)
 		} else {
-			m.Set(k, []byte(k))
+			m.Set(k, k)
 		}
 	}
 
@@ -256,8 +265,8 @@ func TestMigrate(t *testing.T) {
 	// check stat before migrate.
 	stat := m.Stat()
 	assert.Equal(1000, int(stat.Len))
-	assert.Equal(1000*8, int(stat.Alloc))
-	assert.Equal(1000*8, int(stat.Inused))
+	assert.Equal(1000*size, int(stat.Alloc))
+	assert.Equal(1000*size, int(stat.Inused))
 	assert.Equal(0, int(stat.Evict))
 
 	// evict some.
@@ -267,8 +276,8 @@ func TestMigrate(t *testing.T) {
 	stat = m.Stat()
 	evict := int(stat.Evict)
 	assert.Equal(1000-evict, int(stat.Len))
-	assert.Equal(1000*8, int(stat.Alloc))
-	assert.Equal((1000-evict)*8, int(stat.Inused))
+	assert.Equal(1000*size, int(stat.Alloc))
+	assert.Equal((1000-evict)*size, int(stat.Inused))
 	assert.Equal(evict, int(stat.Evict))
 
 	m.Migrate()
@@ -276,8 +285,8 @@ func TestMigrate(t *testing.T) {
 	// check stat after migrate.
 	stat = m.Stat()
 	assert.Equal(750, int(stat.Len))
-	assert.Equal(750*8, int(stat.Alloc))
-	assert.Equal(750*8, int(stat.Inused))
+	assert.Equal(750*size, int(stat.Alloc))
+	assert.Equal(750*size, int(stat.Inused))
 	assert.Equal(evict, int(stat.Evict))
 }
 
@@ -315,5 +324,15 @@ func TestBufferPool(t *testing.T) {
 		opt := DefaultOption
 		opt.ShardCount = 0
 		New(opt)
+	})
+}
+
+func TestPanic(t *testing.T) {
+	fmt.Println("===== TestPanic =====")
+	assert := assert.New(t)
+	m := New(DefaultOption)
+
+	assert.Panics(func() {
+		m.Set(nil, nil)
 	})
 }
