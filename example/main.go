@@ -27,7 +27,7 @@ func main() {
 	td := tdigest.NewWithCompression(1000)
 
 	var count int64
-	var avgRate, avgAlloc, avgInused, avgReused, avgTime float64
+	var avgRate, avgAlloc, avgInused, avgTime float64
 	var memStats runtime.MemStats
 
 	bc := cache.New(cache.DefaultOption)
@@ -44,7 +44,6 @@ func main() {
 				avgRate += stat.ExpRate()
 				avgAlloc += float64(stat.Alloc)
 				avgInused += float64(stat.Inused)
-				avgReused += float64(stat.Reused)
 				avgTime++
 
 				// Stats
@@ -55,9 +54,8 @@ func main() {
 					formatSize(avgInused/avgTime), formatSize(avgAlloc/avgTime),
 					avgRate/avgTime,
 				)
-				fmt.Printf("[Evict] probe: %vw / %vw (%.1f%%) | reused: %v | mgr: %d\n",
+				fmt.Printf("[Evict] probe: %vw / %vw (%.1f%%) | mgr: %d\n",
 					stat.Evict/1e5, stat.Probe/1e5, stat.EvictRate(),
-					formatSize(avgReused/avgTime),
 					stat.Migrates)
 
 				// mem stats
@@ -84,12 +82,11 @@ func main() {
 
 	// set test
 	for j := 0; ; j++ {
-		str := strconv.Itoa(int(source.Uint64() >> 32))
-		k := []byte(str)
+		k := strconv.Itoa(int(source.Uint64() >> 32))
 
 		now := time.Now()
 
-		bc.SetEx(k, k, time.Second)
+		bc.SetEx(k, []byte(k), time.Second*10)
 		count++
 
 		cost := float64(time.Since(now)) / float64(time.Microsecond)
