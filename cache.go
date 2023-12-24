@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"encoding/binary"
 	"slices"
 	"sync"
 	"time"
@@ -39,17 +40,11 @@ type bucket struct {
 	migrates uint64
 	evict    uint64
 	probe    uint64
-
-	// scache reuse sharded space to save memory.
-	scache spaceCache
 }
 
 // New returns new GigaCache instance.
 func New(opt Option) *GigaCache {
 	shardCount := opt.ShardCount
-	if shardCount <= 0 {
-		panic("shard count must be greater than 0")
-	}
 	cache := &GigaCache{
 		mask:    uint64(shardCount - 1),
 		opt:     &opt,
@@ -66,27 +61,37 @@ func New(opt Option) *GigaCache {
 // newBucket returns a new bucket.
 func (c *GigaCache) newBucket(idxSize, bufferSize int) *bucket {
 	return &bucket{
-		opt:    c.opt,
-		root:   c,
-		idx:    swiss.NewMap[Key, Idx](uint32(idxSize)),
-		data:   c.bpool.Get(bufferSize)[:0],
-		scache: newSpaceCache(c.opt.SCacheSize),
+		opt:  c.opt,
+		root: c,
+		idx:  swiss.NewMap[Key, Idx](uint32(idxSize)),
+		data: c.bpool.Get(bufferSize)[:0],
 	}
 }
 
 // getShard returns the bucket and the real key by hash(kstr).
 func (c *GigaCache) getShard(kstr []byte) (*bucket, Key) {
 	hash := xxh3.Hash(kstr)
-	return c.buckets[hash&c.mask], newKey(hash, len(kstr))
+	return c.buckets[hash&c.mask], newKey(hash)
 }
 
 // find return values by given Key and Idx.
 // MAKE SURE check idx valid before call this func.
-func (b *bucket) find(key Key, idx Idx) ([]byte, []byte) {
-	pos := idx.start() + key.klen()
-	kstr := b.data[idx.start():pos]
-	data := b.data[pos : pos+idx.offset()]
-	return kstr, data
+func (b *bucket) find(key Key, idx Idx) (total int, kstr []byte, val []byte) {
+	var index = idx.start()
+	// klen
+	klen, n := binary.Uvarint(b.data[index:])
+	index += n
+	// vlen
+	vlen, n := binary.Uvarint(b.data[index:])
+	index += n
+	// key
+	kstr = b.data[index : index+int(klen)]
+	index += int(klen)
+	// value
+	val = b.data[index : index+int(vlen)]
+	index += int(vlen)
+
+	return index - idx.start(), kstr, val
 }
 
 // Get returns value with expiration time by the key.
@@ -102,7 +107,7 @@ func (c *GigaCache) Get(kstr []byte) ([]byte, int64, bool) {
 	}
 
 	// find data.
-	_, val := bucket.find(key, idx)
+	_, _, val := bucket.find(key, idx)
 	val = slices.Clone(val)
 	bucket.RUnlock()
 
@@ -113,38 +118,25 @@ func (c *GigaCache) Get(kstr []byte) ([]byte, int64, bool) {
 //	                 |
 //	                 v
 //	               start
-//			   +-----+------------------+-------------------+-----+
-//			   | ... |    key bytes     |    value bytes    | ... |
-//			   +-----+------------------+-------------------+-----+
-//		             |<---  keylen  --->|<---   offset  --->|
+//			   +-----+------------+------------+------------+------------+-----+
+//			   | ... |    klen    |    vlen    |    key     |    value   | ... |
+//			   +-----+------------+------------+------------+------------+-----+
+//		             |<- varint ->|<- varint ->|<-- klen -->|<-- vlen -->|
 //
 // set stores key-value pair into bucket.
 func (b *bucket) set(key Key, kstr []byte, bytes []byte, ts int64) {
-	// check valid key.
-	if len(kstr) == 0 {
-		panic("key should not be empty")
-	}
-	need := len(kstr) + len(bytes)
-
-	// attempt to fetch empty space.
-	start, ok := b.scache.fetchGreat(need)
-	if ok {
-		b.idx.Put(key, newIdx(start, len(bytes), ts))
-		copy(b.data[start:], kstr)
-		copy(b.data[start+len(kstr):], bytes)
-
-		b.inused += uint64(need)
-		b.reused += uint64(need)
-		return
-	}
-
 	// alloc new space.
-	b.idx.Put(key, newIdx(len(b.data), len(bytes), ts))
+	b.idx.Put(key, newIdx(len(b.data), ts))
+	before := len(b.data)
+
+	b.data = binary.AppendUvarint(b.data, uint64(len(kstr)))
+	b.data = binary.AppendUvarint(b.data, uint64(len(bytes)))
 	b.data = append(b.data, kstr...)
 	b.data = append(b.data, bytes...)
 
-	b.alloc += uint64(need)
-	b.inused += uint64(need)
+	alloc := len(b.data) - before
+	b.alloc += uint64(alloc)
+	b.inused += uint64(alloc)
 }
 
 // SetTx store key-value pair with deadline.
@@ -170,9 +162,8 @@ func (c *GigaCache) SetEx(kstr, val []byte, dur time.Duration) {
 func (c *GigaCache) Delete(kstr []byte) {
 	b, key := c.getShard(kstr)
 	b.Lock()
-	if idx, ok := b.idx.Get(key); ok {
+	if _, ok := b.idx.Get(key); ok {
 		b.idx.Delete(key)
-		b.updateEvict(key, idx)
 	}
 	b.eliminate()
 	b.Unlock()
@@ -187,7 +178,7 @@ func (b *bucket) scan(f Walker) {
 		if idx.expired() {
 			return false
 		}
-		kstr, val := b.find(key, idx)
+		_, kstr, val := b.find(key, idx)
 		return f(kstr, val, idx.TTL())
 	})
 }
@@ -212,13 +203,6 @@ func (c *GigaCache) Migrate() {
 	}
 }
 
-// updateEvict
-func (b *bucket) updateEvict(key Key, idx Idx) {
-	used := key.klen() + idx.offset()
-	b.inused -= uint64(used)
-	b.scache.put(used, idx.start())
-}
-
 // OnEvictCallback is the callback function of evict key-value pair.
 // DO NOT EDIT the input params key value.
 type OnEvictCallback func(key, value []byte)
@@ -232,13 +216,13 @@ func (b *bucket) eliminate() {
 		b.probe++
 
 		if idx.expired() {
+			total, kstr, val := b.find(key, idx)
 			// on evict
 			if b.opt.OnEvict != nil {
-				kstr, val := b.find(key, idx)
 				b.opt.OnEvict(kstr, val)
 			}
 			b.idx.Delete(key)
-			b.updateEvict(key, idx)
+			b.inused -= uint64(total)
 			b.evict++
 			failed = 0
 
@@ -272,7 +256,7 @@ func (b *bucket) migrate() {
 		if idx.expired() {
 			return false
 		}
-		kstr, val := b.find(key, idx)
+		_, kstr, val := b.find(key, idx)
 		nb.set(key, kstr, val, idx.TTL())
 		return false
 	})
@@ -286,7 +270,6 @@ func (b *bucket) migrate() {
 	b.alloc = nb.alloc
 	b.inused = nb.inused
 	b.reused = nb.reused
-	b.scache = nb.scache
 	b.migrates++
 }
 
