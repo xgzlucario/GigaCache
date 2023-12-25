@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	num = 10 * 10000
+	num = 100 * 10000
 	str = []byte("Hello World")
 )
 
@@ -85,7 +85,7 @@ func BenchmarkDelete(b *testing.B) {
 		m := getStdmap()
 		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for i := 0; i < num; i++ {
 			delete(m, strconv.Itoa(i))
 		}
 	})
@@ -97,7 +97,7 @@ func BenchmarkDelete(b *testing.B) {
 		}
 		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for i := 0; i < num; i++ {
 			m.Delete(strconv.Itoa(i))
 		}
 	})

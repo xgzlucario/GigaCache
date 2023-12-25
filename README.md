@@ -73,15 +73,15 @@ Gigache Set operation has better performance than stdmap.
 
 | Benchmark        | Iter    | time/op     | bytes/op | alloc/op    |
 | ---------------- | ------- | ----------- | -------- | ----------- |
-| Set/stdmap-20    | 4457132 | 296.9 ns/op | 183 B/op | 1 allocs/op |
-| Set/GigaCache-20 | 6852141 | 216.9 ns/op | 146 B/op | 1 allocs/op |
+| Set/stdmap-20    | 4282058 | 310.7 ns/op | 190 B/op | 1 allocs/op |
+| Set/GigaCache-20 | 7852952 | 216.9 ns/op | 132 B/op | 1 allocs/op |
 
-**Get** from 100k entries.
+**Get** from 1 million entries.
 
 | Benchmark        | Iter     | time/op     | bytes/op | alloc/op    |
 | ---------------- | -------- | ----------- | -------- | ----------- |
-| Get/stdmap-20    | 22750813 | 52.25 ns/op | 7 B/op   | 0 allocs/op |
-| Get/GigaCache-20 | 20830256 | 52.62 ns/op | 8 B/op   | 1 allocs/op |
+| Get/stdmap-20    | 11278285 | 115.2 ns/op | 7 B/op   | 0 allocs/op |
+| Get/GigaCache-20 | 18098422 | 71.58 ns/op | 8 B/op   | 1 allocs/op |
 
 **Delete**
 
@@ -101,18 +101,18 @@ Gigache Set operation has better performance than stdmap.
 
 Run bench with `go run example/*.go`.
 
-In the comprehensive test scenario (20 million entries inserted), GigaCache is significantly ahead of stdmap in terms of memory efficiency and faster insertion, but gc performance is slightly worse than stdmap.
+In the bench test below, GigaCache has better memory efficiency, and faster insertion performance than stdmap.
 
 ```go
 gigacache
 entries: 20000000
-alloc: 1121 mb
-gcsys: 32 mb
-heap inuse: 1121 mb
-heap object: 1061 k
-gc: 18
-pause: 978.578µs
-cost: 12.879543968s
+alloc: 1153 mb
+gcsys: 30 mb
+heap inuse: 1155 mb
+heap object: 1515 k
+gc: 15
+pause: 362.249µs
+cost: 5.436793342s
 ```
 
 ```go
@@ -123,8 +123,8 @@ gcsys: 64 mb
 heap inuse: 2664 mb
 heap object: 29482 k
 gc: 11
-pause: 648.029µs
-cost: 14.195488627s
+pause: 385.449µs
+cost: 8.033432768s
 ```
 
 # 🛸Internal

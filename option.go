@@ -23,9 +23,9 @@ type Option struct {
 
 // DefaultOption
 var DefaultOption = Option{
-	ShardCount:        4096,
-	DefaultIdxMapSize: 32,
-	DefaultBufferSize: 1024,
+	ShardCount:        1024,
+	DefaultIdxMapSize: 64,
+	DefaultBufferSize: 64 * 1024, // 64 KB
 	MaxProbeCount:     1000,
 	MaxFailCount:      3,
 	MigrateThresRatio: 0.6,

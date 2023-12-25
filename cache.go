@@ -111,19 +111,16 @@ func (b *bucket) findEntry(idx Idx) (entry []byte) {
 func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 	b, key := c.getShard(kstr)
 	b.RLock()
-
 	// find index map.
 	idx, ok := b.idx.Get(key)
 	if !ok || idx.expired() {
 		b.RUnlock()
 		return nil, 0, false
 	}
-
 	// find data.
 	_, _, val := b.find(idx)
 	val = slices.Clone(val)
 	b.RUnlock()
-
 	return val, idx.TTL(), ok
 }
 
@@ -175,16 +172,41 @@ func (c *GigaCache) SetEx(kstr string, val []byte, dur time.Duration) {
 }
 
 // Delete removes the key-value pair by the key.
-func (c *GigaCache) Delete(kstr string) {
+func (c *GigaCache) Delete(kstr string) bool {
 	b, key := c.getShard(kstr)
 	b.Lock()
-	if idx, ok := b.idx.Get(key); ok {
-		b.idx.Delete(key)
-		entry := b.findEntry(idx)
-		b.inused -= uint64(len(entry))
-	}
 	b.eliminate()
+
+	// find index map.
+	idx, ok := b.idx.Get(key)
+	if !ok || idx.expired() {
+		b.Unlock()
+		return false
+	}
+	// delete.
+	b.idx.Delete(key)
+	entry := b.findEntry(idx)
+	b.inused -= uint64(len(entry))
 	b.Unlock()
+	return true
+}
+
+// SetTTL
+func (c *GigaCache) SetTTL(kstr string, ts int64) bool {
+	b, key := c.getShard(kstr)
+	b.Lock()
+	b.eliminate()
+
+	// find index map.
+	idx, ok := b.idx.Get(key)
+	if !ok || idx.expired() {
+		b.Unlock()
+		return false
+	}
+	// update index.
+	b.idx.Put(key, newIdx(idx.start(), ts))
+	b.Unlock()
+	return true
 }
 
 // Walker is the callback function for iterator.
