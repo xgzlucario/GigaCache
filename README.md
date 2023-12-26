@@ -36,23 +36,16 @@ func main() {
     val, ts, ok := m.Get("foo")
     fmt.Println(string(val), ok) // bar, (nanosecs), true
 
-    ok := m.Has("foo1") // true
-    if ok { 
-        // ...
-    }
-
     ok := m.Delete("foo1") // true
     if ok { 
         // ...
     }
 
     // or Range cache
-    m.Scan(func(key []byte, val []byte, ts int64) bool {
+    m.Scan(func(key, val []byte, ts int64) bool {
         // ...
-        return true
+        return false
     })
-
-    m.Keys() // ["foo", "foo2"]
 }
 ```
 

@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 	"time"
@@ -50,7 +51,6 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 }
 
 func TestSet(t *testing.T) {
-	fmt.Println("===== TestSet =====")
 	assert := assert.New(t)
 	const num = 10000
 	m := New(getTestOption(num))
@@ -112,5 +112,95 @@ func TestSet(t *testing.T) {
 		opt := DefaultOption
 		opt.ShardCount = 0
 		New(opt)
+	})
+}
+
+func TestEvict(t *testing.T) {
+	assert := assert.New(t)
+	const num = 10000
+	opt := getTestOption(num)
+	opt.OnEvict = func(k, v []byte) {
+		assert.Equal(k, v)
+	}
+	m := New(opt)
+
+	// set data.
+	for i := 0; i < num; i++ {
+		k, v := genKV(i)
+		m.SetEx(k, v, time.Second)
+	}
+	time.Sleep(time.Second * 2)
+
+	// stat
+	stat := m.Stat()
+	assert.Equal(stat.Len, uint64(num))
+	assert.Equal(stat.Alloc, uint64(stat.Len*(16+2)))
+	assert.Equal(stat.Inused, uint64(stat.Len*(16+2)))
+	assert.Equal(stat.Evict, uint64(0))
+	assert.Greater(stat.Probe, uint64(0))
+	assert.Equal(stat.EvictRate(), float64(0))
+	assert.Equal(stat.ExpRate(), float64(100))
+
+	// trig evict.
+	m.Set("trig1234", []byte("trig1234"))
+
+	stat = m.Stat()
+	assert.Equal(stat.Len, uint64(num-stat.Evict+1))
+	assert.Equal(stat.Alloc, uint64((num+1)*(16+2)))
+	assert.Equal(stat.Inused, uint64(stat.Len*(16+2)))
+	assert.Equal(stat.Migrates, uint64(0))
+	assert.Equal(stat.Evict, uint64(opt.MaxProbeCount))
+}
+
+func FuzzSet(f *testing.F) {
+	const num = 1000 * 10000
+	m := New(getTestOption(num))
+
+	f.Fuzz(func(t *testing.T, k string, v []byte, u64ts uint64) {
+		sec := GetNanoSec()
+		ts := int64(u64ts)
+
+		// set
+		m.SetTx(k, v, ts)
+		// get
+		val, ts, ok := m.Get(k)
+
+		switch {
+		// no ttl
+		case ts == 0:
+			if !ok {
+				t.Error("no ttl, but not found")
+			}
+			if !bytes.Equal(v, val) {
+				t.Error("no ttl, but not equal")
+			}
+			if ts != 0 {
+				t.Error("no ttl, but ts is not 0")
+			}
+
+		// expired
+		case ts < sec:
+			if ok {
+				t.Error("expired, but found")
+			}
+			if ts != 0 {
+				t.Error("expired, but ts is not 0")
+			}
+			if val != nil {
+				t.Error("expired, but val is not nil")
+			}
+
+		// not expired
+		case ts > sec:
+			if !ok {
+				t.Error("not expired, but not found")
+			}
+			if !bytes.Equal(v, val) {
+				t.Error("not expired, but not equal")
+			}
+			if ts != (ts/timeCarry)*timeCarry {
+				t.Error("not expired, ttl")
+			}
+		}
 	})
 }

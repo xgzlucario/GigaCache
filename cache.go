@@ -254,6 +254,10 @@ func (b *bucket) eliminate() {
 	// probing
 	b.idx.Iter(func(key Key, idx Idx) bool {
 		b.probe++
+		pcount++
+		if pcount > b.opt.MaxProbeCount {
+			return true
+		}
 
 		if idx.expired() {
 			// on evict
@@ -270,17 +274,11 @@ func (b *bucket) eliminate() {
 			b.idx.Delete(key)
 			b.evict++
 			failed = 0
-
 			return false
 		}
 
 		failed++
-		if failed >= b.opt.MaxFailCount {
-			return true
-		}
-
-		pcount++
-		return pcount > b.opt.MaxProbeCount
+		return failed >= b.opt.MaxFailCount
 	})
 
 	// on migrate threshold
