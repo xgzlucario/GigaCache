@@ -21,9 +21,9 @@ func gcPause() time.Duration {
 	return pause
 }
 
-func genKV(id int) ([]byte, []byte) {
-	k := []byte(fmt.Sprintf("%08x", id))
-	return k, k
+func genKV(id int) (string, []byte) {
+	k := fmt.Sprintf("%08x", id)
+	return k, []byte(k)
 }
 
 func main() {

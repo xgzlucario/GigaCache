@@ -5,82 +5,53 @@ import (
 )
 
 // Key is the key of GigaCache.
-// +--------------------------------+----------------+
-// |            hash(52)            |    klen(12)    |
-// +--------------------------------+----------------+
+// +------------------------------------------------+
+// |                    hash(64)                    |
+// +------------------------------------------------+
 
 type Key uint64
 
-const (
-	klenMask = 0xfff
-	klenbits = 12
-)
-
-func newKey(hash uint64, keylen int) Key {
-	if keylen > klenMask {
-		panic("key length overflow of 4KB")
-	}
-	return Key((hash >> klenbits << klenbits) | uint64(keylen))
-}
-
-func (k Key) hash() uint64 {
-	return uint64(k >> klenbits)
-}
-
-func (k Key) klen() int {
-	return int(k & klenMask)
+func newKey(hash uint64) Key {
+	return Key(hash)
 }
 
 // Idx is the index of GigaCache.
-// h1:
-// +-----------------------+------------------------+
-// |       start(32)       |       offset(32)       |
-// +-----------------------+------------------------+
-// h2:
-// +-----------------------+------------------------+
-// |                   ttl(uint32)                  |
-// +-----------------------+------------------------+
+// +-----------------------+-------------------------+
+// |       start(32)       |       ttl(uint32)       |
+// +-----------------------+-------------------------+
 
-type Idx struct {
-	h1 uint64
-	h2 uint32
-}
+type Idx uint64
 
 const (
-	maxStart   = math.MaxUint32
-	offsetMask = math.MaxUint32
-
+	ttlMask   = math.MaxUint32
 	timeCarry = 1e9
 )
 
 func (i Idx) start() int {
-	return int(i.h1 >> 32)
-}
-
-func (i Idx) offset() int {
-	return int(i.h1 & offsetMask)
+	return int(i >> 32)
 }
 
 func (i Idx) expired() bool {
-	return i.h2 > noTTL && i.h2 < GetSec()
+	return i.sec() > noTTL && i.sec() < GetSec()
+}
+
+func (i Idx) sec() uint32 {
+	return uint32(i & ttlMask)
 }
 
 func (i Idx) TTL() int64 {
-	return int64(i.h2) * timeCarry
+	return int64(uint64(i&ttlMask) * timeCarry)
 }
 
-func newIdx(start, offset int, ttl int64) Idx {
-	if start > maxStart {
+func newIdx(start int, ttl int64) Idx {
+	if start > math.MaxUint32 {
 		panic("start overflows the limit of uint32")
-	}
-	if offset > offsetMask {
-		panic("offset overflows the limit of uint32")
 	}
 	if ttl < 0 {
 		panic("ttl is negetive")
 	}
-	return Idx{
-		h1: uint64(start<<32 | offset),
-		h2: uint32(ttl / timeCarry),
+	if ttl/timeCarry > math.MaxUint32 {
+		panic("ttl overflows the limit of uint32")
 	}
+	return Idx(uint64(start)<<32 | uint64(ttl)/timeCarry)
 }

@@ -4,73 +4,39 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestIndex(t *testing.T) {
-	t.Run("index", func(t *testing.T) {
-		assert := assert.New(t)
+	assert := assert.New(t)
 
-		for i := 0; i < 1e6; i++ {
-			a, b := int(rand.Uint32()), int(rand.Uint32())
-			idx := newIdx(a, b, 0)
-			assert.Equal(idx.start(), a)
-			assert.Equal(idx.offset(), b)
-		}
+	// index
+	for i := 0; i < 1e6; i++ {
+		start, ttl := int(rand.Uint32()), time.Now().UnixNano()
+		idx := newIdx(start, ttl)
+		assert.Equal(idx.start(), start)
+		assert.Equal(idx.TTL()/timeCarry, ttl/timeCarry)
+	}
+
+	// key
+	for i := 0; i < 1e6; i++ {
+		hash := rand.Uint64()
+		key := newKey(hash)
+		assert.Equal(uint64(key), hash)
+	}
+
+	// panic-start
+	assert.Panics(func() {
+		newIdx(math.MaxUint32+1, 0)
 	})
 
-	t.Run("key", func(t *testing.T) {
-		assert := assert.New(t)
-
-		for i := 0; i < 1e6; i++ {
-			hash := rand.Uint64()
-			keylen := int(rand.Uint32() & klenMask)
-
-			key := newKey(hash, keylen)
-
-			assert.Equal(key.hash(), hash>>klenbits)
-			assert.Equal(key.klen(), keylen)
-		}
+	// panic-ttl
+	assert.Panics(func() {
+		newIdx(100, -1)
 	})
-
-	t.Run("panic-start", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Fatal("should panic")
-			}
-		}()
-		newIdx(math.MaxInt, 0, 0)
-	})
-
-	t.Run("panic-offset", func(t *testing.T) {
-		defer func() {
-
-			if r := recover(); r == nil {
-				t.Fatal("should panic")
-			}
-		}()
-		newIdx(0, math.MaxInt, 0)
-	})
-
-	t.Run("panic-ttl", func(t *testing.T) {
-		defer func() {
-
-			if r := recover(); r == nil {
-				t.Fatal("should panic")
-			}
-		}()
-		newIdx(0, 100, -1)
-	})
-
-	t.Run("panic-keylen", func(t *testing.T) {
-		newKey(0, klenMask)
-
-		defer func() {
-			if r := recover(); r == nil {
-				t.Fatal("should panic")
-			}
-		}()
-		newKey(0, klenMask+2)
+	assert.Panics(func() {
+		newIdx(100, (math.MaxUint32+1)*timeCarry)
 	})
 }

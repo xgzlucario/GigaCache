@@ -3,18 +3,15 @@ package cache
 // Option is the configuration of GigaCache.
 type Option struct {
 	// ShardCount is shard numbers of GigaCache.
-	ShardCount int
+	ShardCount uint32
 
 	// Initial size of the bucket.
-	DefaultIdxMapSize int
+	DefaultIdxMapSize uint32
 	DefaultBufferSize int
 
 	// Configuration of evict strategy.
-	MaxProbeCount int
-	MaxFailCount  int
-
-	// SCacheSize is the number of bytes of space reused in the scache.
-	SCacheSize int
+	MaxProbeCount uint16
+	MaxFailCount  uint16
 
 	// Migrate threshold for a bucket to trigger a migration.
 	MigrateThresRatio float64
@@ -26,12 +23,11 @@ type Option struct {
 
 // DefaultOption
 var DefaultOption = Option{
-	ShardCount:        4096,
-	DefaultIdxMapSize: 32,
-	DefaultBufferSize: 1024,
+	ShardCount:        1024,
+	DefaultIdxMapSize: 64,
+	DefaultBufferSize: 64 * 1024, // 64 KB
 	MaxProbeCount:     1000,
 	MaxFailCount:      3,
-	SCacheSize:        8,
 	MigrateThresRatio: 0.6,
 	MigrateDelta:      4 * 1 << 10, // 4 KB
 }
