@@ -14,11 +14,11 @@ func genKV(i int) (string, []byte) {
 	return k, []byte(k)
 }
 
-func getTestOption(num int) Option {
-	opt := DefaultOption
+func getTestOption(num int) Options {
+	opt := DefaultOptions
 	opt.ShardCount = 1
-	opt.DefaultIdxMapSize = uint32(num)
-	opt.DefaultBufferSize = 16 * 6
+	opt.IndexSize = uint32(num)
+	opt.BufferSize = 16 * 6
 	return opt
 }
 
@@ -109,8 +109,14 @@ func TestSet(t *testing.T) {
 	checkInvalidData(assert, m, 0, num)
 
 	assert.Panics(func() {
-		opt := DefaultOption
+		opt := DefaultOptions
 		opt.ShardCount = 0
+		New(opt)
+	})
+
+	assert.Panics(func() {
+		opt := DefaultOptions
+		opt.MaxProbeCount = 0
 		New(opt)
 	})
 }

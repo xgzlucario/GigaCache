@@ -39,7 +39,7 @@ func main() {
 	start := time.Now()
 	switch c {
 	case "gigacache":
-		cache := cache.New(cache.DefaultOption)
+		cache := cache.New(cache.DefaultOptions)
 		for i := 0; i < entries; i++ {
 			k, v := genKV(i)
 			cache.Set(k, v)

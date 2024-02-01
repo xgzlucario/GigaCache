@@ -27,7 +27,7 @@ func BenchmarkSet(b *testing.B) {
 	})
 
 	b.Run("GigaCache", func(b *testing.B) {
-		m := New(DefaultOption)
+		m := New(DefaultOptions)
 		for i := 0; i < b.N; i++ {
 			m.Set(strconv.Itoa(i), str)
 		}
@@ -42,7 +42,7 @@ func BenchmarkGet(b *testing.B) {
 		}
 	})
 
-	m2 := New(DefaultOption)
+	m2 := New(DefaultOptions)
 	for i := 0; i < num; i++ {
 		m2.Set(strconv.Itoa(i), str)
 	}
@@ -66,7 +66,7 @@ func BenchmarkIter(b *testing.B) {
 	})
 
 	b.Run("GigaCache", func(b *testing.B) {
-		m := New(DefaultOption)
+		m := New(DefaultOptions)
 		for i := 0; i < num; i++ {
 			m.Set(strconv.Itoa(i), str)
 		}
@@ -91,7 +91,7 @@ func BenchmarkDelete(b *testing.B) {
 	})
 
 	b.Run("GigaCache", func(b *testing.B) {
-		m := New(DefaultOption)
+		m := New(DefaultOptions)
 		for i := 0; i < num; i++ {
 			m.Set(strconv.Itoa(i), str)
 		}

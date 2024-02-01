@@ -15,26 +15,25 @@ const (
 	noTTL = 0
 )
 
-// GigaCache defination.
+// GigaCache implements a key-value cache.
 type GigaCache struct {
 	mask    uint64
-	opt     *Option
-	bpool   *BufferPool
 	buckets []*bucket
 }
 
 // bucket is the data container for GigaCache.
 type bucket struct {
 	sync.RWMutex
+	options *Options
+	bpool   *BufferPool
 
-	opt  *Option
-	root *GigaCache
+	// index is the index map for cache, mapped hash(kstr) to the position that data real stored.
+	index *swiss.Map[Key, Idx]
 
-	// Key & idx is Indexes, and data is where the data is actually stored.
-	idx  *swiss.Map[Key, Idx]
+	// data store all key-value bytes data.
 	data []byte
 
-	// Stat for runtime.
+	// some runtime stats for bucket.
 	alloc    uint64
 	inused   uint64
 	migrates uint64
@@ -43,25 +42,25 @@ type bucket struct {
 }
 
 // New returns new GigaCache instance.
-func New(opt Option) *GigaCache {
-	shardCount := opt.ShardCount
-	if shardCount <= 0 {
-		panic("shard count must be greater than 0")
+func New(options Options) *GigaCache {
+	if err := checkOptions(options); err != nil {
+		panic(err)
 	}
+
 	// create cache.
 	cache := &GigaCache{
-		mask:    uint64(shardCount - 1),
-		opt:     &opt,
-		buckets: make([]*bucket, shardCount),
-		bpool:   NewBufferPool(),
+		mask:    uint64(options.ShardCount - 1),
+		buckets: make([]*bucket, options.ShardCount),
 	}
+	bpool := NewBufferPool()
+
 	// init buckets.
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket{
-			opt:  cache.opt,
-			root: cache,
-			idx:  swiss.NewMap[Key, Idx](opt.DefaultIdxMapSize),
-			data: cache.bpool.Get(opt.DefaultBufferSize)[:0],
+			options: &options,
+			bpool:   bpool,
+			index:   swiss.NewMap[Key, Idx](options.IndexSize),
+			data:    bpool.Get(options.BufferSize)[:0],
 		}
 	}
 	return cache
@@ -112,7 +111,7 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 	b, key := c.getShard(kstr)
 	b.RLock()
 	// find index map.
-	idx, ok := b.idx.Get(key)
+	idx, ok := b.index.Get(key)
 	if !ok || idx.expired() {
 		b.RUnlock()
 		return nil, 0, false
@@ -137,7 +136,7 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 // set stores key-value pair into bucket.
 func (b *bucket) set(key Key, kstr []byte, val []byte, ts int64) {
 	// set index.
-	b.idx.Put(key, newIdx(len(b.data), ts))
+	b.index.Put(key, newIdx(len(b.data), ts))
 	before := len(b.data)
 
 	// append klen, vlen, key, value.
@@ -178,13 +177,13 @@ func (c *GigaCache) Delete(kstr string) bool {
 	b.eliminate()
 
 	// find index map.
-	idx, ok := b.idx.Get(key)
+	idx, ok := b.index.Get(key)
 	if !ok || idx.expired() {
 		b.Unlock()
 		return false
 	}
 	// delete.
-	b.idx.Delete(key)
+	b.index.Delete(key)
 	entry := b.findEntry(idx)
 	b.inused -= uint64(len(entry))
 	b.Unlock()
@@ -198,13 +197,13 @@ func (c *GigaCache) SetTTL(kstr string, ts int64) bool {
 	b.eliminate()
 
 	// find index map.
-	idx, ok := b.idx.Get(key)
+	idx, ok := b.index.Get(key)
 	if !ok || idx.expired() {
 		b.Unlock()
 		return false
 	}
 	// update index.
-	b.idx.Put(key, newIdx(idx.start(), ts))
+	b.index.Put(key, newIdx(idx.start(), ts))
 	b.Unlock()
 	return true
 }
@@ -214,7 +213,7 @@ type Walker func(key []byte, value []byte, ttl int64) (stop bool)
 
 // scan
 func (b *bucket) scan(f Walker) {
-	b.idx.Iter(func(_ Key, idx Idx) bool {
+	b.index.Iter(func(_ Key, idx Idx) bool {
 		if idx.expired() {
 			return false
 		}
@@ -252,18 +251,18 @@ func (b *bucket) eliminate() {
 	var failed, pcount uint16
 
 	// probing
-	b.idx.Iter(func(key Key, idx Idx) bool {
+	b.index.Iter(func(key Key, idx Idx) bool {
 		b.probe++
 		pcount++
-		if pcount > b.opt.MaxProbeCount {
+		if pcount > b.options.MaxProbeCount {
 			return true
 		}
 
 		if idx.expired() {
 			// on evict
-			if b.opt.OnEvict != nil {
+			if b.options.OnEvict != nil {
 				total, kstr, val := b.find(idx)
-				b.opt.OnEvict(kstr, val)
+				b.options.OnEvict(kstr, val)
 				b.inused -= uint64(total)
 
 			} else {
@@ -271,20 +270,20 @@ func (b *bucket) eliminate() {
 				b.inused -= uint64(len(entry))
 			}
 
-			b.idx.Delete(key)
+			b.index.Delete(key)
 			b.evict++
 			failed = 0
 			return false
 		}
 
 		failed++
-		return failed >= b.opt.MaxFailCount
+		return failed >= b.options.MaxFailCount
 	})
 
 	// on migrate threshold
 	rate := float64(b.inused) / float64(b.alloc)
 	delta := b.alloc - b.inused
-	if delta >= b.opt.MigrateDelta && rate <= b.opt.MigrateThresRatio {
+	if delta >= b.options.MigrateDelta && rate <= b.options.MigrateThresRatio {
 		b.migrate()
 	}
 }
@@ -292,20 +291,20 @@ func (b *bucket) eliminate() {
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket) migrate() {
 	// create new data.
-	newData := b.root.bpool.Get(len(b.data))[:0]
+	newData := b.bpool.Get(len(b.data))[:0]
 	b.alloc = 0
 	b.inused = 0
 
 	// migrate datas to new bucket.
-	b.idx.Iter(func(key Key, idx Idx) bool {
+	b.index.Iter(func(key Key, idx Idx) bool {
 		if idx.expired() {
-			b.idx.Delete(key)
+			b.index.Delete(key)
 			return false
 		}
 
 		entry := b.findEntry(idx)
 		// update with new position.
-		b.idx.Put(key, newIdx(len(newData), idx.TTL()))
+		b.index.Put(key, newIdx(len(newData), idx.TTL()))
 		newData = append(newData, entry...)
 
 		b.alloc += uint64(len(entry))
@@ -315,7 +314,7 @@ func (b *bucket) migrate() {
 	})
 
 	// reuse buffer.
-	b.root.bpool.Put(b.data)
+	b.bpool.Put(b.data)
 
 	// replace old data.
 	b.data = newData
@@ -336,7 +335,7 @@ type CacheStat struct {
 func (c *GigaCache) Stat() (s CacheStat) {
 	for _, b := range c.buckets {
 		b.RLock()
-		s.Len += uint64(b.idx.Count())
+		s.Len += uint64(b.index.Count())
 		s.Alloc += b.alloc
 		s.Inused += b.inused
 		s.Migrates += b.migrates
