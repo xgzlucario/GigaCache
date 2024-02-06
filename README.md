@@ -25,7 +25,7 @@ import (
 )
 
 func main() {
-    m := cache.New()
+    m := cache.New(cache.DefaultOptions)
 
     m.Set("foo", []byte("bar"))
     // Set with expired time.

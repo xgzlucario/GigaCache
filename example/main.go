@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -12,11 +13,42 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 
-	"github.com/influxdata/tdigest"
 	cache "github.com/xgzlucario/GigaCache"
 )
 
-var tdlock sync.Mutex
+type Quantile struct {
+	mu sync.RWMutex
+	f  []float64
+}
+
+func NewQuantile(size int) *Quantile {
+	return &Quantile{f: make([]float64, 0, size)}
+}
+
+func (q *Quantile) Add(v float64) {
+	q.mu.Lock()
+	q.f = append(q.f, v)
+	q.mu.Unlock()
+}
+
+func (q *Quantile) Quantile(p float64) float64 {
+	q.mu.RLock()
+	r := q.f[int(float64(len(q.f))*p)]
+	q.mu.RUnlock()
+	return r
+}
+
+func (q *Quantile) Print() {
+	q.mu.Lock()
+	slices.Sort(q.f)
+	fmt.Printf("50th: %.0f ns\n", q.Quantile(0.5))
+	fmt.Printf("90th: %.0f ns\n", q.Quantile(0.9))
+	fmt.Printf("99th: %.0f ns\n", q.Quantile(0.99))
+	fmt.Printf("999th: %.0f ns\n", q.Quantile(0.999))
+	q.mu.Unlock()
+}
+
+const N = 100 * 10000
 
 func main() {
 	go func() {
@@ -24,13 +56,13 @@ func main() {
 	}()
 
 	start := time.Now()
-	td := tdigest.NewWithCompression(1000)
+	quant := NewQuantile(N)
 
 	var count int64
 	var avgRate, avgAlloc, avgInused, avgTime float64
 	var memStats runtime.MemStats
 
-	bc := cache.New(cache.DefaultOption)
+	bc := cache.New(cache.DefaultOptions)
 
 	// Stat
 	go func() {
@@ -66,13 +98,6 @@ func main() {
 					memStats.NumGC,
 					float64(memStats.PauseTotalNs)/float64(memStats.NumGC)/1000)
 
-				// compute quantiles
-				tdlock.Lock()
-				fmt.Printf("90th = %.2f us\n", td.Quantile(0.9))
-				fmt.Printf("99th = %.2f us\n", td.Quantile(0.99))
-				fmt.Printf("100th = %.2f us\n", td.Quantile(0.9999))
-				tdlock.Unlock()
-
 				fmt.Println("-----------------------------------------------------")
 			}
 		}
@@ -90,9 +115,7 @@ func main() {
 		count++
 
 		cost := float64(time.Since(now)) / float64(time.Microsecond)
-		tdlock.Lock()
-		td.Add(cost, 1)
-		tdlock.Unlock()
+		quant.Add(cost)
 	}
 }
 
