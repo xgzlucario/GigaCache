@@ -248,15 +248,11 @@ type OnEvictCallback func(key, value []byte)
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
-	var failed, pcount uint16
+	var failed uint16
 
 	// probing
 	b.index.Iter(func(key Key, idx Idx) bool {
 		b.probe++
-		pcount++
-		if pcount > b.options.MaxProbeCount {
-			return true
-		}
 
 		if idx.expired() {
 			// on evict
@@ -292,8 +288,6 @@ func (b *bucket) eliminate() {
 func (b *bucket) migrate() {
 	// create new data.
 	newData := b.bpool.Get(len(b.data))[:0]
-	b.alloc = 0
-	b.inused = 0
 
 	// migrate datas to new bucket.
 	b.index.Iter(func(key Key, idx Idx) bool {
@@ -307,9 +301,6 @@ func (b *bucket) migrate() {
 		b.index.Put(key, newIdx(len(newData), idx.TTL()))
 		newData = append(newData, entry...)
 
-		b.alloc += uint64(len(entry))
-		b.inused += uint64(len(entry))
-
 		return false
 	})
 
@@ -318,6 +309,8 @@ func (b *bucket) migrate() {
 
 	// replace old data.
 	b.data = newData
+	b.alloc = uint64(len(b.data))
+	b.inused = uint64(len(b.data))
 	b.migrates++
 }
 
