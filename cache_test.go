@@ -113,12 +113,6 @@ func TestSet(t *testing.T) {
 		opt.ShardCount = 0
 		New(opt)
 	})
-
-	assert.Panics(func() {
-		opt := DefaultOptions
-		opt.MaxProbeCount = 0
-		New(opt)
-	})
 }
 
 func TestEvict(t *testing.T) {
@@ -152,10 +146,9 @@ func TestEvict(t *testing.T) {
 
 	stat = m.Stat()
 	assert.Equal(stat.Len, uint64(num-stat.Evict+1))
-	assert.Equal(stat.Alloc, uint64((num+1)*(16+2)))
-	assert.Equal(stat.Inused, uint64(stat.Len*(16+2)))
-	assert.Equal(stat.Migrates, uint64(0))
-	assert.Equal(stat.Evict, uint64(opt.MaxProbeCount))
+	assert.Equal(stat.Alloc, uint64(16+2))
+	assert.Equal(stat.Inused, uint64(16+2))
+	assert.Equal(stat.Migrates, uint64(1))
 }
 
 func FuzzSet(f *testing.F) {

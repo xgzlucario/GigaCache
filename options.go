@@ -12,7 +12,6 @@ type Options struct {
 	BufferSize int
 
 	// Configuration of evict strategy.
-	MaxProbeCount uint16
 	MaxFailCount  uint16
 
 	// Migrate threshold for a bucket to trigger a migration.
@@ -28,7 +27,6 @@ var DefaultOptions = Options{
 	ShardCount:        1024,
 	IndexSize:         128,
 	BufferSize:        64 * 1024, // 64 KB
-	MaxProbeCount:     1000,
 	MaxFailCount:      3,
 	MigrateThresRatio: 0.6,
 	MigrateDelta:      4 * 1 << 10, // 4 KB
@@ -37,9 +35,6 @@ var DefaultOptions = Options{
 func checkOptions(options Options) error {
 	if options.ShardCount == 0 {
 		return errors.New("cache/options: invalid shard count")
-	}
-	if options.MaxProbeCount == 0 {
-		return errors.New("cache/options: max probe count should greater than 0")
 	}
 	return nil
 }
