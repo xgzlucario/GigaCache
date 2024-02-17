@@ -33,7 +33,8 @@ type bucket struct {
 	// data store all key-value bytes data.
 	data []byte
 
-	// some runtime stats for bucket.
+	// some runtime stats.
+	hint     bool
 	alloc    uint64
 	inused   uint64
 	migrates uint64
@@ -73,7 +74,6 @@ func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
 }
 
 // find return values by given Key and Idx.
-// MAKE SURE check idx valid before call this func.
 func (b *bucket) find(idx Idx) (total int, kstr []byte, val []byte) {
 	var index = idx.start()
 	// klen
@@ -92,7 +92,7 @@ func (b *bucket) find(idx Idx) (total int, kstr []byte, val []byte) {
 	return index - idx.start(), kstr, val
 }
 
-// findEntry
+// findEntry return entire entry bytes.
 func (b *bucket) findEntry(idx Idx) (entry []byte) {
 	var index = idx.start()
 	// klen
@@ -244,18 +244,22 @@ func (c *GigaCache) Migrate() {
 
 // OnEvictCallback is the callback function of evict key-value pair.
 // DO NOT EDIT the input params key value.
-type OnEvictCallback func(key, value []byte)
+type OnEvictCallback func(key, val []byte)
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
-	var failed uint16
+	b.hint = !b.hint
+	if b.options.HintEnabled && b.hint {
+		return
+	}
+	var failed int
 
 	// probing
 	b.index.Iter(func(key Key, idx Idx) bool {
 		b.probe++
 
 		if idx.expired() {
-			// on evict
+			// evict
 			if b.options.OnEvict != nil {
 				total, kstr, val := b.find(idx)
 				b.options.OnEvict(kstr, val)
@@ -279,7 +283,8 @@ func (b *bucket) eliminate() {
 	// on migrate threshold
 	rate := float64(b.inused) / float64(b.alloc)
 	delta := b.alloc - b.inused
-	if delta >= b.options.MigrateDelta && rate <= b.options.MigrateThresRatio {
+	if delta >= b.options.MigrateDelta &&
+		rate <= b.options.MigrateThresRatio {
 		b.migrate()
 	}
 }

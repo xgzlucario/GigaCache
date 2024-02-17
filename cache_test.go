@@ -14,9 +14,10 @@ func genKV(i int) (string, []byte) {
 	return k, []byte(k)
 }
 
-func getTestOption(num int) Options {
+func getTestOption(num int, hint bool) Options {
 	opt := DefaultOptions
 	opt.ShardCount = 1
+	opt.HintEnabled = hint
 	opt.IndexSize = uint32(num)
 	opt.BufferSize = 16 * 6
 	return opt
@@ -53,7 +54,7 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 func TestSet(t *testing.T) {
 	assert := assert.New(t)
 	const num = 10000
-	m := New(getTestOption(num))
+	m := New(getTestOption(num, true))
 
 	// set data.
 	for i := 0; i < num/2; i++ {
@@ -113,12 +114,18 @@ func TestSet(t *testing.T) {
 		opt.ShardCount = 0
 		New(opt)
 	})
+
+	assert.Panics(func() {
+		opt := DefaultOptions
+		opt.MaxFailCount = -1
+		New(opt)
+	})
 }
 
 func TestEvict(t *testing.T) {
 	assert := assert.New(t)
 	const num = 10000
-	opt := getTestOption(num)
+	opt := getTestOption(num, false)
 	opt.OnEvict = func(k, v []byte) {
 		assert.Equal(k, v)
 	}
@@ -153,7 +160,7 @@ func TestEvict(t *testing.T) {
 
 func FuzzSet(f *testing.F) {
 	const num = 1000 * 10000
-	m := New(getTestOption(num))
+	m := New(getTestOption(num, true))
 
 	f.Fuzz(func(t *testing.T, k string, v []byte, u64ts uint64) {
 		sec := GetNanoSec()
