@@ -4,7 +4,7 @@
 
 GigaCache is a Golang cache built on `swissmap`, designed to manage GB-level caches with better performance, and higher memory efficiency than `built-in map`, multi-threaded support, 0 GC overhead.
 
-[See doc here](https://www.yuque.com/1ucario/devdoc/ntyyeekkxu8apngd?singleDoc)
+[See doc here](https://lucario.cn/posts/gigacache/)
 
 # 🚗Usage
 
