@@ -78,6 +78,20 @@ func BenchmarkIter(b *testing.B) {
 			})
 		}
 	})
+
+	b.Run("GigaCache/CPU=8", func(b *testing.B) {
+		m := New(DefaultOptions)
+		for i := 0; i < num; i++ {
+			m.Set(strconv.Itoa(i), str)
+		}
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			m.Scan(func(s []byte, b []byte, i int64) bool {
+				return false
+			}, 8)
+		}
+	})
 }
 
 func BenchmarkDelete(b *testing.B) {

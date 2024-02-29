@@ -8,6 +8,7 @@ import (
 	"unsafe"
 
 	"github.com/dolthub/swiss"
+	"github.com/sourcegraph/conc/pool"
 	"github.com/zeebo/xxh3"
 )
 
@@ -222,15 +223,26 @@ func (b *bucket) scan(f Walker) {
 	})
 }
 
-// Scan walk all alive key-value pairs.
-func (c *GigaCache) Scan(f Walker) {
-	for _, b := range c.buckets {
-		b.RLock()
-		b.scan(func(key, val []byte, ts int64) bool {
-			return f(key, val, ts)
-		})
-		b.RUnlock()
+// Scan walk all alive key-value pairs with num cpu.
+func (c *GigaCache) Scan(f Walker, numCPU ...int) {
+	cpu := 1
+	if len(numCPU) > 0 {
+		cpu = numCPU[0]
 	}
+	pool := pool.New().WithMaxGoroutines(cpu)
+
+	for _, b := range c.buckets {
+		b := b
+		pool.Go(func() {
+			b.RLock()
+			b.scan(func(key, val []byte, ts int64) bool {
+				return f(key, val, ts)
+			})
+			b.RUnlock()
+		})
+	}
+
+	pool.Wait()
 }
 
 // Migrate move all data to new buckets.

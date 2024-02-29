@@ -48,7 +48,7 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 		}
 		assert.Equal(s, b)
 		return false
-	})
+	}, 1)
 }
 
 func TestSet(t *testing.T) {
