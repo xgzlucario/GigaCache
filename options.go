@@ -32,12 +32,12 @@ type Options struct {
 // DefaultOptions
 var DefaultOptions = Options{
 	ShardCount:        1024,
-	IndexSize:         128,
+	IndexSize:         1024,
 	BufferSize:        64 * 1024, // 64 KB
 	MaxFailCount:      3,
 	HintEnabled:       true,
 	MigrateThresRatio: 0.6,
-	MigrateDelta:      4 * 1 << 10, // 4 KB
+	MigrateDelta:      4 * 1024, // 4 * KB
 }
 
 func checkOptions(options Options) error {

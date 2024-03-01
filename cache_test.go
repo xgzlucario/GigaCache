@@ -3,6 +3,7 @@ package cache
 import (
 	"bytes"
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -48,7 +49,7 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 		}
 		assert.Equal(s, b)
 		return false
-	}, 1)
+	}, runtime.NumCPU())
 }
 
 func TestSet(t *testing.T) {
@@ -96,7 +97,7 @@ func TestSet(t *testing.T) {
 	time.Sleep(time.Second)
 
 	checkInvalidData(assert, m, num/2, num)
-	m.Migrate()
+	m.Migrate(runtime.NumCPU())
 	checkInvalidData(assert, m, num/2, num)
 
 	// delete 0 ~ num/2.
@@ -106,7 +107,7 @@ func TestSet(t *testing.T) {
 		assert.True(ok)
 	}
 	checkInvalidData(assert, m, 0, num)
-	m.Migrate()
+	m.Migrate(runtime.NumCPU())
 	checkInvalidData(assert, m, 0, num)
 
 	assert.Panics(func() {

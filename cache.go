@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/binary"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -225,7 +226,7 @@ func (b *bucket) scan(f Walker) {
 
 // Scan walk all alive key-value pairs with num cpu.
 func (c *GigaCache) Scan(f Walker, numCPU ...int) {
-	cpu := 1
+	cpu := runtime.NumCPU()
 	if len(numCPU) > 0 {
 		cpu = numCPU[0]
 	}
@@ -246,12 +247,23 @@ func (c *GigaCache) Scan(f Walker, numCPU ...int) {
 }
 
 // Migrate move all data to new buckets.
-func (c *GigaCache) Migrate() {
-	for _, b := range c.buckets {
-		b.Lock()
-		b.migrate()
-		b.Unlock()
+func (c *GigaCache) Migrate(numCPU ...int) {
+	cpu := runtime.NumCPU()
+	if len(numCPU) > 0 {
+		cpu = numCPU[0]
 	}
+	pool := pool.New().WithMaxGoroutines(cpu)
+
+	for _, b := range c.buckets {
+		b := b
+		pool.Go(func() {
+			b.Lock()
+			b.migrate()
+			b.Unlock()
+		})
+	}
+
+	pool.Wait()
 }
 
 // OnEvictCallback is the callback function of evict key-value pair.
