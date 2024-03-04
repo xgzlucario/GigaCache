@@ -71,25 +71,25 @@ Gigache Set operation has better performance than stdmap.
 
 **Get** from 1 million entries.
 
-| Benchmark        | Iter     | time/op     | bytes/op | alloc/op    |
-| ---------------- | -------- | ----------- | -------- | ----------- |
-| Get/stdmap-16    | 5539920  | 242.2 ns/op |  7 B/op  | 0 allocs/op |
-| Get/GigaCache-16 | 7041771  | 151.8 ns/op | 10 B/op  | 1 allocs/op |
+| Benchmark        | Iter    | time/op     | bytes/op | alloc/op    |
+| ---------------- | ------- | ----------- | -------- | ----------- |
+| Get/stdmap-16    | 5539920 | 242.2 ns/op |   7 B/op | 0 allocs/op |
+| Get/GigaCache-16 | 7041771 | 151.8 ns/op |  10 B/op | 1 allocs/op |
 
 **Scan** from 100k entries.
 
-| Benchmark                  | Iter   | time/op        | bytes/op   | alloc/op       |
-| -------------------------- | ------ | -------------- | ---------- | -------------- |
-| Scan/stdmap-16             |  97    | 12422801 ns/op |     0 B/op |    0 allocs/op |
-| Scan/GigaCache-16          |  56    | 25372260 ns/op |     0 B/op |    0 allocs/op |
-| Scan/GigaCache/parallel-16 | 206    |  5519518 ns/op | 25794 B/op | 1060 allocs/op |
+| Benchmark                  | Iter  | time/op        | bytes/op   | alloc/op       |
+| -------------------------- | ----- | -------------- | ---------- | -------------- |
+| Scan/stdmap-16             |    97 | 12422801 ns/op |     0 B/op |    0 allocs/op |
+| Scan/GigaCache-16          |    56 | 25372260 ns/op |     0 B/op |    0 allocs/op |
+| Scan/GigaCache/parallel-16 |   206 |  5519518 ns/op | 25794 B/op | 1060 allocs/op |
 
 **Delete**
 
 | Benchmark              | Iter       | time/op      | bytes/op  | alloc/op    |
 | ---------------------- | ---------- | ------------ | --------- | ----------- |
-| Delete/stdmap-16       | 1000000000 | 0.2383 ns/op |   0 B/op  | 0 allocs/op |
-| Delete/GigaCache-16    | 1000000000 | 0.7658 ns/op |   0 B/op  | 1 allocs/op |
+| Delete/stdmap-16       | 1000000000 | 0.2383 ns/op |    0 B/op | 0 allocs/op |
+| Delete/GigaCache-16    | 1000000000 | 0.7658 ns/op |    0 B/op | 1 allocs/op |
 
 # 🎢Integrated Bench
 
