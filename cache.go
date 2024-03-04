@@ -19,7 +19,7 @@ const (
 
 // GigaCache implements a key-value cache.
 type GigaCache struct {
-	mask    uint64
+	mask    uint32
 	buckets []*bucket
 }
 
@@ -52,7 +52,7 @@ func New(options Options) *GigaCache {
 
 	// create cache.
 	cache := &GigaCache{
-		mask:    uint64(options.ShardCount - 1),
+		mask:    uint32(options.ShardCount - 1),
 		buckets: make([]*bucket, options.ShardCount),
 	}
 	bpool := NewBufferPool()
@@ -69,13 +69,26 @@ func New(options Options) *GigaCache {
 	return cache
 }
 
-// getShard returns the bucket and the real key by hash(kstr).
-func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
-	hash := xxh3.HashString(kstr)
-	return c.buckets[hash&c.mask], newKey(hash)
+func fnv32(key string) uint32 {
+	hash := uint32(2166136261)
+	const prime32 = uint32(16777619)
+	klen := len(key)
+	for i := 0; i < klen; i++ {
+		hash *= prime32
+		hash ^= uint32(key[i])
+	}
+	return hash
 }
 
-// find return values by given Key and Idx.
+// getShard returns the bucket and the real key by hash(kstr).
+// sharding and index use different hash function,
+// can reduce the probability of hash conflicts greatly.
+func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
+	hashShard := fnv32(kstr)
+	hashKey := xxh3.HashString(kstr)
+	return c.buckets[hashShard&c.mask], newKey(hashKey)
+}
+
 func (b *bucket) find(idx Idx) (total int, kstr []byte, val []byte) {
 	var index = idx.start()
 	// klen
@@ -94,7 +107,6 @@ func (b *bucket) find(idx Idx) (total int, kstr []byte, val []byte) {
 	return index - idx.start(), kstr, val
 }
 
-// findEntry return entire entry bytes.
 func (b *bucket) findEntry(idx Idx) (entry []byte) {
 	var index = idx.start()
 	// klen
