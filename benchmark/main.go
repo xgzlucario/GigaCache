@@ -30,7 +30,7 @@ func main() {
 	c := ""
 	entries := 0
 	flag.StringVar(&c, "cache", "gigacache", "cache to bench.")
-	flag.IntVar(&entries, "entries", 2000*10000, "number of entries to test")
+	flag.IntVar(&entries, "entries", 2000*10000, "number of entries to test.")
 	flag.Parse()
 
 	fmt.Println(c)

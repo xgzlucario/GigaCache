@@ -36,9 +36,9 @@ func (q *Quantile) quantile(p float64) float64 {
 
 func (q *Quantile) Print() {
 	slices.Sort(q.f)
-	fmt.Printf("50th: %.0f ns\n", q.quantile(0.5))
 	fmt.Printf("90th: %.0f ns\n", q.quantile(0.9))
 	fmt.Printf("99th: %.0f ns\n", q.quantile(0.99))
+	fmt.Printf("999th: %.0f ns\n", q.quantile(0.999))
 }
 
 const N = 100 * 10000
@@ -51,7 +51,7 @@ func main() {
 	options := cache.DefaultOptions
 	options.IndexSize = 1024
 
-	for _, args := range []uint16{1, 2, 3, 4, 5} {
+	for _, args := range []int{3} {
 		options.MaxFailCount = args
 		fmt.Println("=====Options=====")
 		fmt.Printf("%+v\n", options)

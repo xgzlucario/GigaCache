@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"runtime"
 	"strconv"
 	"testing"
 )
@@ -53,7 +54,7 @@ func BenchmarkGet(b *testing.B) {
 	})
 }
 
-func BenchmarkIter(b *testing.B) {
+func BenchmarkScan(b *testing.B) {
 	b.Run("stdmap", func(b *testing.B) {
 		m := getStdmap()
 		b.ResetTimer()
@@ -75,7 +76,21 @@ func BenchmarkIter(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m.Scan(func(s []byte, b []byte, i int64) bool {
 				return false
-			})
+			}, 1)
+		}
+	})
+
+	b.Run("GigaCache/parallel", func(b *testing.B) {
+		m := New(DefaultOptions)
+		for i := 0; i < num; i++ {
+			m.Set(strconv.Itoa(i), str)
+		}
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			m.Scan(func(s []byte, b []byte, i int64) bool {
+				return false
+			}, runtime.NumCPU())
 		}
 	})
 }
@@ -99,6 +114,46 @@ func BenchmarkDelete(b *testing.B) {
 
 		for i := 0; i < num; i++ {
 			m.Delete(strconv.Itoa(i))
+		}
+	})
+}
+
+func BenchmarkStat(b *testing.B) {
+	b.Run("GigaCache", func(b *testing.B) {
+		m := New(DefaultOptions)
+		for i := 0; i < num; i++ {
+			m.Set(strconv.Itoa(i), str)
+		}
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			m.Stat()
+		}
+	})
+}
+
+func BenchmarkMigrate(b *testing.B) {
+	b.Run("GigaCache", func(b *testing.B) {
+		m := New(DefaultOptions)
+		for i := 0; i < num; i++ {
+			m.Set(strconv.Itoa(i), str)
+		}
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			m.Migrate(1)
+		}
+	})
+
+	b.Run("GigaCache/parallel", func(b *testing.B) {
+		m := New(DefaultOptions)
+		for i := 0; i < num; i++ {
+			m.Set(strconv.Itoa(i), str)
+		}
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			m.Migrate(runtime.NumCPU())
 		}
 	})
 }

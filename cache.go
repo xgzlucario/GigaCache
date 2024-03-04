@@ -2,12 +2,14 @@ package cache
 
 import (
 	"encoding/binary"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/dolthub/swiss"
+	"github.com/sourcegraph/conc/pool"
 	"github.com/zeebo/xxh3"
 )
 
@@ -33,7 +35,8 @@ type bucket struct {
 	// data store all key-value bytes data.
 	data []byte
 
-	// some runtime stats for bucket.
+	// some runtime stats.
+	hint     bool
 	alloc    uint64
 	inused   uint64
 	migrates uint64
@@ -73,7 +76,6 @@ func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
 }
 
 // find return values by given Key and Idx.
-// MAKE SURE check idx valid before call this func.
 func (b *bucket) find(idx Idx) (total int, kstr []byte, val []byte) {
 	var index = idx.start()
 	// klen
@@ -92,7 +94,7 @@ func (b *bucket) find(idx Idx) (total int, kstr []byte, val []byte) {
 	return index - idx.start(), kstr, val
 }
 
-// findEntry
+// findEntry return entire entry bytes.
 func (b *bucket) findEntry(idx Idx) (entry []byte) {
 	var index = idx.start()
 	// klen
@@ -222,40 +224,84 @@ func (b *bucket) scan(f Walker) {
 	})
 }
 
-// Scan walk all alive key-value pairs.
-func (c *GigaCache) Scan(f Walker) {
-	for _, b := range c.buckets {
-		b.RLock()
-		b.scan(func(key, val []byte, ts int64) bool {
-			return f(key, val, ts)
-		})
-		b.RUnlock()
+// Scan walk all alive key-value pairs with num cpu.
+func (c *GigaCache) Scan(f Walker, numCPU ...int) {
+	cpu := runtime.NumCPU()
+	if len(numCPU) > 0 {
+		cpu = numCPU[0]
+	}
+
+	if cpu == 1 {
+		for _, b := range c.buckets {
+			b.RLock()
+			b.scan(func(key, val []byte, ts int64) bool {
+				return f(key, val, ts)
+			})
+			b.RUnlock()
+		}
+
+	} else {
+		pool := pool.New().WithMaxGoroutines(cpu)
+		for _, b := range c.buckets {
+			b := b
+			pool.Go(func() {
+				b.RLock()
+				b.scan(func(key, val []byte, ts int64) bool {
+					return f(key, val, ts)
+				})
+				b.RUnlock()
+			})
+		}
+		pool.Wait()
 	}
 }
 
-// Migrate move all data to new buckets.
-func (c *GigaCache) Migrate() {
-	for _, b := range c.buckets {
-		b.Lock()
-		b.migrate()
-		b.Unlock()
+// Migrate move all data to new buckets with num cpu.
+func (c *GigaCache) Migrate(numCPU ...int) {
+	cpu := runtime.NumCPU()
+	if len(numCPU) > 0 {
+		cpu = numCPU[0]
+	}
+
+	if cpu == 1 {
+		for _, b := range c.buckets {
+			b.Lock()
+			b.migrate()
+			b.Unlock()
+		}
+
+	} else {
+		pool := pool.New().WithMaxGoroutines(cpu)
+		for _, b := range c.buckets {
+			b := b
+			pool.Go(func() {
+				b.Lock()
+				b.migrate()
+				b.Unlock()
+			})
+		}
+		pool.Wait()
 	}
 }
 
 // OnEvictCallback is the callback function of evict key-value pair.
 // DO NOT EDIT the input params key value.
-type OnEvictCallback func(key, value []byte)
+type OnEvictCallback func(key, val []byte)
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
-	var failed uint16
+	b.hint = !b.hint
+	if b.options.HintEnabled && b.hint {
+		return
+	}
+	var failed int
 
 	// probing
 	b.index.Iter(func(key Key, idx Idx) bool {
 		b.probe++
 
 		if idx.expired() {
-			// on evict
+			// evict
 			if b.options.OnEvict != nil {
 				total, kstr, val := b.find(idx)
 				b.options.OnEvict(kstr, val)
@@ -279,7 +325,8 @@ func (b *bucket) eliminate() {
 	// on migrate threshold
 	rate := float64(b.inused) / float64(b.alloc)
 	delta := b.alloc - b.inused
-	if delta >= b.options.MigrateDelta && rate <= b.options.MigrateThresRatio {
+	if delta >= b.options.MigrateDelta &&
+		rate <= b.options.MigrateThresRatio {
 		b.migrate()
 	}
 }
