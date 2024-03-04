@@ -49,6 +49,14 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 		}
 		assert.Equal(s, b)
 		return false
+	}, 1)
+
+	m.Scan(func(s []byte, b []byte, i int64) bool {
+		if string(s) >= beginKey && string(s) < endKey {
+			assert.Fail("invalid data")
+		}
+		assert.Equal(s, b)
+		return false
 	}, runtime.NumCPU())
 }
 
@@ -67,7 +75,7 @@ func TestSet(t *testing.T) {
 		m.SetEx(k, v, time.Hour)
 	}
 
-	m.Migrate()
+	m.Migrate(1)
 
 	// get data.
 	for i := 0; i < num/2; i++ {

@@ -78,10 +78,11 @@ Gigache Set operation has better performance than stdmap.
 
 **Scan** from 100k entries.
 
-| Benchmark         | Iter   | time/op        | bytes/op   | alloc/op       |
-| ----------------- | ------ | -------------- | ---------- | -------------- |
-| Scan/stdmap-16    | 103    | 13304184 ns/op |     0 B/op |    0 allocs/op |
-| Scan/GigaCache-16 | 224    |  5401054 ns/op | 25794 B/op | 1060 allocs/op |
+| Benchmark                  | Iter   | time/op        | bytes/op   | alloc/op       |
+| -------------------------- | ------ | -------------- | ---------- | -------------- |
+| Scan/stdmap-16             |  97    | 12422801 ns/op |     0 B/op |    0 allocs/op |
+| Scan/GigaCache-16          |  56    | 25372260 ns/op |     0 B/op |    0 allocs/op |
+| Scan/GigaCache/parallel-16 | 206    |  5519518 ns/op | 25794 B/op | 1060 allocs/op |
 
 **Delete**
 

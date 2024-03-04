@@ -230,40 +230,58 @@ func (c *GigaCache) Scan(f Walker, numCPU ...int) {
 	if len(numCPU) > 0 {
 		cpu = numCPU[0]
 	}
-	pool := pool.New().WithMaxGoroutines(cpu)
 
-	for _, b := range c.buckets {
-		b := b
-		pool.Go(func() {
+	if cpu == 1 {
+		for _, b := range c.buckets {
 			b.RLock()
 			b.scan(func(key, val []byte, ts int64) bool {
 				return f(key, val, ts)
 			})
 			b.RUnlock()
-		})
-	}
+		}
 
-	pool.Wait()
+	} else {
+		pool := pool.New().WithMaxGoroutines(cpu)
+		for _, b := range c.buckets {
+			b := b
+			pool.Go(func() {
+				b.RLock()
+				b.scan(func(key, val []byte, ts int64) bool {
+					return f(key, val, ts)
+				})
+				b.RUnlock()
+			})
+		}
+		pool.Wait()
+	}
 }
 
-// Migrate move all data to new buckets.
+// Migrate move all data to new buckets with num cpu.
 func (c *GigaCache) Migrate(numCPU ...int) {
 	cpu := runtime.NumCPU()
 	if len(numCPU) > 0 {
 		cpu = numCPU[0]
 	}
-	pool := pool.New().WithMaxGoroutines(cpu)
 
-	for _, b := range c.buckets {
-		b := b
-		pool.Go(func() {
+	if cpu == 1 {
+		for _, b := range c.buckets {
 			b.Lock()
 			b.migrate()
 			b.Unlock()
-		})
-	}
+		}
 
-	pool.Wait()
+	} else {
+		pool := pool.New().WithMaxGoroutines(cpu)
+		for _, b := range c.buckets {
+			b := b
+			pool.Go(func() {
+				b.Lock()
+				b.migrate()
+				b.Unlock()
+			})
+		}
+		pool.Wait()
+	}
 }
 
 // OnEvictCallback is the callback function of evict key-value pair.
