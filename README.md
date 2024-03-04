@@ -57,7 +57,7 @@ func main() {
 goos: linux
 goarch: amd64
 pkg: github.com/xgzlucario/GigaCache
-cpu: 13th Gen Intel(R) Core(TM) i5-13600KF
+cpu: AMD Ryzen 7 5800H with Radeon Graphics
 ```
 
 **Set**
@@ -66,29 +66,29 @@ Gigache Set operation has better performance than stdmap.
 
 | Benchmark        | Iter    | time/op     | bytes/op | alloc/op    |
 | ---------------- | ------- | ----------- | -------- | ----------- |
-| Set/stdmap-20    | 4282058 | 310.7 ns/op | 190 B/op | 1 allocs/op |
-| Set/GigaCache-20 | 7852952 | 216.9 ns/op | 132 B/op | 1 allocs/op |
+| Set/stdmap-16    | 2486958 | 516.9 ns/op | 143 B/op | 1 allocs/op |
+| Set/GigaCache-16 | 2948646 | 465.9 ns/op |  97 B/op | 1 allocs/op |
 
 **Get** from 1 million entries.
 
 | Benchmark        | Iter     | time/op     | bytes/op | alloc/op    |
 | ---------------- | -------- | ----------- | -------- | ----------- |
-| Get/stdmap-20    | 11278285 | 115.2 ns/op | 7 B/op   | 0 allocs/op |
-| Get/GigaCache-20 | 18098422 | 71.58 ns/op | 8 B/op   | 1 allocs/op |
+| Get/stdmap-16    | 5539920  | 242.2 ns/op |  7 B/op  | 0 allocs/op |
+| Get/GigaCache-16 | 7041771  | 151.8 ns/op | 10 B/op  | 1 allocs/op |
+
+**Scan** from 100k entries.
+
+| Benchmark         | Iter   | time/op        | bytes/op   | alloc/op       |
+| ----------------- | ------ | -------------- | ---------- | -------------- |
+| Scan/stdmap-16    | 103    | 13304184 ns/op |     0 B/op |    0 allocs/op |
+| Scan/GigaCache-16 | 224    |  5401054 ns/op | 25794 B/op | 1060 allocs/op |
 
 **Delete**
 
-| Benchmark              | Iter     | time/op     | bytes/op | alloc/op    |
-| ---------------------- | -------- | ----------- | -------- | ----------- |
-| Delete/stdmap-20       | 87499602 | 14.53 ns/op |	7 B/op	 | 0 allocs/op |
-| Delete/GigaCache-20    | 22143832 | 49.78 ns/op |	8 B/op	 | 1 allocs/op |
-
-**Iter** from 100k entries.
-
-| Benchmark                   | Iter     | time/op       | bytes/op | alloc/op    |
-| --------------------------- | -------- | ------------- | -------- | ----------- |
-| BenchmarkIter/stdmap-20     |      496 | 2451833 ns/op |	 0 B/op	| 0 allocs/op |
-| BenchmarkIter/GigaCache-20  |     1998 |  579076 ns/op |	 0 B/op | 0 allocs/op |
+| Benchmark              | Iter       | time/op      | bytes/op  | alloc/op    |
+| ---------------------- | ---------- | ------------ | --------- | ----------- |
+| Delete/stdmap-16       | 1000000000 | 0.2383 ns/op |   0 B/op  | 0 allocs/op |
+| Delete/GigaCache-16    | 1000000000 | 0.7658 ns/op |   0 B/op  | 1 allocs/op |
 
 # 🎢Integrated Bench
 
