@@ -122,19 +122,13 @@ func TestSet(t *testing.T) {
 		opt.ShardCount = 0
 		New(opt)
 	})
-
-	assert.Panics(func() {
-		opt := DefaultOptions
-		opt.MaxFailCount = -1
-		New(opt)
-	})
 }
 
 func TestEvict(t *testing.T) {
 	assert := assert.New(t)
 	const num = 10000
 	opt := getTestOption(num)
-	opt.OnEvict = func(k, v []byte) {
+	opt.OnRemove = func(k, v []byte) {
 		assert.Equal(k, v)
 	}
 	m := New(opt)

@@ -15,6 +15,10 @@ import (
 
 const (
 	noTTL = 0
+
+	// maxFailCount indicates that the evict algorithm break
+	// when consecutive unexpired key-value pairs are detected.
+	maxFailCount = 3
 )
 
 // GigaCache implements a key-value cache.
@@ -325,9 +329,9 @@ func (c *GigaCache) Migrate(numCPU ...int) {
 	}
 }
 
-// OnEvictCallback is the callback function of evict key-value pair.
-// DO NOT EDIT the input params key value.
-type OnEvictCallback func(key, val []byte)
+// OnRemove called when a key-value pair is evicted.
+// DO NOT EDIT the input params.
+type OnRemove func(key, val []byte)
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
@@ -339,9 +343,9 @@ func (b *bucket) eliminate() {
 
 		if idx.expired() {
 			// evict
-			if b.options.OnEvict != nil {
+			if b.options.OnRemove != nil {
 				total, kstr, val := b.find(idx)
-				b.options.OnEvict(kstr, val)
+				b.options.OnRemove(kstr, val)
 				b.inused -= uint64(total)
 				b.arena.Free(uint32(idx.start()), uint32(total))
 
@@ -358,7 +362,7 @@ func (b *bucket) eliminate() {
 		}
 
 		failed++
-		return failed >= b.options.MaxFailCount
+		return failed >= maxFailCount
 	})
 
 	// on migrate threshold

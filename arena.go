@@ -35,6 +35,7 @@ func (a *Arena) Alloc(want int) (node, bool) {
 			// split the node
 			a.Free(n.start+uint32(want), n.offset-uint32(want))
 			a.mt[level][i] = node{}
+			n.offset = uint32(want)
 			return n, true
 		}
 	}
