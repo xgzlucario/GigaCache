@@ -49,15 +49,10 @@ func main() {
 	}()
 
 	options := cache.DefaultOptions
-	options.IndexSize = 1024
 
-	for _, args := range []int{3} {
-		options.MaxFailCount = args
-		fmt.Println("=====Options=====")
-		fmt.Printf("%+v\n", options)
-		benchmark(options)
-		runtime.GC()
-	}
+	fmt.Println("=====Options=====")
+	fmt.Printf("%+v\n", options)
+	benchmark(options)
 }
 
 func benchmark(options cache.Options) {
@@ -72,16 +67,16 @@ func benchmark(options cache.Options) {
 	start := time.Now()
 	var now time.Time
 	for j := 0; ; j++ {
-		k := strconv.FormatUint(source.Uint64(), 10)
+		k := strconv.FormatUint(source.Uint64(), 36)
 
 		if j%10 == 0 {
 			now = time.Now()
-			if now.Sub(start) > time.Minute {
+			if now.Sub(start) > time.Minute*5 {
 				break
 			}
 		}
 
-		bc.SetEx(k, []byte(k), time.Second*2)
+		bc.SetEx(k, []byte(k), time.Second*20)
 		count++
 
 		if j%10 == 0 {
