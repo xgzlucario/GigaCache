@@ -15,12 +15,6 @@ type Options struct {
 	// when `n` consecutive unexpired key-value pairs are detected.
 	MaxFailCount int
 
-	// HintEnabled seeks a balance between performance and memory usage.
-	// When `true`, performance is prioritized.
-	// When `false`, reduce memory usage is prioritized.
-	// If you prefer to reduce memory usage over performance, set it to `false`.
-	HintEnabled bool
-
 	// Migrate threshold for a bucket to trigger a migration.
 	MigrateThresRatio float64
 	MigrateDelta      uint64
@@ -35,7 +29,6 @@ var DefaultOptions = Options{
 	IndexSize:         1024,
 	BufferSize:        64 * 1024, // 64 KB
 	MaxFailCount:      3,
-	HintEnabled:       true,
 	MigrateThresRatio: 0.6,
 	MigrateDelta:      4 * 1024, // 4 * KB
 }

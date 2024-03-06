@@ -33,12 +33,13 @@ type bucket struct {
 	index *swiss.Map[Key, Idx]
 
 	// data store all key-value bytes data.
-	data []byte
+	arena *Arena
+	data  []byte
 
-	// some runtime stats.
-	hint     bool
+	// runtime stats.
 	alloc    uint64
 	inused   uint64
+	reused   uint64
 	migrates uint64
 	evict    uint64
 	probe    uint64
@@ -63,6 +64,7 @@ func New(options Options) *GigaCache {
 			options: &options,
 			bpool:   bpool,
 			index:   swiss.NewMap[Key, Idx](options.IndexSize),
+			arena:   NewArena(),
 			data:    bpool.Get(options.BufferSize)[:0],
 		}
 	}
@@ -81,15 +83,14 @@ func fnv32(key string) uint32 {
 }
 
 // getShard returns the bucket and the real key by hash(kstr).
-// sharding and index use different hash function,
-// can reduce the probability of hash conflicts greatly.
+// sharding and index use different hash function, can reduce the hash conflicts greatly.
 func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
 	hashShard := fnv32(kstr)
 	hashKey := xxh3.HashString(kstr)
 	return c.buckets[hashShard&c.mask], newKey(hashKey)
 }
 
-func (b *bucket) find(idx Idx) (total int, kstr []byte, val []byte) {
+func (b *bucket) find(idx Idx) (total int, kstr, val []byte) {
 	var index = idx.start()
 	// klen
 	klen, n := binary.Uvarint(b.data[index:])
@@ -148,29 +149,57 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 //				     |<--------------------- entry --------------------->|
 //
 // set stores key-value pair into bucket.
-func (b *bucket) set(key Key, kstr []byte, val []byte, ts int64) {
+func (b *bucket) set(key Key, kstr, val []byte, ts int64) (needEvict bool) {
+	total := varlen[int](len(kstr)) + varlen[int](len(val)) + len(kstr) + len(val)
+	n, ok := b.arena.Alloc(total)
+
+	// find reuse space.
+	if ok {
+		var index = int(n.start)
+		// set index.
+		b.index.Put(key, newIdx(index, ts))
+
+		// put klen, vlen, key, val.
+		index += binary.PutUvarint(b.data[index:], uint64(len(kstr)))
+		index += binary.PutUvarint(b.data[index:], uint64(len(val)))
+		copy(b.data[index:], kstr)
+		copy(b.data[index+len(kstr):], val)
+
+		b.reused += uint64(total)
+		b.inused += uint64(total)
+		return false
+	}
+
 	// set index.
 	b.index.Put(key, newIdx(len(b.data), ts))
-	before := len(b.data)
 
-	// append klen, vlen, key, value.
+	// append klen, vlen, key, val.
 	b.data = binary.AppendUvarint(b.data, uint64(len(kstr)))
 	b.data = binary.AppendUvarint(b.data, uint64(len(val)))
 	b.data = append(b.data, kstr...)
 	b.data = append(b.data, val...)
 
 	// update stat.
-	alloc := len(b.data) - before
-	b.alloc += uint64(alloc)
-	b.inused += uint64(alloc)
+	b.alloc += uint64(total)
+	b.inused += uint64(total)
+	return true
+}
+
+func varlen[T uint32 | uint64 | int](num int) (length T) {
+	for num > 0 {
+		num >>= 7
+		length++
+	}
+	return length
 }
 
 // SetTx store key-value pair with deadline.
 func (c *GigaCache) SetTx(kstr string, val []byte, ts int64) {
 	b, key := c.getShard(kstr)
 	b.Lock()
-	b.eliminate()
-	b.set(key, s2b(&kstr), val, ts)
+	if b.set(key, s2b(&kstr), val, ts) {
+		b.eliminate()
+	}
 	b.Unlock()
 }
 
@@ -302,10 +331,6 @@ type OnEvictCallback func(key, val []byte)
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
-	b.hint = !b.hint
-	if b.options.HintEnabled && b.hint {
-		return
-	}
 	var failed int
 
 	// probing
@@ -318,10 +343,12 @@ func (b *bucket) eliminate() {
 				total, kstr, val := b.find(idx)
 				b.options.OnEvict(kstr, val)
 				b.inused -= uint64(total)
+				b.arena.Free(uint32(idx.start()), uint32(total))
 
 			} else {
 				entry := b.findEntry(idx)
 				b.inused -= uint64(len(entry))
+				b.arena.Free(uint32(idx.start()), uint32(len(entry)))
 			}
 
 			b.index.Delete(key)
@@ -367,7 +394,9 @@ func (b *bucket) migrate() {
 	b.bpool.Put(b.data)
 
 	// replace old data.
+	b.arena.Clear()
 	b.data = newData
+	b.reused = 0
 	b.alloc = uint64(len(b.data))
 	b.inused = uint64(len(b.data))
 	b.migrates++
@@ -378,6 +407,7 @@ type CacheStat struct {
 	Len      uint64
 	Alloc    uint64
 	Inused   uint64
+	Reused   uint64
 	Migrates uint64
 	Evict    uint64
 	Probe    uint64
@@ -390,6 +420,7 @@ func (c *GigaCache) Stat() (s CacheStat) {
 		s.Len += uint64(b.index.Count())
 		s.Alloc += b.alloc
 		s.Inused += b.inused
+		s.Reused += b.reused
 		s.Migrates += b.migrates
 		s.Evict += b.evict
 		s.Probe += b.probe

@@ -9,6 +9,8 @@ import (
 )
 
 const (
+	// Shard N entries to SHARD_COUNT buckets,
+	// test hash conflict rate with different hash functions.
 	SHARD_COUNT = 32
 	N           = 1000 * 10000
 )
@@ -44,7 +46,7 @@ func (c *cache) Len() int {
 func main() {
 	dataset := make([]string, 0, N)
 	for i := 0; i < N; i++ {
-		dataset = append(dataset, fmt.Sprintf("%010x", i))
+		dataset = append(dataset, fmt.Sprintf("%08x", i))
 	}
 
 	// xxh3
@@ -53,7 +55,7 @@ func main() {
 	for _, k := range dataset {
 		m.Set(k, xxhash, xxhash)
 	}
-	fmt.Println("xxh3(xxh3):", N-m.Len(), time.Since(start))
+	fmt.Println("shard xxh3, index xxh3:", N-m.Len(), time.Since(start))
 
 	// xxh3 with shard fnv64
 	m = newCache()
@@ -61,7 +63,7 @@ func main() {
 	for _, k := range dataset {
 		m.Set(k, fnv64, xxhash)
 	}
-	fmt.Println("xxh3(fnv64):", N-m.Len(), time.Since(start))
+	fmt.Println("shard fnv64, index xxh3:", N-m.Len(), time.Since(start))
 }
 
 func xxhash(text string) uint64 {
