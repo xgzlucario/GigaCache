@@ -37,7 +37,7 @@ type bucket struct {
 	index *swiss.Map[Key, Idx]
 
 	// data store all key-value bytes data.
-	arena *Arena
+	arena *arena
 	data  []byte
 
 	// runtime stats.
@@ -68,7 +68,7 @@ func New(options Options) *GigaCache {
 			options: &options,
 			bpool:   bpool,
 			index:   swiss.NewMap[Key, Idx](options.IndexSize),
-			arena:   NewArena(),
+			arena:   newArena(),
 			data:    bpool.Get(options.BufferSize)[:0],
 		}
 	}

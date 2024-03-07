@@ -10,7 +10,7 @@ import (
 func TestArenaAlloc(t *testing.T) {
 	assert := assert.New(t)
 
-	arena := NewArena()
+	arena := newArena()
 	n, ok := arena.Alloc(1)
 	assert.False(ok)
 	assert.Equal(node{}, n)
@@ -42,7 +42,7 @@ func TestArenaAlloc(t *testing.T) {
 func TestArenaError(t *testing.T) {
 	assert := assert.New(t)
 
-	arena := NewArena()
+	arena := newArena()
 	n, ok := arena.Alloc(math.MaxInt)
 	assert.Equal(n, node{})
 	assert.False(ok)

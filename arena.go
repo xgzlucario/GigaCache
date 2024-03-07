@@ -10,8 +10,8 @@ const (
 	LEVEL_SCALE_BITS = 1
 )
 
-// Arena is a memory allocator.
-type Arena struct {
+// arena is a memory allocator.
+type arena struct {
 	mt [MAX_LEVEL][LEVEL_SIZE]node
 }
 
@@ -19,12 +19,12 @@ type node struct {
 	start, offset uint32
 }
 
-func NewArena() *Arena {
-	return &Arena{}
+func newArena() *arena {
+	return &arena{}
 }
 
 // Alloc allocates a block of memory and return it start and offset.
-func (a *Arena) Alloc(want int) (node, bool) {
+func (a *arena) Alloc(want int) (node, bool) {
 	level := toLevel(want)
 	if level >= MAX_LEVEL {
 		return node{}, false
@@ -43,7 +43,7 @@ func (a *Arena) Alloc(want int) (node, bool) {
 }
 
 // Free
-func (a *Arena) Free(start, offset uint32) {
+func (a *arena) Free(start, offset uint32) {
 	if offset == 0 {
 		return
 	}
@@ -55,6 +55,7 @@ func (a *Arena) Free(start, offset uint32) {
 	n := a.mt[level][0]
 	if offset > n.offset {
 		a.mt[level][0] = node{start, offset}
+		// TODO: optimize move empty node to it place directly.
 		// sort
 		slices.SortFunc(a.mt[level][:], func(a, b node) int {
 			return int(a.offset) - int(b.offset)
@@ -63,7 +64,7 @@ func (a *Arena) Free(start, offset uint32) {
 }
 
 // Clear
-func (a *Arena) Clear() {
+func (a *arena) Clear() {
 	a.mt = [MAX_LEVEL][LEVEL_SIZE]node{}
 }
 
