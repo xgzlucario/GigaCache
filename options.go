@@ -15,7 +15,7 @@ type Options struct {
 	MigrateThresRatio float64
 	MigrateDelta      uint64
 
-	// OnRemove called when a key-value pair is evicted.
+	// OnRemove called when key-value pair is evicted.
 	OnRemove OnRemove
 }
 

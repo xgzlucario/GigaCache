@@ -11,6 +11,7 @@ const (
 )
 
 // arena is a memory allocator.
+// it is designed to manage the reallocation of fragmented memory.
 type arena struct {
 	mt [MAX_LEVEL][LEVEL_SIZE]node
 }
@@ -23,7 +24,7 @@ func newArena() *arena {
 	return &arena{}
 }
 
-// Alloc allocates a block of memory and return it start and offset.
+// Alloc allocates a adapt fragmented space and return it position.
 func (a *arena) Alloc(want int) (node, bool) {
 	level := toLevel(want)
 	if level >= MAX_LEVEL {
@@ -42,7 +43,7 @@ func (a *arena) Alloc(want int) (node, bool) {
 	return node{}, false
 }
 
-// Free
+// Free stores a segment of fragmented space.
 func (a *arena) Free(start, offset uint32) {
 	if offset == 0 {
 		return
@@ -55,7 +56,6 @@ func (a *arena) Free(start, offset uint32) {
 	n := a.mt[level][0]
 	if offset > n.offset {
 		a.mt[level][0] = node{start, offset}
-		// TODO: optimize move empty node to it place directly.
 		// sort
 		slices.SortFunc(a.mt[level][:], func(a, b node) int {
 			return int(a.offset) - int(b.offset)
@@ -63,7 +63,7 @@ func (a *arena) Free(start, offset uint32) {
 	}
 }
 
-// Clear
+// Clear reset the arena.
 func (a *arena) Clear() {
 	a.mt = [MAX_LEVEL][LEVEL_SIZE]node{}
 }
