@@ -49,15 +49,10 @@ func main() {
 	}()
 
 	options := cache.DefaultOptions
-	options.IndexSize = 1024
 
-	for _, args := range []int{3} {
-		options.MaxFailCount = args
-		fmt.Println("=====Options=====")
-		fmt.Printf("%+v\n", options)
-		benchmark(options)
-		runtime.GC()
-	}
+	fmt.Println("=====Options=====")
+	fmt.Printf("%+v\n", options)
+	benchmark(options)
 }
 
 func benchmark(options cache.Options) {
@@ -76,12 +71,12 @@ func benchmark(options cache.Options) {
 
 		if j%10 == 0 {
 			now = time.Now()
-			if now.Sub(start) > time.Minute {
+			if now.Sub(start) > time.Minute*5 {
 				break
 			}
 		}
 
-		bc.SetEx(k, []byte(k), time.Second)
+		bc.SetEx(k, []byte(k), time.Second*20)
 		count++
 
 		if j%10 == 0 {
@@ -93,14 +88,15 @@ func benchmark(options cache.Options) {
 	// Stat
 	stat := bc.Stat()
 
-	fmt.Printf("[Cache] %.0fs | %dw | len: %dw | alloc: %v / %v (%.1f%%)\n",
+	fmt.Printf("[Cache] %.0fs | %dw | len: %dw | alloc: %v / %v (%.0f%%) | reuse: %v\n",
 		time.Since(start).Seconds(),
 		count/1e4,
 		stat.Len/1e4,
 		formatSize(stat.Inused), formatSize(stat.Alloc),
 		stat.ExpRate(),
+		formatSize(stat.Reused),
 	)
-	fmt.Printf("[Evict] probe: %vw / %vw (%.1f%%) | mgr: %d\n",
+	fmt.Printf("[Evict] probe: %vw / %vw (%.0f%%) | mgr: %d\n",
 		stat.Evict/1e5, stat.Probe/1e5, stat.EvictRate(),
 		stat.Migrates)
 

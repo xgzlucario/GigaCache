@@ -157,3 +157,19 @@ func BenchmarkMigrate(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkArena(b *testing.B) {
+	b.Run("alloc", func(b *testing.B) {
+		arena := newArena()
+		for i := 0; i < b.N; i++ {
+			arena.Alloc(i % 1024)
+		}
+	})
+
+	b.Run("free", func(b *testing.B) {
+		arena := newArena()
+		for i := 0; i < b.N; i++ {
+			arena.Free(uint32(i), uint32(i%1024))
+		}
+	})
+}
