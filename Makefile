@@ -24,7 +24,7 @@ gen-proto:
 # pprof relatived.
 # cpu analysis.
 web-profile:
-	go tool pprof -http=:18081 "http://localhost:6060/debug/pprof/profile?seconds=30"
+	go tool pprof -http=:18081 "http://localhost:6060/debug/pprof/profile?seconds=60"
 
 # mem analysis.
 cmd-heap:

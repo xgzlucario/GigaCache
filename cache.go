@@ -189,12 +189,13 @@ func (b *bucket) set(key Key, kstr, val []byte, ts int64) (needEvict bool) {
 	return true
 }
 
-func varlen[T uint32 | uint64 | int](num int) (length T) {
-	for num > 0 {
-		num >>= 7
-		length++
+func varlen[T uint32 | uint64 | int](x int) (n T) {
+	i := 0
+	for x >= 0x80 {
+		x >>= 7
+		i++
 	}
-	return length
+	return T(i + 1)
 }
 
 // SetTx store key-value pair with deadline.
