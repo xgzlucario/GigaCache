@@ -34,8 +34,8 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 		// setTTL
 		ok = m.SetTTL(k, time.Now().UnixNano())
 		assert.False(ok)
-		// delete
-		ok = m.Delete(k)
+		// remove
+		ok = m.Remove(k)
 		assert.False(ok)
 	}
 	// scan
@@ -110,7 +110,7 @@ func TestSet(t *testing.T) {
 	// delete 0 ~ num/2.
 	for i := 0; i < num/2; i++ {
 		k, _ := genKV(i)
-		ok := m.Delete(k)
+		ok := m.Remove(k)
 		assert.True(ok)
 	}
 	checkInvalidData(assert, m, 0, num)

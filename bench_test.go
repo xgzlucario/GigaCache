@@ -104,7 +104,7 @@ func BenchmarkScan(b *testing.B) {
 	})
 }
 
-func BenchmarkDelete(b *testing.B) {
+func BenchmarkRemove(b *testing.B) {
 	b.Run("stdmap", func(b *testing.B) {
 		m := getStdmap()
 		b.ResetTimer()
@@ -122,7 +122,7 @@ func BenchmarkDelete(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < num; i++ {
-			m.Delete(strconv.Itoa(i))
+			m.Remove(strconv.Itoa(i))
 		}
 	})
 }

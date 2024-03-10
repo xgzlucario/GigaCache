@@ -198,8 +198,8 @@ func (c *GigaCache) SetEx(kstr string, val []byte, dur time.Duration) {
 	c.SetTx(kstr, val, GetNanoSec()+int64(dur))
 }
 
-// Delete removes the key-value pair by the key.
-func (c *GigaCache) Delete(kstr string) bool {
+// Remove removes the key-value pair by the key.
+func (c *GigaCache) Remove(kstr string) bool {
 	b, key := c.getShard(kstr)
 	b.Lock()
 	b.eliminate()
@@ -210,12 +210,22 @@ func (c *GigaCache) Delete(kstr string) bool {
 		b.Unlock()
 		return false
 	}
-	// delete.
-	b.index.Delete(key)
-	entry := b.findEntry(idx)
-	b.inused -= uint64(len(entry))
+	b.remove(key, idx)
 	b.Unlock()
 	return true
+}
+
+func (b *bucket) remove(key Key, idx Idx) {
+	if b.options.OnRemove != nil {
+		total, kstr, val := b.find(idx)
+		b.options.OnRemove(kstr, val)
+		b.inused -= uint64(total)
+
+	} else {
+		entry := b.findEntry(idx)
+		b.inused -= uint64(len(entry))
+	}
+	b.index.Delete(key)
 }
 
 // SetTTL
@@ -251,9 +261,7 @@ func checkWalkOptions(opts ...WalkOptions) WalkOptions {
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
-	if opt.NumCPU <= 0 {
-		opt.NumCPU = 1
-	}
+	opt.NumCPU = max(opt.NumCPU, 1)
 	return opt
 }
 
@@ -349,25 +357,12 @@ func (b *bucket) eliminate() {
 	// probing
 	b.index.Iter(func(key Key, idx Idx) bool {
 		b.probe++
-
 		if idx.expired() {
-			// remove
-			if b.options.OnRemove != nil {
-				total, kstr, val := b.find(idx)
-				b.options.OnRemove(kstr, val)
-				b.inused -= uint64(total)
-
-			} else {
-				entry := b.findEntry(idx)
-				b.inused -= uint64(len(entry))
-			}
-
-			b.index.Delete(key)
+			b.remove(key, idx)
 			b.evict++
 			failed = 0
 			return false
 		}
-
 		failed++
 		return failed >= maxFailCount
 	})
