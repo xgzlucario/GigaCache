@@ -33,6 +33,15 @@ func BenchmarkSet(b *testing.B) {
 			m.Set(strconv.Itoa(i), str)
 		}
 	})
+
+	b.Run("GigaCache/disableEvict", func(b *testing.B) {
+		options := DefaultOptions
+		options.DisableEvict = true
+		m := New(options)
+		for i := 0; i < b.N; i++ {
+			m.Set(strconv.Itoa(i), str)
+		}
+	})
 }
 
 func BenchmarkGet(b *testing.B) {
@@ -76,7 +85,7 @@ func BenchmarkScan(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m.Scan(func(s []byte, b []byte, i int64) bool {
 				return false
-			}, 1)
+			}, WalkOptions{NoCopy: true})
 		}
 	})
 
@@ -90,7 +99,7 @@ func BenchmarkScan(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m.Scan(func(s []byte, b []byte, i int64) bool {
 				return false
-			}, runtime.NumCPU())
+			}, WalkOptions{NumCPU: runtime.NumCPU(), NoCopy: true})
 		}
 	})
 }

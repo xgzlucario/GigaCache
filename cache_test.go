@@ -20,7 +20,6 @@ func getTestOption(num, interval int) Options {
 	opt.ShardCount = 1
 	opt.EvictInterval = interval
 	opt.IndexSize = uint32(num)
-	opt.BufferSize = 16 * 6
 	return opt
 }
 
@@ -49,7 +48,7 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 		}
 		assert.Equal(s, b)
 		return false
-	}, 1)
+	})
 
 	m.Scan(func(s []byte, b []byte, i int64) bool {
 		if string(s) >= beginKey && string(s) < endKey {
@@ -57,7 +56,7 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 		}
 		assert.Equal(s, b)
 		return false
-	}, runtime.NumCPU())
+	}, WalkOptions{NumCPU: runtime.NumCPU(), NoCopy: true})
 }
 
 func TestSet(t *testing.T) {
@@ -165,6 +164,47 @@ func TestEvict(t *testing.T) {
 	assert.Equal(stat.Alloc, uint64(16+2))
 	assert.Equal(stat.Inused, uint64(16+2))
 	assert.Equal(stat.Migrates, uint64(1))
+}
+
+func TestDisableEvict(t *testing.T) {
+	assert := assert.New(t)
+
+	opt := DefaultOptions
+	opt.ShardCount = 1
+	opt.DisableEvict = true
+	opt.IndexSize = uint32(num)
+
+	m := New(opt)
+
+	// set data.
+	for i := 0; i < num; i++ {
+		k, v := genKV(i)
+		m.Set(k, v)
+	}
+
+	// stat
+	stat := m.Stat()
+	assert.Equal(stat.Len, uint64(num))
+	assert.Equal(stat.Alloc, uint64(stat.Len*(16+2)))
+	assert.Equal(stat.Inused, uint64(stat.Len*(16+2)))
+	assert.Equal(stat.Migrates, uint64(0))
+	assert.Equal(stat.Evict, uint64(0))
+	assert.Equal(stat.Probe, uint64(0))
+
+	// set same data.
+	for i := 0; i < num/5; i++ {
+		k, v := genKV(i)
+		m.Set(k, v)
+	}
+	m.Set("trig1234", []byte("trig1234"))
+
+	stat = m.Stat()
+	assert.Equal(stat.Len, uint64(num+1))
+	assert.Equal(stat.Alloc, uint64((num+1)*(16+2)))
+	assert.Equal(stat.Inused, uint64((num+1)*(16+2)))
+	assert.Equal(stat.Migrates, uint64(0))
+	assert.Equal(stat.Evict, uint64(0))
+	assert.Equal(stat.Probe, uint64(0))
 }
 
 func FuzzSet(f *testing.F) {
