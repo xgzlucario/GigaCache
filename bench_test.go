@@ -33,6 +33,15 @@ func BenchmarkSet(b *testing.B) {
 			m.Set(strconv.Itoa(i), str)
 		}
 	})
+
+	b.Run("GigaCache/disableEvict", func(b *testing.B) {
+		options := DefaultOptions
+		options.DisableEvict = true
+		m := New(options)
+		for i := 0; i < b.N; i++ {
+			m.Set(strconv.Itoa(i), str)
+		}
+	})
 }
 
 func BenchmarkGet(b *testing.B) {

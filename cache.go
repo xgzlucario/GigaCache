@@ -250,9 +250,9 @@ func checkWalkOptions(opts ...WalkOptions) WalkOptions {
 	var opt WalkOptions
 	if len(opts) > 0 {
 		opt = opts[0]
-	} else {
+	}
+	if opt.NumCPU <= 0 {
 		opt.NumCPU = 1
-		opt.NoCopy = false
 	}
 	return opt
 }
