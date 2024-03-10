@@ -15,6 +15,10 @@ import (
 
 const (
 	noTTL = 0
+
+	// maxFailCount indicates that the evict algorithm break
+	// when consecutive unexpired key-value pairs are detected.
+	maxFailCount = 3
 )
 
 // GigaCache implements a key-value cache.
@@ -35,8 +39,8 @@ type bucket struct {
 	// data store all key-value bytes data.
 	data []byte
 
-	// some runtime stats.
-	hint     bool
+	// runtime stats.
+	interval int
 	alloc    uint64
 	inused   uint64
 	migrates uint64
@@ -81,15 +85,14 @@ func fnv32(key string) uint32 {
 }
 
 // getShard returns the bucket and the real key by hash(kstr).
-// sharding and index use different hash function,
-// can reduce the probability of hash conflicts greatly.
+// sharding and index use different hash function, can reduce the hash conflicts greatly.
 func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
 	hashShard := fnv32(kstr)
 	hashKey := xxh3.HashString(kstr)
 	return c.buckets[hashShard&c.mask], newKey(hashKey)
 }
 
-func (b *bucket) find(idx Idx) (total int, kstr []byte, val []byte) {
+func (b *bucket) find(idx Idx) (total int, kstr, val []byte) {
 	var index = idx.start()
 	// klen
 	klen, n := binary.Uvarint(b.data[index:])
@@ -148,12 +151,12 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 //				     |<--------------------- entry --------------------->|
 //
 // set stores key-value pair into bucket.
-func (b *bucket) set(key Key, kstr []byte, val []byte, ts int64) {
+func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
 	// set index.
 	b.index.Put(key, newIdx(len(b.data), ts))
 	before := len(b.data)
 
-	// append klen, vlen, key, value.
+	// append klen, vlen, key, val.
 	b.data = binary.AppendUvarint(b.data, uint64(len(kstr)))
 	b.data = binary.AppendUvarint(b.data, uint64(len(val)))
 	b.data = append(b.data, kstr...)
@@ -223,7 +226,7 @@ func (c *GigaCache) SetTTL(kstr string, ts int64) bool {
 }
 
 // Walker is the callback function for iterator.
-type Walker func(key []byte, value []byte, ttl int64) (stop bool)
+type Walker func(key, val []byte, ttl int64) (stop bool)
 
 // scan
 func (b *bucket) scan(f Walker) {
@@ -296,16 +299,17 @@ func (c *GigaCache) Migrate(numCPU ...int) {
 	}
 }
 
-// OnEvictCallback is the callback function of evict key-value pair.
-// DO NOT EDIT the input params key value.
-type OnEvictCallback func(key, val []byte)
+// OnRemove called when a key-value pair is evicted.
+// DO NOT EDIT the input params.
+type OnRemove func(key, val []byte)
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
-	b.hint = !b.hint
-	if b.options.HintEnabled && b.hint {
+	b.interval++
+	if b.interval < b.options.EvictInterval {
 		return
 	}
+	b.interval = 0
 	var failed int
 
 	// probing
@@ -313,10 +317,10 @@ func (b *bucket) eliminate() {
 		b.probe++
 
 		if idx.expired() {
-			// evict
-			if b.options.OnEvict != nil {
+			// remove
+			if b.options.OnRemove != nil {
 				total, kstr, val := b.find(idx)
-				b.options.OnEvict(kstr, val)
+				b.options.OnRemove(kstr, val)
 				b.inused -= uint64(total)
 
 			} else {
@@ -331,7 +335,7 @@ func (b *bucket) eliminate() {
 		}
 
 		failed++
-		return failed >= b.options.MaxFailCount
+		return failed >= maxFailCount
 	})
 
 	// on migrate threshold

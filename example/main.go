@@ -49,10 +49,9 @@ func main() {
 	}()
 
 	options := cache.DefaultOptions
-	options.IndexSize = 1024
 
-	for _, args := range []int{3} {
-		options.MaxFailCount = args
+	for _, arg := range []int{1, 2, 3, 4, 5} {
+		options.EvictInterval = arg
 		fmt.Println("=====Options=====")
 		fmt.Printf("%+v\n", options)
 		benchmark(options)
