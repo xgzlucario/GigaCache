@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"encoding/binary"
 	"runtime"
 	"slices"
@@ -152,6 +153,16 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 //
 // set stores key-value pair into bucket.
 func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
+	// check key if already exists.
+	if idx, ok := b.index.Get(key); ok {
+		total, key, _ := b.find(idx)
+		if bytes.Equal(key, kstr) {
+			// update stat.
+			b.alloc -= uint64(total)
+			b.inused -= uint64(total)
+		}
+	}
+
 	// set index.
 	b.index.Put(key, newIdx(len(b.data), ts))
 	before := len(b.data)
@@ -228,42 +239,60 @@ func (c *GigaCache) SetTTL(kstr string, ts int64) bool {
 // Walker is the callback function for iterator.
 type Walker func(key, val []byte, ttl int64) (stop bool)
 
+// WalkOptions
+type WalkOptions struct {
+	NumCPU int
+	NoCopy bool
+}
+
+// checkWalkOptions
+func checkWalkOptions(opts ...WalkOptions) WalkOptions {
+	var opt WalkOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	} else {
+		opt.NumCPU = 1
+		opt.NoCopy = false
+	}
+	return opt
+}
+
 // scan
-func (b *bucket) scan(f Walker) {
+func (b *bucket) scan(f Walker, nocopy bool) {
 	b.index.Iter(func(_ Key, idx Idx) bool {
 		if idx.expired() {
 			return false
 		}
 		_, kstr, val := b.find(idx)
-		return f(kstr, val, idx.TTL())
+		if nocopy {
+			return f(kstr, val, idx.TTL())
+		}
+		return f(slices.Clone(kstr), slices.Clone(val), idx.TTL())
 	})
 }
 
 // Scan walk all alive key-value pairs with num cpu.
-func (c *GigaCache) Scan(f Walker, numCPU ...int) {
-	cpu := runtime.NumCPU()
-	if len(numCPU) > 0 {
-		cpu = numCPU[0]
-	}
+func (c *GigaCache) Scan(f Walker, opts ...WalkOptions) {
+	opt := checkWalkOptions(opts...)
 
-	if cpu == 1 {
+	if opt.NumCPU == 1 {
 		for _, b := range c.buckets {
 			b.RLock()
 			b.scan(func(key, val []byte, ts int64) bool {
 				return f(key, val, ts)
-			})
+			}, opt.NoCopy)
 			b.RUnlock()
 		}
 
 	} else {
-		pool := pool.New().WithMaxGoroutines(cpu)
+		pool := pool.New().WithMaxGoroutines(opt.NumCPU)
 		for _, b := range c.buckets {
 			b := b
 			pool.Go(func() {
 				b.RLock()
 				b.scan(func(key, val []byte, ts int64) bool {
 					return f(key, val, ts)
-				})
+				}, opt.NoCopy)
 				b.RUnlock()
 			})
 		}
@@ -305,6 +334,11 @@ type OnRemove func(key, val []byte)
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
+	if b.options.DisableEvict {
+		b.migrate()
+		return
+	}
+
 	b.interval++
 	if b.interval < b.options.EvictInterval {
 		return
@@ -338,17 +372,20 @@ func (b *bucket) eliminate() {
 		return failed >= maxFailCount
 	})
 
-	// on migrate threshold
-	rate := float64(b.inused) / float64(b.alloc)
-	delta := b.alloc - b.inused
-	if delta >= b.options.MigrateDelta &&
-		rate <= b.options.MigrateThresRatio {
-		b.migrate()
-	}
+	b.migrate()
 }
 
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket) migrate() {
+	// check if need to migrate.
+	rate := float64(b.inused) / float64(b.alloc)
+	delta := b.alloc - b.inused
+	if delta >= b.options.MigrateDelta &&
+		rate <= b.options.MigrateThresRatio {
+	} else {
+		return
+	}
+
 	// create new data.
 	newData := b.bpool.Get(len(b.data))[:0]
 

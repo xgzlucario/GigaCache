@@ -50,7 +50,7 @@ func main() {
 
 	options := cache.DefaultOptions
 
-	for _, arg := range []int{1, 2, 3, 4, 5} {
+	for _, arg := range []int{3} {
 		options.EvictInterval = arg
 		fmt.Println("=====Options=====")
 		fmt.Printf("%+v\n", options)

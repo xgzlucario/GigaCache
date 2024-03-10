@@ -17,6 +17,10 @@ type Options struct {
 	// because the system needs to spend more time on probing and evicting.
 	EvictInterval int
 
+	// DisableEvict
+	// Set `true` when you don't need any expiration times.
+	DisableEvict bool
+
 	// Migrate threshold for a bucket to trigger a migration.
 	MigrateThresRatio float64
 	MigrateDelta      uint64
@@ -31,6 +35,7 @@ var DefaultOptions = Options{
 	IndexSize:         1024,
 	BufferSize:        64 * 1024, // 64 KB
 	EvictInterval:     3,
+	DisableEvict:      false,
 	MigrateThresRatio: 0.6,
 	MigrateDelta:      4 * 1024, // 4 * KB
 }
