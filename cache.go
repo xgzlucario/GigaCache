@@ -237,68 +237,29 @@ func (c *GigaCache) SetTTL(kstr string, ts int64) bool {
 // Walker is the callback function for iterator.
 type Walker func(key, val []byte, ttl int64) (stop bool)
 
-// WalkOptions
-type WalkOptions struct {
-	NumCPU int
-	NoCopy bool
-}
-
-// checkWalkOptions
-func checkWalkOptions(opts ...WalkOptions) WalkOptions {
-	var opt WalkOptions
-	if len(opts) > 0 {
-		opt = opts[0]
-	}
-	opt.NumCPU = max(opt.NumCPU, 1)
-	return opt
-}
-
-// scan
-func (b *bucket) scan(f Walker, nocopy bool) {
+func (b *bucket) scan(f Walker) (stop bool) {
 	for _, idx := range b.index {
 		if idx.expired() {
 			continue
 		}
 		_, kstr, val := b.find(idx)
-		if nocopy {
-			if f(kstr, val, idx.TTL()) {
-				break
-			}
-		} else {
-			if f(slices.Clone(kstr), slices.Clone(val), idx.TTL()) {
-				break
-			}
+		if f(kstr, val, idx.TTL()) {
+			return true
 		}
-
 	}
+	return false
 }
 
-// Scan walk all alive key-value pairs with num cpu.
-func (c *GigaCache) Scan(f Walker, opts ...WalkOptions) {
-	opt := checkWalkOptions(opts...)
-
-	if opt.NumCPU == 1 {
-		for _, b := range c.buckets {
-			b.RLock()
-			b.scan(func(key, val []byte, ts int64) bool {
-				return f(key, val, ts)
-			}, opt.NoCopy)
-			b.RUnlock()
+// Scan walk all alive key-value pairs.
+// DO NOT EDIT the bytes as they are NO COPY.
+func (c *GigaCache) Scan(f Walker) {
+	for _, b := range c.buckets {
+		b.RLock()
+		stop := b.scan(f)
+		b.RUnlock()
+		if stop {
+			return
 		}
-
-	} else {
-		pool := pool.New().WithMaxGoroutines(opt.NumCPU)
-		for _, b := range c.buckets {
-			b := b
-			pool.Go(func() {
-				b.RLock()
-				b.scan(func(key, val []byte, ts int64) bool {
-					return f(key, val, ts)
-				}, opt.NoCopy)
-				b.RUnlock()
-			})
-		}
-		pool.Wait()
 	}
 }
 

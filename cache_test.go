@@ -15,12 +15,45 @@ func genKV(i int) (string, []byte) {
 	return k, []byte(k)
 }
 
-func getTestOption(num, interval int) Options {
+func getOptions(num, interval int) Options {
 	opt := DefaultOptions
 	opt.ShardCount = 1
 	opt.EvictInterval = interval
 	opt.IndexSize = uint32(num)
+	opt.BufferSize = num * 16 * 2
 	return opt
+}
+
+func checkValidData(assert *assert.Assertions, m *GigaCache, start, end int) {
+	for i := start; i < end; i++ {
+		k, _ := genKV(i)
+		val, ts, ok := m.Get(k)
+		assert.True(ok)
+		assert.Equal(string(val), k)
+		assert.GreaterOrEqual(ts, int64(0))
+	}
+	// scan
+	beginKey := fmt.Sprintf("%08x", start)
+	endKey := fmt.Sprintf("%08x", end)
+
+	var count int
+	m.Scan(func(key, val []byte, i int64) bool {
+		if string(key) < beginKey || string(key) >= endKey {
+			assert.Fail("invalid data")
+		}
+		assert.Equal(key, val)
+		count++
+		return false
+	})
+	assert.Equal(count, end-start)
+
+	// scan break
+	count = 0
+	m.Scan(func(key, val []byte, i int64) bool {
+		count++
+		return count >= (end-start)/2
+	})
+	assert.Equal(count, (end-start)/2)
 }
 
 func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
@@ -42,80 +75,79 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 	beginKey := fmt.Sprintf("%08x", start)
 	endKey := fmt.Sprintf("%08x", end)
 
-	m.Scan(func(s []byte, b []byte, i int64) bool {
-		if string(s) >= beginKey && string(s) < endKey {
+	m.Scan(func(key, val []byte, i int64) bool {
+		if string(key) >= beginKey && string(key) < endKey {
 			assert.Fail("invalid data")
 		}
-		assert.Equal(s, b)
+		assert.Equal(key, val)
 		return false
 	})
-
-	m.Scan(func(s []byte, b []byte, i int64) bool {
-		if string(s) >= beginKey && string(s) < endKey {
-			assert.Fail("invalid data")
-		}
-		assert.Equal(s, b)
-		return false
-	}, WalkOptions{NumCPU: runtime.NumCPU(), NoCopy: true})
 }
 
-func TestSet(t *testing.T) {
+func TestCache(t *testing.T) {
 	assert := assert.New(t)
 	const num = 10000
-	m := New(getTestOption(num, 3))
+	m := New(getOptions(num, 3))
 
-	// set data.
-	for i := 0; i < num/2; i++ {
+	// init cache.
+	for i := 0; i < num/3; i++ {
 		k, v := genKV(i)
 		m.Set(k, v)
 	}
-	for i := num / 2; i < num; i++ {
+	for i := num / 3; i < num*2/3; i++ {
 		k, v := genKV(i)
 		m.SetEx(k, v, time.Hour)
 	}
-
-	m.Migrate(1)
-
-	// get data.
-	for i := 0; i < num/2; i++ {
+	for i := num * 2 / 3; i < num; i++ {
 		k, v := genKV(i)
-		val, ts, ok := m.Get(k)
-		assert.True(ok)
-		assert.Equal(v, val)
-		assert.Equal(ts, int64(0))
+		m.SetEx(k, v, time.Second)
 	}
-	for i := num / 2; i < num; i++ {
-		k, v := genKV(i)
-		val, ts, ok := m.Get(k)
-		assert.True(ok)
-		assert.Equal(v, val)
-		assert.Greater(ts, time.Now().UnixNano())
+
+	// wait for expired.
+	time.Sleep(time.Second * 2)
+
+	// check.
+	{
+		checkValidData(assert, m, 0, num*2/3)
+		checkInvalidData(assert, m, num*2/3, num)
+		m.Migrate(1)
+		checkValidData(assert, m, 0, num*2/3)
+		checkInvalidData(assert, m, num*2/3, num)
 	}
 
 	// setTTL
 	ts := time.Now().UnixNano()
-	for i := num / 2; i < num; i++ {
+	for i := num / 3; i < num*2/3; i++ {
 		k, _ := genKV(i)
-		ok := m.SetTTL(k, ts)
-		assert.True(ok)
+		assert.True(m.SetTTL(k, ts))
 	}
-
-	// sleep.
 	time.Sleep(time.Second)
 
-	checkInvalidData(assert, m, num/2, num)
-	m.Migrate(runtime.NumCPU())
-	checkInvalidData(assert, m, num/2, num)
-
-	// delete 0 ~ num/2.
-	for i := 0; i < num/2; i++ {
-		k, _ := genKV(i)
-		ok := m.Remove(k)
-		assert.True(ok)
+	// check.
+	{
+		checkValidData(assert, m, 0, num/3)
+		checkInvalidData(assert, m, num/3, num)
+		m.Migrate(runtime.NumCPU())
+		checkValidData(assert, m, 0, num/3)
+		checkInvalidData(assert, m, num/3, num)
 	}
-	checkInvalidData(assert, m, 0, num)
-	m.Migrate(runtime.NumCPU())
-	checkInvalidData(assert, m, 0, num)
+
+	// remove all.
+	for i := 0; i < num/3; i++ {
+		k, _ := genKV(i)
+		assert.True(m.Remove(k))
+	}
+	for i := num / 3; i < num; i++ {
+		k, _ := genKV(i)
+		assert.False(m.Remove(k))
+	}
+
+	// check.
+	{
+		checkInvalidData(assert, m, 0, num)
+		m.Migrate(runtime.NumCPU())
+		checkInvalidData(assert, m, 0, num)
+	}
 
 	assert.Panics(func() {
 		opt := DefaultOptions
@@ -133,7 +165,7 @@ func TestSet(t *testing.T) {
 func TestEvict(t *testing.T) {
 	assert := assert.New(t)
 	const num = 10000
-	opt := getTestOption(num, 1)
+	opt := getOptions(num, 1)
 	opt.OnRemove = func(k, v []byte) {
 		assert.Equal(k, v)
 	}
@@ -209,7 +241,7 @@ func TestDisableEvict(t *testing.T) {
 
 func FuzzSet(f *testing.F) {
 	const num = 1000 * 10000
-	m := New(getTestOption(num, 1))
+	m := New(getOptions(num, 1))
 
 	f.Fuzz(func(t *testing.T, k string, v []byte, u64ts uint64) {
 		sec := GetNanoSec()
