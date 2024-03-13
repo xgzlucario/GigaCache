@@ -2,9 +2,9 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/xgzlucario/GigaCache)](https://goreportcard.com/report/github.com/xgzlucario/GigaCache) [![Go Reference](https://pkg.go.dev/badge/github.com/xgzlucario/GigaCache.svg)](https://pkg.go.dev/github.com/xgzlucario/GigaCache) ![](https://img.shields.io/badge/go-1.21.0-orange.svg) ![](https://img.shields.io/github/languages/code-size/xgzlucario/GigaCache.svg) [![codecov](https://codecov.io/gh/xgzlucario/GigaCache/graph/badge.svg?token=yC1xELYaM2)](https://codecov.io/gh/xgzlucario/GigaCache) [![Test and coverage](https://github.com/xgzlucario/GigaCache/actions/workflows/rotom.yml/badge.svg)](https://github.com/xgzlucario/GigaCache/actions/workflows/rotom.yml)
 
-GigaCache is a Golang cache built on `swissmap`, designed to manage GB-level caches with better performance, and higher memory efficiency than `built-in map`, multi-threaded support, 0 GC overhead.
+GigaCache is a light and fast cache written by Go, designed to manage GB-level datas with better performance, and higher memory efficiency than `stdmap`, multi-threaded support, 0 GC overhead.
 
-[See doc here](https://lucario.cn/posts/gigacache/)
+GigaCache reduce lock competition by `sharding`, accelerating hashing with runtime.memhash, use value-typed index map to avoid GC overhead. See more technical details via [Doc](https://lucario.cn/posts/gigacache/).
 
 # 🚗Usage
 
@@ -82,7 +82,6 @@ Gigache Set operation has better performance than stdmap.
 | -------------------------- | ----- | -------------- | ---------- | -------------- |
 | Scan/stdmap-16             |    97 | 12422801 ns/op |     0 B/op |    0 allocs/op |
 | Scan/GigaCache-16          |    56 | 25372260 ns/op |     0 B/op |    0 allocs/op |
-| Scan/GigaCache/parallel-16 |   206 |  5519518 ns/op | 25794 B/op | 1060 allocs/op |
 
 **Delete**
 
