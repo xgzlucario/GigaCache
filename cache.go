@@ -9,9 +9,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/dolthub/swiss"
 	"github.com/sourcegraph/conc/pool"
-	"github.com/zeebo/xxh3"
 )
 
 const (
@@ -35,7 +33,7 @@ type bucket struct {
 	bpool   *BufferPool
 
 	// index is the index map for cache, mapped hash(kstr) to the position that data real stored.
-	index *swiss.Map[Key, Idx]
+	index map[Key]Idx
 
 	// data store all key-value bytes data.
 	data []byte
@@ -67,30 +65,19 @@ func New(options Options) *GigaCache {
 		cache.buckets[i] = &bucket{
 			options: &options,
 			bpool:   bpool,
-			index:   swiss.NewMap[Key, Idx](options.IndexSize),
+			index:   make(map[Key]Idx, options.IndexSize),
 			data:    bpool.Get(options.BufferSize)[:0],
 		}
 	}
 	return cache
 }
 
-func fnv32(key string) uint32 {
-	hash := uint32(2166136261)
-	const prime32 = uint32(16777619)
-	klen := len(key)
-	for i := 0; i < klen; i++ {
-		hash *= prime32
-		hash ^= uint32(key[i])
-	}
-	return hash
-}
-
 // getShard returns the bucket and the real key by hash(kstr).
 // sharding and index use different hash function, can reduce the hash conflicts greatly.
 func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
-	hashShard := fnv32(kstr)
-	hashKey := xxh3.HashString(kstr)
-	return c.buckets[hashShard&c.mask], newKey(hashKey)
+	hash := memHashString(kstr)
+	hash32 := uint32(hash >> 32)
+	return c.buckets[hash32&c.mask], newKey(hash)
 }
 
 func (b *bucket) find(idx Idx) (total int, kstr, val []byte) {
@@ -129,7 +116,7 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 	b, key := c.getShard(kstr)
 	b.RLock()
 	// find index map.
-	idx, ok := b.index.Get(key)
+	idx, ok := b.index[key]
 	if !ok || idx.expired() {
 		b.RUnlock()
 		return nil, 0, false
@@ -154,7 +141,7 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 // set stores key-value pair into bucket.
 func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
 	// check key if already exists.
-	if idx, ok := b.index.Get(key); ok {
+	if idx, ok := b.index[key]; ok {
 		total, key, _ := b.find(idx)
 		if bytes.Equal(key, kstr) {
 			// update stat.
@@ -164,7 +151,7 @@ func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
 	}
 
 	// set index.
-	b.index.Put(key, newIdx(len(b.data), ts))
+	b.index[key] = newIdx(len(b.data), ts)
 	before := len(b.data)
 
 	// append klen, vlen, key, val.
@@ -205,7 +192,7 @@ func (c *GigaCache) Remove(kstr string) bool {
 	b.eliminate()
 
 	// find index map.
-	idx, ok := b.index.Get(key)
+	idx, ok := b.index[key]
 	if !ok || idx.expired() {
 		b.Unlock()
 		return false
@@ -225,7 +212,7 @@ func (b *bucket) remove(key Key, idx Idx) {
 		entry := b.findEntry(idx)
 		b.inused -= uint64(len(entry))
 	}
-	b.index.Delete(key)
+	delete(b.index, key)
 }
 
 // SetTTL
@@ -235,13 +222,13 @@ func (c *GigaCache) SetTTL(kstr string, ts int64) bool {
 	b.eliminate()
 
 	// find index map.
-	idx, ok := b.index.Get(key)
+	idx, ok := b.index[key]
 	if !ok || idx.expired() {
 		b.Unlock()
 		return false
 	}
 	// update index.
-	b.index.Put(key, newIdx(idx.start(), ts))
+	b.index[key] = newIdx(idx.start(), ts)
 	b.Unlock()
 	return true
 }
@@ -249,62 +236,29 @@ func (c *GigaCache) SetTTL(kstr string, ts int64) bool {
 // Walker is the callback function for iterator.
 type Walker func(key, val []byte, ttl int64) (stop bool)
 
-// WalkOptions
-type WalkOptions struct {
-	NumCPU int
-	NoCopy bool
-}
-
-// checkWalkOptions
-func checkWalkOptions(opts ...WalkOptions) WalkOptions {
-	var opt WalkOptions
-	if len(opts) > 0 {
-		opt = opts[0]
-	}
-	opt.NumCPU = max(opt.NumCPU, 1)
-	return opt
-}
-
-// scan
-func (b *bucket) scan(f Walker, nocopy bool) {
-	b.index.Iter(func(_ Key, idx Idx) bool {
+func (b *bucket) scan(f Walker) (stop bool) {
+	for _, idx := range b.index {
 		if idx.expired() {
-			return false
+			continue
 		}
 		_, kstr, val := b.find(idx)
-		if nocopy {
-			return f(kstr, val, idx.TTL())
+		if f(kstr, val, idx.TTL()) {
+			return true
 		}
-		return f(slices.Clone(kstr), slices.Clone(val), idx.TTL())
-	})
+	}
+	return false
 }
 
-// Scan walk all alive key-value pairs with num cpu.
-func (c *GigaCache) Scan(f Walker, opts ...WalkOptions) {
-	opt := checkWalkOptions(opts...)
-
-	if opt.NumCPU == 1 {
-		for _, b := range c.buckets {
-			b.RLock()
-			b.scan(func(key, val []byte, ts int64) bool {
-				return f(key, val, ts)
-			}, opt.NoCopy)
-			b.RUnlock()
+// Scan walk all alive key-value pairs.
+// DO NOT EDIT the bytes as they are NO COPY.
+func (c *GigaCache) Scan(f Walker) {
+	for _, b := range c.buckets {
+		b.RLock()
+		stop := b.scan(f)
+		b.RUnlock()
+		if stop {
+			return
 		}
-
-	} else {
-		pool := pool.New().WithMaxGoroutines(opt.NumCPU)
-		for _, b := range c.buckets {
-			b := b
-			pool.Go(func() {
-				b.RLock()
-				b.scan(func(key, val []byte, ts int64) bool {
-					return f(key, val, ts)
-				}, opt.NoCopy)
-				b.RUnlock()
-			})
-		}
-		pool.Wait()
 	}
 }
 
@@ -355,17 +309,19 @@ func (b *bucket) eliminate() {
 	var failed int
 
 	// probing
-	b.index.Iter(func(key Key, idx Idx) bool {
+	for key, idx := range b.index {
 		b.probe++
 		if idx.expired() {
 			b.remove(key, idx)
 			b.evict++
 			failed = 0
-			return false
+			continue
 		}
 		failed++
-		return failed >= maxFailCount
-	})
+		if failed >= maxFailCount {
+			break
+		}
+	}
 
 	b.migrate()
 }
@@ -385,19 +341,16 @@ func (b *bucket) migrate() {
 	newData := b.bpool.Get(len(b.data))[:0]
 
 	// migrate datas to new bucket.
-	b.index.Iter(func(key Key, idx Idx) bool {
+	for key, idx := range b.index {
 		if idx.expired() {
-			b.index.Delete(key)
-			return false
+			delete(b.index, key)
+			continue
 		}
-
 		entry := b.findEntry(idx)
 		// update with new position.
-		b.index.Put(key, newIdx(len(newData), idx.TTL()))
+		b.index[key] = newIdx(len(newData), idx.TTL())
 		newData = append(newData, entry...)
-
-		return false
-	})
+	}
 
 	// reuse buffer.
 	b.bpool.Put(b.data)
@@ -423,7 +376,7 @@ type CacheStat struct {
 func (c *GigaCache) Stat() (s CacheStat) {
 	for _, b := range c.buckets {
 		b.RLock()
-		s.Len += uint64(b.index.Count())
+		s.Len += uint64(len(b.index))
 		s.Alloc += b.alloc
 		s.Inused += b.inused
 		s.Migrates += b.migrates

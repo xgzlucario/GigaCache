@@ -7,15 +7,11 @@ import (
 	"strconv"
 	"time"
 
-	"golang.org/x/exp/rand"
-
 	"net/http"
 	_ "net/http/pprof"
 
 	cache "github.com/xgzlucario/GigaCache"
 )
-
-var source = rand.NewSource(uint64(time.Now().UnixNano()))
 
 type Quantile struct {
 	f []float64
@@ -71,7 +67,7 @@ func benchmark(options cache.Options) {
 	start := time.Now()
 	var now time.Time
 	for j := 0; ; j++ {
-		k := strconv.FormatUint(source.Uint64(), 36)
+		k := strconv.FormatUint(uint64(cache.FastRand()), 10)
 
 		if j%10 == 0 {
 			now = time.Now()
