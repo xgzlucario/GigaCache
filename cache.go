@@ -10,7 +10,6 @@ import (
 	"unsafe"
 
 	"github.com/sourcegraph/conc/pool"
-	"github.com/zeebo/xxh3"
 )
 
 const (
@@ -76,9 +75,9 @@ func New(options Options) *GigaCache {
 // getShard returns the bucket and the real key by hash(kstr).
 // sharding and index use different hash function, can reduce the hash conflicts greatly.
 func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
-	hashShard := MemHashString(kstr)
-	hashKey := xxh3.HashString(kstr)
-	return c.buckets[hashShard&c.mask], newKey(hashKey)
+	hash := memHashString(kstr)
+	hash32 := uint32(hash >> 32)
+	return c.buckets[hash32&c.mask], newKey(hash)
 }
 
 func (b *bucket) find(idx Idx) (total int, kstr, val []byte) {

@@ -26,12 +26,12 @@ type stringStruct struct {
 //go:linkname memhash runtime.memhash
 func memhash(p unsafe.Pointer, h, s uintptr) uintptr
 
-// MemHashString is the hash function used by go map, it utilizes available hardware instructions
+// memHashString is the hash function used by go map, it utilizes available hardware instructions
 // (behaves as aeshash if aes instruction is available).
 // NOTE: The hash seed changes for every process. So, this cannot be used as a persistent hash.
-func MemHashString(str string) uint32 {
+func memHashString(str string) uint64 {
 	ss := (*stringStruct)(unsafe.Pointer(&str))
-	return uint32(memhash(ss.str, 0, uintptr(ss.len)))
+	return uint64(memhash(ss.str, 0, uintptr(ss.len)))
 }
 
 func init() {
