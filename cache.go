@@ -16,6 +16,8 @@ import (
 const (
 	noTTL = 0
 
+	maxKeySize = 1024
+
 	// maxFailCount indicates that the evict algorithm break
 	// when consecutive unexpired key-value pairs are detected.
 	maxFailCount = 3
@@ -24,6 +26,7 @@ const (
 // GigaCache implements a key-value cache.
 type GigaCache struct {
 	mask    uint32
+	hashFn  HashFn
 	buckets []*bucket
 }
 
@@ -34,8 +37,7 @@ type bucket struct {
 	bpool   *BufferPool
 
 	// index is the index map for cache, mapped hash(kstr) to the position that data real stored.
-	index     *swiss.Map[Key, Idx]
-	conflicts *swiss.Map[string, *item]
+	index *swiss.Map[Key, Idx]
 
 	// data store all key-value bytes data.
 	data []byte
@@ -61,7 +63,8 @@ func New(options Options) *GigaCache {
 
 	// create cache.
 	cache := &GigaCache{
-		mask:    uint32(options.ShardCount - 1),
+		mask:    options.ShardCount - 1,
+		hashFn:  options.HashFn,
 		buckets: make([]*bucket, options.ShardCount),
 	}
 	bpool := NewBufferPool()
@@ -69,11 +72,10 @@ func New(options Options) *GigaCache {
 	// init buckets.
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket{
-			options:   &options,
-			bpool:     bpool,
-			index:     swiss.New[Key, Idx](options.IndexSize),
-			conflicts: swiss.New[string, *item](8),
-			data:      bpool.Get(options.BufferSize)[:0],
+			options: &options,
+			bpool:   bpool,
+			index:   swiss.New[Key, Idx](options.IndexSize),
+			data:    bpool.Get(options.BufferSize)[:0],
 		}
 	}
 	return cache
@@ -82,8 +84,8 @@ func New(options Options) *GigaCache {
 // getShard returns the bucket and the real key by hash(kstr).
 // sharding and index use different hash function, can reduce the hash conflicts greatly.
 func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
-	hash := MemHash(kstr)
-	hash32 := uint32(hash >> 32)
+	hash := c.hashFn(kstr)
+	hash32 := uint32(hash >> 1)
 	return c.buckets[hash32&c.mask], newKey(hash)
 }
 
@@ -103,18 +105,6 @@ func (b *bucket) find(idx Idx) (total int, kstr, val []byte) {
 	index += int(vlen)
 
 	return index - idx.start(), kstr, val
-}
-
-func (b *bucket) findVal(idx Idx) (total int, val []byte) {
-	var index = idx.start()
-	// vlen
-	vlen, n := binary.Uvarint(b.data[index:])
-	index += n
-	// val
-	val = b.data[index : index+int(vlen)]
-	index += int(vlen)
-
-	return index - idx.start(), val
 }
 
 func (b *bucket) findEntry(idx Idx) (entry []byte) {
@@ -159,6 +149,10 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 //
 // set stores key-value pair into bucket.
 func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
+	if len(kstr) > maxKeySize {
+		panic("key size is too large")
+	}
+
 	// check key exist in index.
 	if idx, ok := b.index.Get(key); ok {
 		total, key, _ := b.find(idx)
@@ -167,19 +161,13 @@ func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
 			b.unused += uint64(total)
 
 		} else {
-			// add conflicts
-			//b.conflicts.Put(string(kstr), &item{
-			//	val: slices.Clone(val),
-			//	ttl: uint32(convTTL(ts)),
-			//})
-			//return
+			if b.options.OnHashConflict != nil {
+				// key is origin string, kstr is conflict key.
+				b.options.OnHashConflict(key, kstr)
+			}
+			return
 		}
 	}
-
-	// delete conflicts.
-	//if b.conflicts.Len() > 0 {
-	//	b.conflicts.Delete(string(kstr))
-	//}
 
 	// set index.
 	b.index.Put(key, newIdx(len(b.data), ts))
@@ -314,9 +302,9 @@ func (c *GigaCache) Migrate(numCPU ...int) {
 	}
 }
 
-// OnRemove called when a key-value pair is evicted.
+// Callback is the callback function.
 // DO NOT EDIT the input params.
-type OnRemove func(key, val []byte)
+type Callback func(key, val []byte)
 
 // eliminate the expired key-value pairs.
 func (b *bucket) eliminate() {
@@ -382,13 +370,12 @@ func (b *bucket) migrate() {
 
 // Stat is the runtime statistics of GigaCache.
 type Stat struct {
-	Len       int
-	Conflicts int
-	Alloc     uint64
-	Unused    uint64
-	Migrates  uint64
-	Evict     uint64
-	Probe     uint64
+	Len      int
+	Alloc    uint64
+	Unused   uint64
+	Migrates uint64
+	Evict    uint64
+	Probe    uint64
 }
 
 // Stat return the runtime statistics of GigaCache.
@@ -396,7 +383,6 @@ func (c *GigaCache) Stat() (s Stat) {
 	for _, b := range c.buckets {
 		b.RLock()
 		s.Len += b.index.Len()
-		s.Conflicts += b.conflicts.Len()
 		s.Alloc += uint64(len(b.data))
 		s.Unused += b.unused
 		s.Migrates += b.migrates

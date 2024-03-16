@@ -239,6 +239,32 @@ func TestDisableEvict(t *testing.T) {
 	assert.Equal(stat.Probe, uint64(0))
 }
 
+// hashTest is only for test.
+func hashTest(str string) uint64 {
+	return 1
+}
+
+func TestHashConflict(t *testing.T) {
+	assert := assert.New(t)
+	opt := DefaultOptions
+	opt.ShardCount = 1
+	opt.OnHashConflict = func(key, val []byte) {
+		assert.NotEqual(key, val)
+	}
+	opt.HashFn = hashTest
+	m := New(opt)
+
+	for i := 0; i < 100; i++ {
+		k, v := genKV(i)
+		m.Set(k, v)
+	}
+
+	// max key size
+	assert.Panics(func() {
+		m.Set(string(make([]byte, 1025)), []byte("hello"))
+	})
+}
+
 func FuzzSet(f *testing.F) {
 	const num = 1000 * 10000
 	m := New(getOptions(num, 1))

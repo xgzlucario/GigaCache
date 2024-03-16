@@ -59,8 +59,3 @@ func MemHash(str string) uint64 {
 	ss := (*stringStruct)(unsafe.Pointer(&str))
 	return uint64(memhash(ss.str, 0, uintptr(ss.len)))
 }
-
-// HashTest is only for test.
-func HashTest(str string) uint64 {
-	return 1
-}

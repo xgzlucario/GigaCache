@@ -25,11 +25,15 @@ type Options struct {
 	MigrateRatio float64
 	MigrateDelta uint64
 
+	HashFn HashFn
+
 	// OnRemove called when key-value pair is evicted.
-	OnRemove OnRemove
+	OnRemove Callback
+
+	// OnHashConflict called when hash conflict occurred.
+	OnHashConflict Callback
 }
 
-// DefaultOptions
 var DefaultOptions = Options{
 	ShardCount:    1024,
 	IndexSize:     1024,
@@ -38,6 +42,7 @@ var DefaultOptions = Options{
 	DisableEvict:  false,
 	MigrateRatio:  0.4,
 	MigrateDelta:  4 * 1024, // 4 * KB
+	HashFn:        MemHash,
 }
 
 func checkOptions(options Options) error {

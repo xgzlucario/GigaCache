@@ -113,20 +113,6 @@ func BenchmarkRemove(b *testing.B) {
 	})
 }
 
-func BenchmarkStat(b *testing.B) {
-	b.Run("GigaCache", func(b *testing.B) {
-		m := New(DefaultOptions)
-		for i := 0; i < num; i++ {
-			m.Set(strconv.Itoa(i), str)
-		}
-		b.ResetTimer()
-
-		for i := 0; i < b.N; i++ {
-			m.Stat()
-		}
-	})
-}
-
 func BenchmarkMigrate(b *testing.B) {
 	b.Run("GigaCache", func(b *testing.B) {
 		m := New(DefaultOptions)
