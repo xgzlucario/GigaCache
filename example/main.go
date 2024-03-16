@@ -88,12 +88,12 @@ func benchmark(options cache.Options) {
 	// Stat
 	stat := bc.Stat()
 
-	fmt.Printf("[Cache] %.0fs | %dw | len: %dw | alloc: %v / %v (%.1f%%)\n",
+	fmt.Printf("[Cache] %.0fs | %dw | len: %dw | alloc: %v (unused: %.1f%%)\n",
 		time.Since(start).Seconds(),
 		count/1e4,
 		stat.Len/1e4,
-		formatSize(stat.Inused), formatSize(stat.Alloc),
-		stat.ExpRate(),
+		formatSize(stat.Alloc),
+		stat.UnusedRate(),
 	)
 	fmt.Printf("[Evict] probe: %vw / %vw (%.1f%%) | mgr: %d\n",
 		stat.Evict/1e5, stat.Probe/1e5, stat.EvictRate(),

@@ -3,6 +3,7 @@ package cache
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/cockroachdb/swiss"
 	"runtime"
 	"slices"
 	"sync"
@@ -33,18 +34,23 @@ type bucket struct {
 	bpool   *BufferPool
 
 	// index is the index map for cache, mapped hash(kstr) to the position that data real stored.
-	index map[Key]Idx
+	index     *swiss.Map[Key, Idx]
+	conflicts *swiss.Map[string, *item]
 
 	// data store all key-value bytes data.
 	data []byte
 
 	// runtime stats.
 	interval int
-	alloc    uint64
-	inused   uint64
+	unused   uint64
 	migrates uint64
 	evict    uint64
 	probe    uint64
+}
+
+type item struct {
+	val []byte
+	ttl uint32
 }
 
 // New returns new GigaCache instance.
@@ -63,10 +69,11 @@ func New(options Options) *GigaCache {
 	// init buckets.
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket{
-			options: &options,
-			bpool:   bpool,
-			index:   make(map[Key]Idx, options.IndexSize),
-			data:    bpool.Get(options.BufferSize)[:0],
+			options:   &options,
+			bpool:     bpool,
+			index:     swiss.New[Key, Idx](options.IndexSize),
+			conflicts: swiss.New[string, *item](8),
+			data:      bpool.Get(options.BufferSize)[:0],
 		}
 	}
 	return cache
@@ -75,7 +82,7 @@ func New(options Options) *GigaCache {
 // getShard returns the bucket and the real key by hash(kstr).
 // sharding and index use different hash function, can reduce the hash conflicts greatly.
 func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
-	hash := memHashString(kstr)
+	hash := MemHash(kstr)
 	hash32 := uint32(hash >> 32)
 	return c.buckets[hash32&c.mask], newKey(hash)
 }
@@ -98,6 +105,18 @@ func (b *bucket) find(idx Idx) (total int, kstr, val []byte) {
 	return index - idx.start(), kstr, val
 }
 
+func (b *bucket) findVal(idx Idx) (total int, val []byte) {
+	var index = idx.start()
+	// vlen
+	vlen, n := binary.Uvarint(b.data[index:])
+	index += n
+	// val
+	val = b.data[index : index+int(vlen)]
+	index += int(vlen)
+
+	return index - idx.start(), val
+}
+
 func (b *bucket) findEntry(idx Idx) (entry []byte) {
 	var index = idx.start()
 	// klen
@@ -116,7 +135,7 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 	b, key := c.getShard(kstr)
 	b.RLock()
 	// find index map.
-	idx, ok := b.index[key]
+	idx, ok := b.index.Get(key)
 	if !ok || idx.expired() {
 		b.RUnlock()
 		return nil, 0, false
@@ -140,30 +159,36 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 //
 // set stores key-value pair into bucket.
 func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
-	// check key if already exists.
-	if idx, ok := b.index[key]; ok {
+	// check key exist in index.
+	if idx, ok := b.index.Get(key); ok {
 		total, key, _ := b.find(idx)
+		// same as index
 		if bytes.Equal(key, kstr) {
-			// update stat.
-			b.alloc -= uint64(total)
-			b.inused -= uint64(total)
+			b.unused += uint64(total)
+
+		} else {
+			// add conflicts
+			//b.conflicts.Put(string(kstr), &item{
+			//	val: slices.Clone(val),
+			//	ttl: uint32(convTTL(ts)),
+			//})
+			//return
 		}
 	}
 
+	// delete conflicts.
+	//if b.conflicts.Len() > 0 {
+	//	b.conflicts.Delete(string(kstr))
+	//}
+
 	// set index.
-	b.index[key] = newIdx(len(b.data), ts)
-	before := len(b.data)
+	b.index.Put(key, newIdx(len(b.data), ts))
 
 	// append klen, vlen, key, val.
 	b.data = binary.AppendUvarint(b.data, uint64(len(kstr)))
 	b.data = binary.AppendUvarint(b.data, uint64(len(val)))
 	b.data = append(b.data, kstr...)
 	b.data = append(b.data, val...)
-
-	// update stat.
-	alloc := len(b.data) - before
-	b.alloc += uint64(alloc)
-	b.inused += uint64(alloc)
 }
 
 // SetTx store key-value pair with deadline.
@@ -192,7 +217,7 @@ func (c *GigaCache) Remove(kstr string) bool {
 	b.eliminate()
 
 	// find index map.
-	idx, ok := b.index[key]
+	idx, ok := b.index.Get(key)
 	if !ok || idx.expired() {
 		b.Unlock()
 		return false
@@ -206,47 +231,46 @@ func (b *bucket) remove(key Key, idx Idx) {
 	if b.options.OnRemove != nil {
 		total, kstr, val := b.find(idx)
 		b.options.OnRemove(kstr, val)
-		b.inused -= uint64(total)
+		b.unused += uint64(total)
 
 	} else {
 		entry := b.findEntry(idx)
-		b.inused -= uint64(len(entry))
+		b.unused += uint64(len(entry))
 	}
-	delete(b.index, key)
+	b.index.Delete(key)
 }
 
-// SetTTL
+// SetTTL set ttl for key.
 func (c *GigaCache) SetTTL(kstr string, ts int64) bool {
 	b, key := c.getShard(kstr)
 	b.Lock()
 	b.eliminate()
 
 	// find index map.
-	idx, ok := b.index[key]
+	idx, ok := b.index.Get(key)
 	if !ok || idx.expired() {
 		b.Unlock()
 		return false
 	}
 	// update index.
-	b.index[key] = newIdx(idx.start(), ts)
+	b.index.Put(key, newIdx(idx.start(), ts))
 	b.Unlock()
 	return true
 }
 
 // Walker is the callback function for iterator.
-type Walker func(key, val []byte, ttl int64) (stop bool)
+type Walker func(key, val []byte, ttl int64) (next bool)
 
-func (b *bucket) scan(f Walker) (stop bool) {
-	for _, idx := range b.index {
+func (b *bucket) scan(f Walker) (next bool) {
+	b.index.All(func(_ Key, idx Idx) bool {
 		if idx.expired() {
-			continue
-		}
-		_, kstr, val := b.find(idx)
-		if f(kstr, val, idx.TTL()) {
 			return true
 		}
-	}
-	return false
+		_, kstr, val := b.find(idx)
+		next = f(kstr, val, idx.TTL())
+		return next
+	})
+	return
 }
 
 // Scan walk all alive key-value pairs.
@@ -254,9 +278,9 @@ func (b *bucket) scan(f Walker) (stop bool) {
 func (c *GigaCache) Scan(f Walker) {
 	for _, b := range c.buckets {
 		b.RLock()
-		stop := b.scan(f)
+		next := b.scan(f)
 		b.RUnlock()
-		if stop {
+		if !next {
 			return
 		}
 	}
@@ -277,16 +301,16 @@ func (c *GigaCache) Migrate(numCPU ...int) {
 		}
 
 	} else {
-		pool := pool.New().WithMaxGoroutines(cpu)
+		p := pool.New().WithMaxGoroutines(cpu)
 		for _, b := range c.buckets {
 			b := b
-			pool.Go(func() {
+			p.Go(func() {
 				b.Lock()
 				b.migrate()
 				b.Unlock()
 			})
 		}
-		pool.Wait()
+		p.Wait()
 	}
 }
 
@@ -306,33 +330,30 @@ func (b *bucket) eliminate() {
 		return
 	}
 	b.interval = 0
-	var failed int
 
+	var failed int
 	// probing
-	for key, idx := range b.index {
+	b.index.All(func(key Key, idx Idx) bool {
 		b.probe++
 		if idx.expired() {
 			b.remove(key, idx)
 			b.evict++
 			failed = 0
-			continue
+			return true
 		}
+
 		failed++
-		if failed >= maxFailCount {
-			break
-		}
-	}
+		return failed <= maxFailCount
+	})
 
 	b.migrate()
 }
 
 // migrate move valid key-value pairs to the new container to save memory.
 func (b *bucket) migrate() {
-	// check if need to migrate.
-	rate := float64(b.inused) / float64(b.alloc)
-	delta := b.alloc - b.inused
-	if delta >= b.options.MigrateDelta &&
-		rate <= b.options.MigrateThresRatio {
+	// check need to migrate.
+	rate := float64(b.unused) / float64(len(b.data))
+	if b.unused >= b.options.MigrateDelta && rate >= b.options.MigrateRatio {
 	} else {
 		return
 	}
@@ -340,45 +361,44 @@ func (b *bucket) migrate() {
 	// create new data.
 	newData := b.bpool.Get(len(b.data))[:0]
 
-	// migrate datas to new bucket.
-	for key, idx := range b.index {
+	// migrate data to new bucket.
+	b.index.All(func(key Key, idx Idx) bool {
 		if idx.expired() {
-			delete(b.index, key)
-			continue
+			b.index.Delete(key)
+			return true
 		}
 		entry := b.findEntry(idx)
 		// update with new position.
-		b.index[key] = newIdx(len(newData), idx.TTL())
+		b.index.Put(key, newIdx(len(newData), idx.TTL()))
 		newData = append(newData, entry...)
-	}
+		return true
+	})
 
-	// reuse buffer.
 	b.bpool.Put(b.data)
-
-	// replace old data.
 	b.data = newData
-	b.alloc = uint64(len(b.data))
-	b.inused = uint64(len(b.data))
+	b.unused = 0
 	b.migrates++
 }
 
-// CacheStat is the runtime statistics of Gigacache.
-type CacheStat struct {
-	Len      uint64
-	Alloc    uint64
-	Inused   uint64
-	Migrates uint64
-	Evict    uint64
-	Probe    uint64
+// Stat is the runtime statistics of GigaCache.
+type Stat struct {
+	Len       int
+	Conflicts int
+	Alloc     uint64
+	Unused    uint64
+	Migrates  uint64
+	Evict     uint64
+	Probe     uint64
 }
 
-// Stat return the runtime statistics of Gigacache.
-func (c *GigaCache) Stat() (s CacheStat) {
+// Stat return the runtime statistics of GigaCache.
+func (c *GigaCache) Stat() (s Stat) {
 	for _, b := range c.buckets {
 		b.RLock()
-		s.Len += uint64(len(b.index))
-		s.Alloc += b.alloc
-		s.Inused += b.inused
+		s.Len += b.index.Len()
+		s.Conflicts += b.conflicts.Len()
+		s.Alloc += uint64(len(b.data))
+		s.Unused += b.unused
 		s.Migrates += b.migrates
 		s.Evict += b.evict
 		s.Probe += b.probe
@@ -387,17 +407,14 @@ func (c *GigaCache) Stat() (s CacheStat) {
 	return
 }
 
-// ExpRate
-func (s CacheStat) ExpRate() float64 {
-	return float64(s.Inused) / float64(s.Alloc) * 100
+func (s Stat) UnusedRate() float64 {
+	return float64(s.Unused) / float64(s.Alloc) * 100
 }
 
-// EvictRate
-func (s CacheStat) EvictRate() float64 {
+func (s Stat) EvictRate() float64 {
 	return float64(s.Evict) / float64(s.Probe) * 100
 }
 
-// s2b is string convert to bytes unsafe.
 func s2b(str *string) []byte {
 	strHeader := (*[2]uintptr)(unsafe.Pointer(str))
 	byteSliceHeader := [3]uintptr{

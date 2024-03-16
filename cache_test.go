@@ -19,7 +19,7 @@ func getOptions(num, interval int) Options {
 	opt := DefaultOptions
 	opt.ShardCount = 1
 	opt.EvictInterval = interval
-	opt.IndexSize = uint32(num)
+	opt.IndexSize = num
 	opt.BufferSize = num * 16 * 2
 	return opt
 }
@@ -43,7 +43,7 @@ func checkValidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 		}
 		assert.Equal(key, val)
 		count++
-		return false
+		return true
 	})
 	assert.Equal(count, end-start)
 
@@ -51,7 +51,7 @@ func checkValidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 	count = 0
 	m.Scan(func(key, val []byte, i int64) bool {
 		count++
-		return count >= (end-start)/2
+		return count < (end-start)/2
 	})
 	assert.Equal(count, (end-start)/2)
 }
@@ -80,7 +80,7 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 			assert.Fail("invalid data")
 		}
 		assert.Equal(key, val)
-		return false
+		return true
 	})
 }
 
@@ -180,21 +180,21 @@ func TestEvict(t *testing.T) {
 
 	// stat
 	stat := m.Stat()
-	assert.Equal(stat.Len, uint64(num))
+	assert.Equal(stat.Len, num)
 	assert.Equal(stat.Alloc, uint64(stat.Len*(16+2)))
-	assert.Equal(stat.Inused, uint64(stat.Len*(16+2)))
+	assert.Equal(stat.Unused, uint64(0))
 	assert.Equal(stat.Evict, uint64(0))
 	assert.Greater(stat.Probe, uint64(0))
 	assert.Equal(stat.EvictRate(), float64(0))
-	assert.Equal(stat.ExpRate(), float64(100))
+	assert.Equal(stat.UnusedRate(), float64(0))
 
 	// trig evict.
 	m.Set("trig1234", []byte("trig1234"))
 
 	stat = m.Stat()
-	assert.Equal(stat.Len, uint64(num-stat.Evict+1))
+	assert.Equal(stat.Len, int(num-stat.Evict+1))
 	assert.Equal(stat.Alloc, uint64(16+2))
-	assert.Equal(stat.Inused, uint64(16+2))
+	assert.Equal(stat.Unused, uint64(0))
 	assert.Equal(stat.Migrates, uint64(1))
 }
 
@@ -204,7 +204,7 @@ func TestDisableEvict(t *testing.T) {
 	opt := DefaultOptions
 	opt.ShardCount = 1
 	opt.DisableEvict = true
-	opt.IndexSize = uint32(num)
+	opt.IndexSize = num
 
 	m := New(opt)
 
@@ -216,9 +216,9 @@ func TestDisableEvict(t *testing.T) {
 
 	// stat
 	stat := m.Stat()
-	assert.Equal(stat.Len, uint64(num))
+	assert.Equal(stat.Len, num)
 	assert.Equal(stat.Alloc, uint64(stat.Len*(16+2)))
-	assert.Equal(stat.Inused, uint64(stat.Len*(16+2)))
+	assert.Equal(stat.Unused, uint64(0))
 	assert.Equal(stat.Migrates, uint64(0))
 	assert.Equal(stat.Evict, uint64(0))
 	assert.Equal(stat.Probe, uint64(0))
@@ -231,9 +231,9 @@ func TestDisableEvict(t *testing.T) {
 	m.Set("trig1234", []byte("trig1234"))
 
 	stat = m.Stat()
-	assert.Equal(stat.Len, uint64(num+1))
-	assert.Equal(stat.Alloc, uint64((num+1)*(16+2)))
-	assert.Equal(stat.Inused, uint64((num+1)*(16+2)))
+	assert.Equal(stat.Len, num+1)
+	assert.Equal(stat.Alloc, uint64((num+1+num/5)*(16+2)))
+	assert.Equal(stat.Unused, uint64(num/5*(16+2)))
 	assert.Equal(stat.Migrates, uint64(0))
 	assert.Equal(stat.Evict, uint64(0))
 	assert.Equal(stat.Probe, uint64(0))
