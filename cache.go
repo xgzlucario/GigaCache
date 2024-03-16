@@ -50,11 +50,6 @@ type bucket struct {
 	probe    uint64
 }
 
-type item struct {
-	val []byte
-	ttl uint32
-}
-
 // New returns new GigaCache instance.
 func New(options Options) *GigaCache {
 	if err := checkOptions(options); err != nil {
