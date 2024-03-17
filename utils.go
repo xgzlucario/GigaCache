@@ -7,15 +7,16 @@ import (
 )
 
 var (
-	// now unixnano time
+	// now nano time
 	nanosec atomic.Int64
 	sec     atomic.Uint32
 )
 
-// FastRand is a fast thread local random function.
-//
 //go:linkname FastRand runtime.fastrand
 func FastRand() uint32
+
+//go:linkname FastRand64 runtime.fastrand64
+func FastRand64() uint64
 
 type stringStruct struct {
 	str unsafe.Pointer
@@ -25,14 +26,6 @@ type stringStruct struct {
 //go:noescape
 //go:linkname memhash runtime.memhash
 func memhash(p unsafe.Pointer, h, s uintptr) uintptr
-
-// memHashString is the hash function used by go map, it utilizes available hardware instructions
-// (behaves as aeshash if aes instruction is available).
-// NOTE: The hash seed changes for every process. So, this cannot be used as a persistent hash.
-func memHashString(str string) uint64 {
-	ss := (*stringStruct)(unsafe.Pointer(&str))
-	return uint64(memhash(ss.str, 0, uintptr(ss.len)))
-}
 
 func init() {
 	now := time.Now()
@@ -48,7 +41,7 @@ func init() {
 	}()
 }
 
-// GetNanoSec returns the current unixnano time.
+// GetNanoSec returns the current nano time.
 func GetNanoSec() int64 {
 	return nanosec.Load()
 }
@@ -56,4 +49,14 @@ func GetNanoSec() int64 {
 // GetSec returns the current unix time.
 func GetSec() uint32 {
 	return sec.Load()
+}
+
+type HashFn func(string) uint64
+
+// MemHash is the hash function used by go map, it utilizes available hardware instructions
+// (behaves as aes hash if aes instruction is available).
+// NOTE: The hash seed changes for every process. So, this cannot be used as a persistent hash.
+func MemHash(str string) uint64 {
+	ss := (*stringStruct)(unsafe.Pointer(&str))
+	return uint64(memhash(ss.str, 0, uintptr(ss.len)))
 }

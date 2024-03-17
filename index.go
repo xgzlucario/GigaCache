@@ -43,15 +43,19 @@ func (i Idx) TTL() int64 {
 	return int64(uint64(i&ttlMask) * timeCarry)
 }
 
-func newIdx(start int, ttl int64) Idx {
-	if start > math.MaxUint32 {
-		panic("start overflows the limit of uint32")
-	}
+func convTTL(ttl int64) uint64 {
 	if ttl < 0 {
 		panic("ttl is negetive")
 	}
 	if ttl/timeCarry > math.MaxUint32 {
 		panic("ttl overflows the limit of uint32")
 	}
-	return Idx(uint64(start)<<32 | uint64(ttl)/timeCarry)
+	return uint64(ttl) / timeCarry
+}
+
+func newIdx(start int, ttl int64) Idx {
+	if start > math.MaxUint32 {
+		panic("start overflows the limit of uint32")
+	}
+	return Idx(uint64(start)<<32 | convTTL(ttl))
 }

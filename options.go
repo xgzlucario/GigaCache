@@ -8,7 +8,7 @@ type Options struct {
 	ShardCount uint32
 
 	// Default size of the bucket initial.
-	IndexSize  uint32
+	IndexSize  int
 	BufferSize int
 
 	// EvictInterval indicates the frequency of execution of the eliminate algorithm.
@@ -22,22 +22,28 @@ type Options struct {
 	DisableEvict bool
 
 	// Migrate threshold for a bucket to trigger a migration.
-	MigrateThresRatio float64
-	MigrateDelta      uint64
+	MigrateRatio float64
+	MigrateDelta uint64
+
+	// HashFn is custom hash function, default is runtime.memhash.
+	HashFn HashFn
 
 	// OnRemove called when key-value pair is evicted.
-	OnRemove OnRemove
+	OnRemove Callback
+
+	// OnHashConflict called when hash conflict occurred.
+	OnHashConflict Callback
 }
 
-// DefaultOptions
 var DefaultOptions = Options{
-	ShardCount:        1024,
-	IndexSize:         1024,
-	BufferSize:        64 * 1024, // 64 KB
-	EvictInterval:     3,
-	DisableEvict:      false,
-	MigrateThresRatio: 0.6,
-	MigrateDelta:      4 * 1024, // 4 * KB
+	ShardCount:    1024,
+	IndexSize:     1024,
+	BufferSize:    64 * KB,
+	EvictInterval: 3,
+	DisableEvict:  false,
+	MigrateRatio:  0.4,
+	MigrateDelta:  4 * KB,
+	HashFn:        MemHash,
 }
 
 func checkOptions(options Options) error {

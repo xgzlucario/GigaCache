@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"bytes"
 	"fmt"
 	"runtime"
 	"testing"
@@ -19,7 +18,7 @@ func getOptions(num, interval int) Options {
 	opt := DefaultOptions
 	opt.ShardCount = 1
 	opt.EvictInterval = interval
-	opt.IndexSize = uint32(num)
+	opt.IndexSize = num
 	opt.BufferSize = num * 16 * 2
 	return opt
 }
@@ -43,7 +42,7 @@ func checkValidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 		}
 		assert.Equal(key, val)
 		count++
-		return false
+		return true
 	})
 	assert.Equal(count, end-start)
 
@@ -51,7 +50,7 @@ func checkValidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 	count = 0
 	m.Scan(func(key, val []byte, i int64) bool {
 		count++
-		return count >= (end-start)/2
+		return count < (end-start)/2
 	})
 	assert.Equal(count, (end-start)/2)
 }
@@ -80,7 +79,7 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 			assert.Fail("invalid data")
 		}
 		assert.Equal(key, val)
-		return false
+		return true
 	})
 }
 
@@ -180,21 +179,21 @@ func TestEvict(t *testing.T) {
 
 	// stat
 	stat := m.Stat()
-	assert.Equal(stat.Len, uint64(num))
+	assert.Equal(stat.Len, num)
 	assert.Equal(stat.Alloc, uint64(stat.Len*(16+2)))
-	assert.Equal(stat.Inused, uint64(stat.Len*(16+2)))
+	assert.Equal(stat.Unused, uint64(0))
 	assert.Equal(stat.Evict, uint64(0))
 	assert.Greater(stat.Probe, uint64(0))
 	assert.Equal(stat.EvictRate(), float64(0))
-	assert.Equal(stat.ExpRate(), float64(100))
+	assert.Equal(stat.UnusedRate(), float64(0))
 
 	// trig evict.
 	m.Set("trig1234", []byte("trig1234"))
 
 	stat = m.Stat()
-	assert.Equal(stat.Len, uint64(num-stat.Evict+1))
+	assert.Equal(stat.Len, int(num-stat.Evict+1))
 	assert.Equal(stat.Alloc, uint64(16+2))
-	assert.Equal(stat.Inused, uint64(16+2))
+	assert.Equal(stat.Unused, uint64(0))
 	assert.Equal(stat.Migrates, uint64(1))
 }
 
@@ -204,7 +203,7 @@ func TestDisableEvict(t *testing.T) {
 	opt := DefaultOptions
 	opt.ShardCount = 1
 	opt.DisableEvict = true
-	opt.IndexSize = uint32(num)
+	opt.IndexSize = num
 
 	m := New(opt)
 
@@ -216,9 +215,9 @@ func TestDisableEvict(t *testing.T) {
 
 	// stat
 	stat := m.Stat()
-	assert.Equal(stat.Len, uint64(num))
+	assert.Equal(stat.Len, num)
 	assert.Equal(stat.Alloc, uint64(stat.Len*(16+2)))
-	assert.Equal(stat.Inused, uint64(stat.Len*(16+2)))
+	assert.Equal(stat.Unused, uint64(0))
 	assert.Equal(stat.Migrates, uint64(0))
 	assert.Equal(stat.Evict, uint64(0))
 	assert.Equal(stat.Probe, uint64(0))
@@ -231,63 +230,36 @@ func TestDisableEvict(t *testing.T) {
 	m.Set("trig1234", []byte("trig1234"))
 
 	stat = m.Stat()
-	assert.Equal(stat.Len, uint64(num+1))
-	assert.Equal(stat.Alloc, uint64((num+1)*(16+2)))
-	assert.Equal(stat.Inused, uint64((num+1)*(16+2)))
+	assert.Equal(stat.Len, num+1)
+	assert.Equal(stat.Alloc, uint64((num+1+num/5)*(16+2)))
+	assert.Equal(stat.Unused, uint64(num/5*(16+2)))
 	assert.Equal(stat.Migrates, uint64(0))
 	assert.Equal(stat.Evict, uint64(0))
 	assert.Equal(stat.Probe, uint64(0))
 }
 
-func FuzzSet(f *testing.F) {
-	const num = 1000 * 10000
-	m := New(getOptions(num, 1))
+// hashTest is only for test.
+func hashTest(str string) uint64 {
+	return 1
+}
 
-	f.Fuzz(func(t *testing.T, k string, v []byte, u64ts uint64) {
-		sec := GetNanoSec()
-		ts := int64(u64ts)
+func TestHashConflict(t *testing.T) {
+	assert := assert.New(t)
+	opt := DefaultOptions
+	opt.ShardCount = 1
+	opt.OnHashConflict = func(key, val []byte) {
+		assert.NotEqual(key, val)
+	}
+	opt.HashFn = hashTest
+	m := New(opt)
 
-		// set
-		m.SetTx(k, v, ts)
-		// get
-		val, ts, ok := m.Get(k)
+	for i := 0; i < 100; i++ {
+		k, v := genKV(i)
+		m.Set(k, v)
+	}
 
-		switch {
-		// no ttl
-		case ts == 0:
-			if !ok {
-				t.Error("no ttl, but not found")
-			}
-			if !bytes.Equal(v, val) {
-				t.Error("no ttl, but not equal")
-			}
-			if ts != 0 {
-				t.Error("no ttl, but ts is not 0")
-			}
-
-		// expired
-		case ts < sec:
-			if ok {
-				t.Error("expired, but found")
-			}
-			if ts != 0 {
-				t.Error("expired, but ts is not 0")
-			}
-			if val != nil {
-				t.Error("expired, but val is not nil")
-			}
-
-		// not expired
-		case ts > sec:
-			if !ok {
-				t.Error("not expired, but not found")
-			}
-			if !bytes.Equal(v, val) {
-				t.Error("not expired, but not equal")
-			}
-			if ts != (ts/timeCarry)*timeCarry {
-				t.Error("not expired, ttl")
-			}
-		}
+	// max key size
+	assert.Panics(func() {
+		m.Set(string(make([]byte, maxKeySize+1)), []byte("hello"))
 	})
 }
