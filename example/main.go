@@ -67,7 +67,7 @@ func benchmark(options cache.Options) {
 	start := time.Now()
 	var now time.Time
 	for j := 0; ; j++ {
-		k := strconv.FormatUint(uint64(cache.FastRand()), 10)
+		k := strconv.FormatUint(cache.FastRand64(), 36)
 
 		if j%10 == 0 {
 			now = time.Now()

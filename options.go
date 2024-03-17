@@ -25,6 +25,7 @@ type Options struct {
 	MigrateRatio float64
 	MigrateDelta uint64
 
+	// HashFn is custom hash function, default is runtime.memhash.
 	HashFn HashFn
 
 	// OnRemove called when key-value pair is evicted.

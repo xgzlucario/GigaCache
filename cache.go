@@ -16,7 +16,7 @@ import (
 const (
 	noTTL = 0
 
-	maxKeySize = 1024
+	maxKeySize = 4096
 
 	// maxFailCount indicates that the evict algorithm break
 	// when consecutive unexpired key-value pairs are detected.

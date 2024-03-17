@@ -12,10 +12,11 @@ var (
 	sec     atomic.Uint32
 )
 
-// FastRand is a fast thread local random function.
-//
 //go:linkname FastRand runtime.fastrand
 func FastRand() uint32
+
+//go:linkname FastRand64 runtime.fastrand64
+func FastRand64() uint64
 
 type stringStruct struct {
 	str unsafe.Pointer

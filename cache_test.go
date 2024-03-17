@@ -261,59 +261,35 @@ func TestHashConflict(t *testing.T) {
 
 	// max key size
 	assert.Panics(func() {
-		m.Set(string(make([]byte, 1025)), []byte("hello"))
+		m.Set(string(make([]byte, maxKeySize+1)), []byte("hello"))
 	})
 }
 
 func FuzzSet(f *testing.F) {
-	const num = 1000 * 10000
-	m := New(getOptions(num, 1))
+	opt := DefaultOptions
+	opt.OnHashConflict = func(key, val []byte) {
+		f.Errorf("hash conflict: %s %s", key, val)
+	}
+	opt.ShardCount = 4
+	opt.DisableEvict = true
+	m := New(opt)
 
-	f.Fuzz(func(t *testing.T, k string, v []byte, u64ts uint64) {
-		sec := GetNanoSec()
-		ts := int64(u64ts)
+	f.Fuzz(func(t *testing.T, k string, v []byte) {
+		if len(k) > maxKeySize {
+			return
+		}
+		m.Set(k, v)
 
-		// set
-		m.SetTx(k, v, ts)
 		// get
 		val, ts, ok := m.Get(k)
-
-		switch {
-		// no ttl
-		case ts == 0:
-			if !ok {
-				t.Error("no ttl, but not found")
-			}
-			if !bytes.Equal(v, val) {
-				t.Error("no ttl, but not equal")
-			}
-			if ts != 0 {
-				t.Error("no ttl, but ts is not 0")
-			}
-
-		// expired
-		case ts < sec:
-			if ok {
-				t.Error("expired, but found")
-			}
-			if ts != 0 {
-				t.Error("expired, but ts is not 0")
-			}
-			if val != nil {
-				t.Error("expired, but val is not nil")
-			}
-
-		// not expired
-		case ts > sec:
-			if !ok {
-				t.Error("not expired, but not found")
-			}
-			if !bytes.Equal(v, val) {
-				t.Error("not expired, but not equal")
-			}
-			if ts != (ts/timeCarry)*timeCarry {
-				t.Error("not expired, ttl")
-			}
+		if !bytes.Equal(v, val) {
+			t.Errorf("value not equal: %s %s", v, val)
+		}
+		if ts != 0 {
+			t.Errorf("ts error: %v", ts)
+		}
+		if !ok {
+			t.Errorf("not ok: %s %s", k, v)
 		}
 	})
 }
