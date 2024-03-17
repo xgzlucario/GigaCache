@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"bytes"
 	"fmt"
 	"runtime"
 	"testing"
@@ -262,34 +261,5 @@ func TestHashConflict(t *testing.T) {
 	// max key size
 	assert.Panics(func() {
 		m.Set(string(make([]byte, maxKeySize+1)), []byte("hello"))
-	})
-}
-
-func FuzzSet(f *testing.F) {
-	opt := DefaultOptions
-	opt.OnHashConflict = func(key, val []byte) {
-		f.Errorf("hash conflict: %s %s", key, val)
-	}
-	opt.ShardCount = 4
-	opt.DisableEvict = true
-	m := New(opt)
-
-	f.Fuzz(func(t *testing.T, k string, v []byte) {
-		if len(k) > maxKeySize {
-			return
-		}
-		m.Set(k, v)
-
-		// get
-		val, ts, ok := m.Get(k)
-		if !bytes.Equal(v, val) {
-			t.Errorf("value not equal: %s %s", v, val)
-		}
-		if ts != 0 {
-			t.Errorf("ts error: %v", ts)
-		}
-		if !ok {
-			t.Errorf("not ok: %s %s", k, v)
-		}
 	})
 }

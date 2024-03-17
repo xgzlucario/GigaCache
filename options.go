@@ -38,11 +38,11 @@ type Options struct {
 var DefaultOptions = Options{
 	ShardCount:    1024,
 	IndexSize:     1024,
-	BufferSize:    64 * 1024, // 64 KB
+	BufferSize:    64 * KB,
 	EvictInterval: 3,
 	DisableEvict:  false,
 	MigrateRatio:  0.4,
-	MigrateDelta:  4 * 1024, // 4 * KB
+	MigrateDelta:  4 * KB,
 	HashFn:        MemHash,
 }
 
