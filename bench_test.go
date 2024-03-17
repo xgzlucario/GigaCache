@@ -84,7 +84,7 @@ func BenchmarkScan(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			m.Scan(func(s []byte, b []byte, i int64) bool {
-				return false
+				return true
 			})
 		}
 	})
