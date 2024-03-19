@@ -3,12 +3,13 @@ package cache
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/cockroachdb/swiss"
 	"runtime"
 	"slices"
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/cockroachdb/swiss"
 
 	"github.com/sourcegraph/conc/pool"
 )
@@ -119,17 +120,17 @@ func (b *bucket) findEntry(idx Idx) (entry []byte) {
 func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 	b, key := c.getShard(kstr)
 	b.RLock()
+	defer b.RUnlock()
+
 	// find index map.
 	idx, ok := b.index.Get(key)
 	if !ok || idx.expired() {
-		b.RUnlock()
 		return nil, 0, false
 	}
+
 	// find data.
 	_, _, val := b.find(idx)
-	val = slices.Clone(val)
-	b.RUnlock()
-	return val, idx.TTL(), ok
+	return slices.Clone(val), idx.TTL(), ok
 }
 
 //	 map[Key]Idx ----+
@@ -151,13 +152,11 @@ func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
 	// check key exist in index.
 	if idx, ok := b.index.Get(key); ok {
 		total, key, _ := b.find(idx)
-		// same as index
-		if bytes.Equal(key, kstr) {
-			b.unused += uint64(total)
+		b.unused += uint64(total)
 
-		} else {
+		// unexpired and hash conflict.
+		if !idx.expired() && !bytes.Equal(key, kstr) {
 			if b.options.OnHashConflict != nil {
-				// key is origin string, kstr is conflict key.
 				b.options.OnHashConflict(key, kstr)
 			}
 			return
@@ -245,6 +244,7 @@ func (c *GigaCache) SetTTL(kstr string, ts int64) bool {
 type Walker func(key, val []byte, ttl int64) (next bool)
 
 func (b *bucket) scan(f Walker) (next bool) {
+	next = true
 	b.index.All(func(_ Key, idx Idx) bool {
 		if idx.expired() {
 			return true
