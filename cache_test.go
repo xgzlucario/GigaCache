@@ -263,3 +263,24 @@ func TestHashConflict(t *testing.T) {
 		m.Set(string(make([]byte, maxKeySize+1)), []byte("hello"))
 	})
 }
+
+func TestScanSmall(t *testing.T) {
+	assert := assert.New(t)
+	opt := DefaultOptions
+	opt.ShardCount = 1024
+	m := New(opt)
+
+	for i := 0; i < 100; i++ {
+		k, v := genKV(i)
+		m.Set(k, v)
+	}
+
+	var count int
+	m.Scan(func(key, val []byte, ttl int64) (next bool) {
+		assert.Equal(key, val)
+		assert.Equal(ttl, int64(0))
+		count++
+		return true
+	})
+	assert.Equal(count, 100)
+}
