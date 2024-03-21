@@ -11,10 +11,6 @@ import (
 
 type Key uint64
 
-func newKey(hash uint64) Key {
-	return Key(hash)
-}
-
 // Idx is the index of GigaCache.
 // +-----------------------+-------------------------+
 // |       start(32)       |       ttl(uint32)       |

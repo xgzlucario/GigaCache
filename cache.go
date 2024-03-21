@@ -15,9 +15,8 @@ import (
 )
 
 const (
-	noTTL      = 0
-	KB         = 1024
-	maxKeySize = 4 * KB
+	noTTL = 0
+	KB    = 1024
 
 	// maxFailCount indicates that the evict algorithm break
 	// when consecutive unexpired key-value pairs are detected.
@@ -38,7 +37,8 @@ type bucket struct {
 	bpool   *BufferPool
 
 	// index is the index map for cache, mapped hash(kstr) to the position that data real stored.
-	index *swiss.Map[Key, Idx]
+	index    *swiss.Map[Key, Idx]
+	conflict *cmap
 
 	// data store all key-value bytes data.
 	data []byte
@@ -68,10 +68,11 @@ func New(options Options) *GigaCache {
 	// init buckets.
 	for i := range cache.buckets {
 		cache.buckets[i] = &bucket{
-			options: &options,
-			bpool:   bpool,
-			index:   swiss.New[Key, Idx](options.IndexSize),
-			data:    bpool.Get(options.BufferSize)[:0],
+			options:  &options,
+			bpool:    bpool,
+			index:    swiss.New[Key, Idx](options.IndexSize),
+			conflict: newCMap(),
+			data:     bpool.Get(options.BufferSize)[:0],
 		}
 	}
 	return cache
@@ -82,7 +83,7 @@ func New(options Options) *GigaCache {
 func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
 	hash := c.hashFn(kstr)
 	hash32 := uint32(hash >> 1)
-	return c.buckets[hash32&c.mask], newKey(hash)
+	return c.buckets[hash32&c.mask], Key(hash)
 }
 
 func (b *bucket) find(idx Idx) (total int, kstr, val []byte) {
@@ -122,15 +123,21 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 	b.RLock()
 	defer b.RUnlock()
 
-	// find index map.
-	idx, ok := b.index.Get(key)
-	if !ok || idx.expired() {
-		return nil, 0, false
+	// find conflict map.
+	idx, ok := b.conflict.Get(kstr)
+	if ok && !idx.expired() {
+		_, _, val := b.find(idx)
+		return slices.Clone(val), idx.TTL(), ok
 	}
 
-	// find data.
-	_, _, val := b.find(idx)
-	return slices.Clone(val), idx.TTL(), ok
+	// find index map.
+	idx, ok = b.index.Get(key)
+	if ok && !idx.expired() {
+		_, _, val := b.find(idx)
+		return slices.Clone(val), idx.TTL(), ok
+	}
+
+	return nil, 0, false
 }
 
 //	 map[Key]Idx ----+
@@ -145,27 +152,31 @@ func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
 //
 // set stores key-value pair into bucket.
 func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
-	if len(kstr) > maxKeySize {
-		panic("key size is too large")
+	// check conflict map.
+	idx, ok := b.conflict.Get(b2s(kstr))
+	if ok {
+		total, _, _ := b.find(idx)
+		b.unused += uint64(total)
+		b.conflict.Put(b2s(kstr), newIdx(len(b.data), ts))
+		goto ADD
 	}
 
-	// check key exist in index.
-	if idx, ok := b.index.Get(key); ok {
-		total, key, _ := b.find(idx)
+	// check index map.
+	idx, ok = b.index.Get(key)
+	if ok {
+		total, oldKstr, _ := b.find(idx)
 		b.unused += uint64(total)
-
-		// unexpired and hash conflict.
-		if !idx.expired() && !bytes.Equal(key, kstr) {
-			if b.options.OnHashConflict != nil {
-				b.options.OnHashConflict(key, kstr)
-			}
-			return
+		// hash conflict
+		if !idx.expired() && !bytes.Equal(oldKstr, kstr) {
+			b.conflict.Put(string(kstr), newIdx(len(b.data), ts))
+			goto ADD
 		}
 	}
 
-	// set index.
+	// update index.
 	b.index.Put(key, newIdx(len(b.data), ts))
 
+ADD:
 	// append klen, vlen, key, val.
 	b.data = binary.AppendUvarint(b.data, uint64(len(kstr)))
 	b.data = binary.AppendUvarint(b.data, uint64(len(val)))
@@ -193,51 +204,56 @@ func (c *GigaCache) SetEx(kstr string, val []byte, dur time.Duration) {
 }
 
 // Remove removes the key-value pair by the key.
-func (c *GigaCache) Remove(kstr string) bool {
+func (c *GigaCache) Remove(kstr string) {
 	b, key := c.getShard(kstr)
 	b.Lock()
+	defer b.Unlock()
 	b.eliminate()
 
-	// find index map.
-	idx, ok := b.index.Get(key)
-	if !ok || idx.expired() {
-		b.Unlock()
-		return false
+	// find conflict map.
+	idx, ok := b.conflict.Get(kstr)
+	if ok {
+		b.conflict.Delete(kstr)
+		b.onremove(idx)
+		return
 	}
-	b.remove(key, idx)
-	b.Unlock()
-	return true
+
+	// find index map.
+	idx, ok = b.index.Get(key)
+	if ok {
+		b.index.Delete(key)
+		b.onremove(idx)
+		return
+	}
 }
 
-func (b *bucket) remove(key Key, idx Idx) {
-	if b.options.OnRemove != nil {
-		total, kstr, val := b.find(idx)
-		b.options.OnRemove(kstr, val)
-		b.unused += uint64(total)
-
-	} else {
-		entry := b.findEntry(idx)
-		b.unused += uint64(len(entry))
-	}
-	b.index.Delete(key)
+func (b *bucket) onremove(idx Idx) {
+	entry := b.findEntry(idx)
+	b.unused += uint64(len(entry))
 }
 
 // SetTTL set ttl for key.
 func (c *GigaCache) SetTTL(kstr string, ts int64) bool {
 	b, key := c.getShard(kstr)
 	b.Lock()
+	defer b.Unlock()
 	b.eliminate()
 
-	// find index map.
-	idx, ok := b.index.Get(key)
-	if !ok || idx.expired() {
-		b.Unlock()
-		return false
+	// find conflict map.
+	idx, ok := b.conflict.Get(kstr)
+	if ok && !idx.expired() {
+		b.conflict.Put(kstr, newIdx(idx.start(), ts))
+		return true
 	}
-	// update index.
-	b.index.Put(key, newIdx(idx.start(), ts))
-	b.Unlock()
-	return true
+
+	// find index map.
+	idx, ok = b.index.Get(key)
+	if ok && !idx.expired() {
+		b.index.Put(key, newIdx(idx.start(), ts))
+		return true
+	}
+
+	return false
 }
 
 // Walker is the callback function for iterator.
@@ -245,14 +261,23 @@ type Walker func(key, val []byte, ttl int64) (next bool)
 
 func (b *bucket) scan(f Walker) (next bool) {
 	next = true
-	b.index.All(func(_ Key, idx Idx) bool {
+	scanf := func(idx Idx) bool {
 		if idx.expired() {
 			return true
 		}
 		_, kstr, val := b.find(idx)
 		next = f(kstr, val, idx.TTL())
 		return next
+	}
+
+	b.conflict.All(func(_ string, idx Idx) bool {
+		return scanf(idx)
 	})
+	if next {
+		b.index.All(func(_ Key, idx Idx) bool {
+			return scanf(idx)
+		})
+	}
 	return
 }
 
@@ -314,17 +339,30 @@ func (b *bucket) eliminate() {
 	}
 	b.interval = 0
 
-	var failed int
 	// probing
-	b.index.All(func(key Key, idx Idx) bool {
+	var failed int
+	b.conflict.All(func(key string, idx Idx) bool {
 		b.probe++
 		if idx.expired() {
-			b.remove(key, idx)
+			b.conflict.Delete(key)
+			b.onremove(idx)
 			b.evict++
 			failed = 0
 			return true
 		}
+		failed++
+		return failed <= maxFailCount
+	})
 
+	b.index.All(func(key Key, idx Idx) bool {
+		b.probe++
+		if idx.expired() {
+			b.index.Delete(key)
+			b.onremove(idx)
+			b.evict++
+			failed = 0
+			return true
+		}
 		failed++
 		return failed <= maxFailCount
 	})
@@ -341,10 +379,21 @@ func (b *bucket) migrate() {
 		return
 	}
 
-	// create new data.
 	newData := b.bpool.Get(len(b.data))[:0]
 
 	// migrate data to new bucket.
+	b.conflict.All(func(key string, idx Idx) bool {
+		if idx.expired() {
+			b.conflict.Delete(key)
+			return true
+		}
+		entry := b.findEntry(idx)
+		// update with new position.
+		b.conflict.Put(key, newIdx(len(newData), idx.TTL()))
+		newData = append(newData, entry...)
+		return true
+	})
+
 	b.index.All(func(key Key, idx Idx) bool {
 		if idx.expired() {
 			b.index.Delete(key)
@@ -366,6 +415,7 @@ func (b *bucket) migrate() {
 // Stat is the runtime statistics of GigaCache.
 type Stat struct {
 	Len      int
+	Conflict int
 	Alloc    uint64
 	Unused   uint64
 	Migrates uint64
@@ -378,6 +428,7 @@ func (c *GigaCache) Stat() (s Stat) {
 	for _, b := range c.buckets {
 		b.RLock()
 		s.Len += b.index.Len()
+		s.Conflict += b.conflict.Len()
 		s.Alloc += uint64(len(b.data))
 		s.Unused += b.unused
 		s.Migrates += b.migrates
@@ -402,4 +453,8 @@ func s2b(str *string) []byte {
 		strHeader[0], strHeader[1], strHeader[1],
 	}
 	return *(*[]byte)(unsafe.Pointer(&byteSliceHeader))
+}
+
+func b2s(b []byte) string {
+	return *(*string)(unsafe.Pointer(&b))
 }

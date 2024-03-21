@@ -67,8 +67,7 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 		ok = m.SetTTL(k, time.Now().UnixNano())
 		assert.False(ok)
 		// remove
-		ok = m.Remove(k)
-		assert.False(ok)
+		m.Remove(k)
 	}
 	// scan
 	beginKey := fmt.Sprintf("%08x", start)
@@ -134,11 +133,11 @@ func TestCache(t *testing.T) {
 	// remove all.
 	for i := 0; i < num/3; i++ {
 		k, _ := genKV(i)
-		assert.True(m.Remove(k))
+		m.Remove(k)
 	}
 	for i := num / 3; i < num; i++ {
 		k, _ := genKV(i)
-		assert.False(m.Remove(k))
+		m.Remove(k)
 	}
 
 	// check.
@@ -165,9 +164,6 @@ func TestEvict(t *testing.T) {
 	assert := assert.New(t)
 	const num = 10000
 	opt := getOptions(num, 1)
-	opt.OnRemove = func(k, v []byte) {
-		assert.Equal(k, v)
-	}
 	m := New(opt)
 
 	// set data.
@@ -247,9 +243,6 @@ func TestHashConflict(t *testing.T) {
 	assert := assert.New(t)
 	opt := DefaultOptions
 	opt.ShardCount = 1
-	opt.OnHashConflict = func(key, val []byte) {
-		assert.NotEqual(key, val)
-	}
 	opt.HashFn = hashTest
 	m := New(opt)
 
@@ -258,10 +251,14 @@ func TestHashConflict(t *testing.T) {
 		m.Set(k, v)
 	}
 
-	// max key size
-	assert.Panics(func() {
-		m.Set(string(make([]byte, maxKeySize+1)), []byte("hello"))
-	})
+	// check
+	for i := 0; i < 100; i++ {
+		k, v := genKV(i)
+		val, ts, ok := m.Get(k)
+		assert.True(ok)
+		assert.Equal(v, val)
+		assert.Equal(ts, int64(0))
+	}
 }
 
 func TestScanSmall(t *testing.T) {

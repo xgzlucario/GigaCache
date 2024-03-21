@@ -7,10 +7,8 @@ import (
 
 // BufferPool is a bytes buffer pool.
 type BufferPool struct {
-	pool *sync.Pool
-
-	miss atomic.Uint64
-	hit  atomic.Uint64
+	pool      *sync.Pool
+	miss, hit atomic.Uint64
 }
 
 // Get returns buffer with length of want.

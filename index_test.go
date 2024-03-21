@@ -20,13 +20,6 @@ func TestIndex(t *testing.T) {
 		assert.Equal(idx.TTL()/timeCarry, ttl/timeCarry)
 	}
 
-	// key
-	for i := 0; i < 1e6; i++ {
-		hash := rand.Uint64()
-		key := newKey(hash)
-		assert.Equal(uint64(key), hash)
-	}
-
 	// panic-start
 	assert.Panics(func() {
 		newIdx(math.MaxUint32+1, 0)
