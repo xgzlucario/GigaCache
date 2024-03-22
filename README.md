@@ -2,19 +2,64 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/xgzlucario/GigaCache)](https://goreportcard.com/report/github.com/xgzlucario/GigaCache) [![Go Reference](https://pkg.go.dev/badge/github.com/xgzlucario/GigaCache.svg)](https://pkg.go.dev/github.com/xgzlucario/GigaCache) ![](https://img.shields.io/badge/go-1.21.0-orange.svg) ![](https://img.shields.io/github/languages/code-size/xgzlucario/GigaCache.svg) [![codecov](https://codecov.io/gh/xgzlucario/GigaCache/graph/badge.svg?token=yC1xELYaM2)](https://codecov.io/gh/xgzlucario/GigaCache) [![Test and coverage](https://github.com/xgzlucario/GigaCache/actions/workflows/rotom.yml/badge.svg)](https://github.com/xgzlucario/GigaCache/actions/workflows/rotom.yml)
 
-GigaCache is a light and fast cache written by Go, designed to manage GB-level datas with better performance, and higher memory efficiency than `stdmap`, multi-threaded support, 0 GC overhead.
+GigaCache 是一个基于 ` swissmap` 的高性能 Go 缓存库，为 GB 级序列化数据而设计，支持设置过期时间与淘汰机制，相比 `stdmap` 有更快的速度，更高的内存效率，和更小的延迟。
 
-GigaCache reduce lock competition by `sharding`, accelerating hashing with runtime.memhash, use value-typed index map to avoid GC overhead. See more technical details via [Doc](https://lucario.cn/posts/gigacache/).
+特性：
 
-# 🚗Usage
+1. 只支持**序列化**的数据，性能超强，插入性能相比 `stdmap` 提升了 **93%**，内存使用减少 **50%**。
+2. 采用**分片**技术减小锁粒度，并分块管理数据
+3. 键值对**独立**的过期时间支持，使用**定期淘汰**策略驱逐过期的键值对
+4. 内置迁移算法，定期整理碎片空间，以释放内存
+5. 类似于 `bigcache` 规避 GC 的设计，上亿数据集的 P99 延迟在**微秒**级别
 
-**Install**
+你可以阅读 [博客文档](https://lucario.cn/posts/gigacache/) 了解更多的技术细节。
+
+# 性能
+
+下面是插入 2000 万条数据的性能对比测试，`GigaCache` 的插入速度相比 `stdmap` 提升了 **93%**，内存使用相比也减少了 **50%** 左右。
+
+```
+gigacache
+entries: 20000000
+alloc: 1327 mb
+gcsys: 7 mb
+heap inuse: 1327 mb // 内存占用 1.3GB
+heap object: 5033 k
+gc: 12
+pause: 2.348011ms
+cost: 10.903936565s // 耗时 10.9s
+```
+
+```
+stdmap
+entries: 20000000
+alloc: 2702 mb
+gcsys: 16 mb
+heap inuse: 2709 mb // 内存占用 2.7GB
+heap object: 29596 k
+gc: 11
+pause: 2.564445ms
+cost: 21.102264031s // 耗时 21.1s
+```
+
+**测试环境**
+
+```
+goos: linux
+goarch: amd64
+pkg: github.com/xgzlucario/GigaCache
+cpu: AMD Ryzen 7 5800H with Radeon Graphics
+```
+
+# 使用
+
+首先安装 GigaCache 到本地：
 
 ```bash
 go get github.com/xgzlucario/GigaCache
 ```
 
-**Example**
+运行下面的代码示例：
 
 ```go
 package main
@@ -49,87 +94,16 @@ func main() {
 }
 ```
 
-# 🚀Benchmark
+# 内部架构
 
-**Environment**
-
-```
-goos: linux
-goarch: amd64
-pkg: github.com/xgzlucario/GigaCache
-cpu: AMD Ryzen 7 5800H with Radeon Graphics
-```
-
-**Set**
-
-Gigache Set operation has better performance than stdmap.
-
-| Benchmark        | Iter    | time/op     | bytes/op | alloc/op    |
-| ---------------- | ------- | ----------- | -------- | ----------- |
-| Set/stdmap-16    | 2486958 | 516.9 ns/op | 143 B/op | 1 allocs/op |
-| Set/GigaCache-16 | 2948646 | 465.9 ns/op |  97 B/op | 1 allocs/op |
-
-**Get** from 1 million entries.
-
-| Benchmark        | Iter    | time/op     | bytes/op | alloc/op    |
-| ---------------- | ------- | ----------- | -------- | ----------- |
-| Get/stdmap-16    | 5539920 | 242.2 ns/op |   7 B/op | 0 allocs/op |
-| Get/GigaCache-16 | 7041771 | 151.8 ns/op |  10 B/op | 1 allocs/op |
-
-**Scan** from 100k entries.
-
-| Benchmark                  | Iter  | time/op        | bytes/op   | alloc/op       |
-| -------------------------- | ----- | -------------- | ---------- | -------------- |
-| Scan/stdmap-16             |    97 | 12422801 ns/op |     0 B/op |    0 allocs/op |
-| Scan/GigaCache-16          |    56 | 25372260 ns/op |     0 B/op |    0 allocs/op |
-
-**Delete**
-
-| Benchmark              | Iter       | time/op      | bytes/op  | alloc/op    |
-| ---------------------- | ---------- | ------------ | --------- | ----------- |
-| Delete/stdmap-16       | 1000000000 | 0.2383 ns/op |    0 B/op | 0 allocs/op |
-| Delete/GigaCache-16    | 1000000000 | 0.7658 ns/op |    0 B/op | 1 allocs/op |
-
-# 🎢Integrated Bench
-
-Run bench with `go run example/*.go`.
-
-In the bench test below, GigaCache has better memory efficiency, and faster insertion performance than stdmap.
-
-```go
-gigacache
-entries: 20000000
-alloc: 1153 mb
-gcsys: 30 mb
-heap inuse: 1155 mb
-heap object: 1515 k
-gc: 15
-pause: 362.249µs
-cost: 5.436793342s
-```
-
-```go
-stdmap
-entries: 20000000
-alloc: 2663 mb
-gcsys: 64 mb
-heap inuse: 2664 mb
-heap object: 29482 k
-gc: 11
-pause: 385.449µs
-cost: 8.033432768s
-```
-
-# 🛸Internal
-
-GigaCache structure.
+GigaCache
 
 ![p1](p1.png)
 
-Key & Idx Defination.
+Key & Idx
 
 ![p2](p2.png)
 
-Bucket structure.
+Bucket
 
 ![p3](p3.png)
