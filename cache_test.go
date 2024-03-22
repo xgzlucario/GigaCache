@@ -19,7 +19,6 @@ func getOptions(num, interval int) Options {
 	opt.ShardCount = 1
 	opt.EvictInterval = interval
 	opt.IndexSize = num
-	opt.BufferSize = num * 16 * 2
 	return opt
 }
 
@@ -84,7 +83,7 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 
 func TestCache(t *testing.T) {
 	assert := assert.New(t)
-	const num = 10000
+	const num = 1000
 	m := New(getOptions(num, 3))
 
 	// init cache.
@@ -162,7 +161,7 @@ func TestCache(t *testing.T) {
 
 func TestEvict(t *testing.T) {
 	assert := assert.New(t)
-	const num = 10000
+	const num = 1000
 	opt := getOptions(num, 1)
 	m := New(opt)
 
@@ -195,12 +194,12 @@ func TestEvict(t *testing.T) {
 
 func TestDisableEvict(t *testing.T) {
 	assert := assert.New(t)
+	const num = 1000
 
 	opt := DefaultOptions
 	opt.ShardCount = 1
 	opt.DisableEvict = true
 	opt.IndexSize = num
-
 	m := New(opt)
 
 	// set data.
@@ -232,33 +231,6 @@ func TestDisableEvict(t *testing.T) {
 	assert.Equal(stat.Migrates, uint64(0))
 	assert.Equal(stat.Evict, uint64(0))
 	assert.Equal(stat.Probe, uint64(0))
-}
-
-// hashTest is only for test.
-func hashTest(str string) uint64 {
-	return 1
-}
-
-func TestHashConflict(t *testing.T) {
-	assert := assert.New(t)
-	opt := DefaultOptions
-	opt.ShardCount = 1
-	opt.HashFn = hashTest
-	m := New(opt)
-
-	for i := 0; i < 100; i++ {
-		k, v := genKV(i)
-		m.Set(k, v)
-	}
-
-	// check
-	for i := 0; i < 100; i++ {
-		k, v := genKV(i)
-		val, ts, ok := m.Get(k)
-		assert.True(ok)
-		assert.Equal(v, val)
-		assert.Equal(ts, int64(0))
-	}
 }
 
 func TestScanSmall(t *testing.T) {

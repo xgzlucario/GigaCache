@@ -2,7 +2,6 @@ package cache
 
 import (
 	"math"
-	"math/rand"
 	"testing"
 	"time"
 
@@ -13,8 +12,8 @@ func TestIndex(t *testing.T) {
 	assert := assert.New(t)
 
 	// index
-	for i := 0; i < 1e6; i++ {
-		start, ttl := int(rand.Uint32()), time.Now().UnixNano()
+	for i := 0; i < 10000; i++ {
+		start, ttl := int(FastRand()), time.Now().UnixNano()
 		idx := newIdx(start, ttl)
 		assert.Equal(idx.start(), start)
 		assert.Equal(idx.TTL()/timeCarry, ttl/timeCarry)

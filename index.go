@@ -19,7 +19,7 @@ type Key uint64
 type Idx uint64
 
 const (
-	ttlMask   = math.MaxUint32
+	ttlMask   = 0x00000000ffffffff
 	timeCarry = 1e9
 )
 
@@ -36,7 +36,7 @@ func (i Idx) sec() uint32 {
 }
 
 func (i Idx) TTL() int64 {
-	return int64(uint64(i&ttlMask) * timeCarry)
+	return int64(i.sec()) * timeCarry
 }
 
 func convTTL(ttl int64) uint64 {
