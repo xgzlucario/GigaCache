@@ -27,12 +27,6 @@ type Options struct {
 
 	// HashFn is custom hash function, default is runtime.memhash.
 	HashFn HashFn
-
-	// OnRemove called when key-value pair is evicted.
-	OnRemove Callback
-
-	// OnHashConflict called when hash conflict occurred.
-	OnHashConflict Callback
 }
 
 var DefaultOptions = Options{

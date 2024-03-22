@@ -60,3 +60,15 @@ func MemHash(str string) uint64 {
 	ss := (*stringStruct)(unsafe.Pointer(&str))
 	return uint64(memhash(ss.str, 0, uintptr(ss.len)))
 }
+
+func s2b(str *string) []byte {
+	strHeader := (*[2]uintptr)(unsafe.Pointer(str))
+	byteSliceHeader := [3]uintptr{
+		strHeader[0], strHeader[1], strHeader[1],
+	}
+	return *(*[]byte)(unsafe.Pointer(&byteSliceHeader))
+}
+
+func b2s(b []byte) string {
+	return *(*string)(unsafe.Pointer(&b))
+}
