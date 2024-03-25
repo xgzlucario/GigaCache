@@ -102,32 +102,28 @@ ADD:
 }
 
 func (b *bucket) remove(key Key, kstr string) bool {
-	// find conflict map.
 	idx, ok := b.conflict.Get(kstr)
 	if ok {
 		b.removeConflict(kstr, idx)
-		return true
+		return !idx.expired()
 	}
 
-	// find index map.
 	idx, ok = b.index.Get(key)
 	if ok {
 		b.removeIndex(key, idx)
-		return true
+		return !idx.expired()
 	}
 
 	return false
 }
 
 func (b *bucket) setTTL(key Key, kstr string, ts int64) bool {
-	// find conflict map.
 	idx, ok := b.conflict.Get(kstr)
 	if ok && !idx.expired() {
 		b.conflict.Put(kstr, newIdx(idx.start(), ts))
 		return true
 	}
 
-	// find index map.
 	idx, ok = b.index.Get(key)
 	if ok && !idx.expired() {
 		b.index.Put(key, newIdx(idx.start(), ts))
@@ -211,25 +207,33 @@ func (b *bucket) migrate() {
 	newData := bpool.Get(len(b.data))[:0]
 
 	// migrate data to new bucket.
-	b.conflict.All(func(key string, idx Idx) bool {
-		if idx.expired() {
-			b.conflict.Delete(key)
-			return true
-		}
-		// update with new position.
-		b.conflict.Put(key, newIdx(len(newData), idx.TTL()))
-		newData = append(newData, b.findEntry(idx)...)
-		return true
-	})
-
 	b.index.All(func(key Key, idx Idx) bool {
 		if idx.expired() {
 			b.index.Delete(key)
 			return true
 		}
 		// update with new position.
-		b.index.Put(key, newIdx(len(newData), idx.TTL()))
+		b.index.Put(key, newIdxx(len(newData), idx))
 		newData = append(newData, b.findEntry(idx)...)
+		return true
+	})
+
+	b.conflict.All(func(kstr string, idx Idx) bool {
+		if idx.expired() {
+			b.conflict.Delete(kstr)
+			return true
+		}
+		key := Key(b.options.HashFn(kstr))
+		// check if conflict.
+		_, ok := b.index.Get(key)
+		if ok {
+			b.conflict.Put(kstr, newIdxx(len(newData), idx))
+		} else {
+			b.index.Put(key, newIdxx(len(newData), idx))
+			b.conflict.Delete(kstr)
+		}
+		newData = append(newData, b.findEntry(idx)...)
+
 		return true
 	})
 

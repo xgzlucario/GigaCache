@@ -2,7 +2,6 @@ package cache
 
 import (
 	"fmt"
-	"runtime"
 	"testing"
 	"time"
 
@@ -107,7 +106,7 @@ func TestCache(t *testing.T) {
 	{
 		checkValidData(assert, m, 0, num*2/3)
 		checkInvalidData(assert, m, num*2/3, num)
-		m.Migrate(1)
+		m.Migrate()
 		checkValidData(assert, m, 0, num*2/3)
 		checkInvalidData(assert, m, num*2/3, num)
 	}
@@ -124,7 +123,7 @@ func TestCache(t *testing.T) {
 	{
 		checkValidData(assert, m, 0, num/3)
 		checkInvalidData(assert, m, num/3, num)
-		m.Migrate(runtime.NumCPU())
+		m.Migrate()
 		checkValidData(assert, m, 0, num/3)
 		checkInvalidData(assert, m, num/3, num)
 	}
@@ -142,7 +141,7 @@ func TestCache(t *testing.T) {
 	// check.
 	{
 		checkInvalidData(assert, m, 0, num)
-		m.Migrate(runtime.NumCPU())
+		m.Migrate()
 		checkInvalidData(assert, m, 0, num)
 	}
 

@@ -1,11 +1,8 @@
 package cache
 
 import (
-	"runtime"
 	"slices"
 	"time"
-
-	"github.com/sourcegraph/conc/pool"
 )
 
 const (
@@ -82,12 +79,13 @@ func (c *GigaCache) SetEx(kstr string, val []byte, dur time.Duration) {
 }
 
 // Remove removes the key-value pair by the key.
-func (c *GigaCache) Remove(kstr string) {
+func (c *GigaCache) Remove(kstr string) bool {
 	b, key := c.getShard(kstr)
 	b.Lock()
 	b.eliminate()
-	b.remove(key, kstr)
+	ok := b.remove(key, kstr)
 	b.Unlock()
+	return ok
 }
 
 // SetTTL set ttl for key.
@@ -116,31 +114,12 @@ func (c *GigaCache) Scan(f Walker) {
 	}
 }
 
-// Migrate move all data to new buckets with num cpu.
-func (c *GigaCache) Migrate(numCPU ...int) {
-	cpu := runtime.NumCPU()
-	if len(numCPU) > 0 {
-		cpu = numCPU[0]
-	}
-
-	if cpu == 1 {
-		for _, b := range c.buckets {
-			b.Lock()
-			b.migrate()
-			b.Unlock()
-		}
-
-	} else {
-		p := pool.New().WithMaxGoroutines(cpu)
-		for _, b := range c.buckets {
-			b := b
-			p.Go(func() {
-				b.Lock()
-				b.migrate()
-				b.Unlock()
-			})
-		}
-		p.Wait()
+// Migrate move all data to new buckets.
+func (c *GigaCache) Migrate() {
+	for _, b := range c.buckets {
+		b.Lock()
+		b.migrate()
+		b.Unlock()
 	}
 }
 

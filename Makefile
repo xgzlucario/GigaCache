@@ -7,7 +7,7 @@ test-cover:
 	rm coverage.txt
 
 bench:
-	go test -bench . -test.benchmem
+	sudo go test -bench . -benchmem
 
 web-profile:
 	go tool pprof -http=:18081 "http://localhost:6060/debug/pprof/profile?seconds=60"
