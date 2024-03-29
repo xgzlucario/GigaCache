@@ -88,7 +88,22 @@ func BenchmarkScan(b *testing.B) {
 		}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			m.Scan(func(s []byte, b []byte, i int64) bool {
+			m.Scan(func(s, b []byte, i int64) bool {
+				return true
+			})
+		}
+	})
+
+	b.Run("GigaCache/disableEvict", func(b *testing.B) {
+		opt := DefaultOptions
+		opt.DisableEvict = true
+		m := New(opt)
+		for i := 0; i < num; i++ {
+			m.Set(strconv.Itoa(i), str)
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			m.Scan(func(s, b []byte, i int64) bool {
 				return true
 			})
 		}

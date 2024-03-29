@@ -51,7 +51,7 @@ func TestBucket(t *testing.T) {
 		}
 
 		assert.Equal(10, m.index.Len())
-		assert.Equal(90, m.conflict.Len())
+		assert.Equal(90, m.cmap.Len())
 
 		m.eliminate()
 		scanCheck()
@@ -59,10 +59,10 @@ func TestBucket(t *testing.T) {
 
 		if i == 0 {
 			assert.Equal(100, m.index.Len()) // migrate use memhash and migrate all keys to index.
-			assert.Equal(0, m.conflict.Len())
+			assert.Equal(0, m.cmap.Len())
 		} else {
 			assert.Equal(10, m.index.Len())
-			assert.Equal(90, m.conflict.Len())
+			assert.Equal(90, m.cmap.Len())
 		}
 		scanCheck()
 	}
@@ -86,15 +86,15 @@ func TestBucketExpired(t *testing.T) {
 	}
 
 	m.eliminate()
-	assert.Equal(90, m.conflict.Len())
+	assert.Equal(90, m.cmap.Len())
 	assert.Equal(10, m.index.Len())
 
 	time.Sleep(time.Second * 2)
-	assert.Equal(90, m.conflict.Len())
+	assert.Equal(90, m.cmap.Len())
 	assert.Equal(10, m.index.Len())
 
 	m.eliminate()
-	assert.Equal(0, m.conflict.Len())
+	assert.Equal(0, m.cmap.Len())
 	assert.Equal(0, m.index.Len())
 }
 
@@ -117,10 +117,10 @@ func TestBucketMigrate(t *testing.T) {
 	}
 
 	time.Sleep(time.Second * 2)
-	assert.Equal(90, m.conflict.Len())
+	assert.Equal(90, m.cmap.Len())
 	assert.Equal(10, m.index.Len())
 	m.migrate()
-	assert.Equal(0, m.conflict.Len())
+	assert.Equal(0, m.cmap.Len())
 	assert.Equal(0, m.index.Len())
 }
 
@@ -140,7 +140,7 @@ func TestBucketRemove(t *testing.T) {
 			assert.Equal(val, nilBytes)
 			assert.Equal(ts, int64(0))
 		}
-		assert.Equal(0, m.conflict.Len())
+		assert.Equal(0, m.cmap.Len())
 		assert.Equal(0, m.index.Len())
 	})
 
@@ -177,5 +177,49 @@ func TestBucketRemove(t *testing.T) {
 			ok := m.remove(key, k)
 			assert.False(ok) // false because of expired.
 		}
+	})
+}
+
+func TestBucketScan(t *testing.T) {
+	assert := assert.New(t)
+	m := getBucket()
+
+	t.Run("scan", func(t *testing.T) {
+		var count int
+		m.scan(func(key, val []byte, _ int64) bool {
+			assert.Equal(key, val)
+			count++
+			return true
+		})
+		assert.Equal(100, count)
+
+		count = 0
+		m.scan2(func(key, val []byte, _ int64) bool {
+			k, v := genKV(count)
+			assert.Equal(k, string(key))
+			assert.Equal(v, val)
+			count++
+			return true
+		})
+		assert.Equal(100, count)
+	})
+
+	t.Run("scan-break", func(t *testing.T) {
+		var count int
+		m.scan(func(_, _ []byte, _ int64) bool {
+			count++
+			return count < 50
+		})
+		assert.Equal(50, count)
+
+		count = 0
+		m.scan2(func(key, val []byte, _ int64) bool {
+			k, v := genKV(count)
+			assert.Equal(k, string(key))
+			assert.Equal(v, val)
+			count++
+			return count < 50
+		})
+		assert.Equal(50, count)
 	})
 }

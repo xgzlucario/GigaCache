@@ -30,8 +30,8 @@ func checkValidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 		assert.GreaterOrEqual(ts, int64(0))
 	}
 	// scan
-	beginKey := fmt.Sprintf("%08x", start)
-	endKey := fmt.Sprintf("%08x", end)
+	beginKey, _ := genKV(start)
+	endKey, _ := genKV(end)
 
 	var count int
 	m.Scan(func(key, val []byte, i int64) bool {
@@ -68,8 +68,8 @@ func checkInvalidData(assert *assert.Assertions, m *GigaCache, start, end int) {
 		m.Remove(k)
 	}
 	// scan
-	beginKey := fmt.Sprintf("%08x", start)
-	endKey := fmt.Sprintf("%08x", end)
+	beginKey, _ := genKV(start)
+	endKey, _ := genKV(end)
 
 	m.Scan(func(key, val []byte, i int64) bool {
 		if string(key) >= beginKey && string(key) < endKey {
@@ -198,7 +198,6 @@ func TestDisableEvict(t *testing.T) {
 	opt := DefaultOptions
 	opt.ShardCount = 1
 	opt.DisableEvict = true
-	opt.IndexSize = num
 	m := New(opt)
 
 	// set data.
@@ -206,6 +205,16 @@ func TestDisableEvict(t *testing.T) {
 		k, v := genKV(i)
 		m.Set(k, v)
 	}
+
+	// scan
+	var count int
+	m.Scan(func(key, val []byte, ttl int64) (next bool) {
+		k, v := genKV(count)
+		assert.Equal(key, []byte(k))
+		assert.Equal(val, []byte(v))
+		count++
+		return true
+	})
 
 	// stat
 	stat := m.Stat()

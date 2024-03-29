@@ -104,9 +104,14 @@ type Walker func(key, val []byte, ttl int64) (next bool)
 // Scan walk all alive key-value pairs.
 // DO NOT EDIT the bytes as they are NO COPY.
 func (c *GigaCache) Scan(f Walker) {
+	var next bool
 	for _, b := range c.buckets {
 		b.RLock()
-		next := b.scan(f)
+		if b.options.DisableEvict {
+			next = b.scan2(f)
+		} else {
+			next = b.scan(f)
+		}
 		b.RUnlock()
 		if !next {
 			return
@@ -138,8 +143,8 @@ type Stat struct {
 func (c *GigaCache) Stat() (s Stat) {
 	for _, b := range c.buckets {
 		b.RLock()
-		s.Len += b.index.Len()
-		s.Conflict += b.conflict.Len()
+		s.Len += b.index.Len() + b.cmap.Len()
+		s.Conflict += b.cmap.Len()
 		s.Alloc += uint64(len(b.data))
 		s.Unused += b.unused
 		s.Migrates += b.migrates
