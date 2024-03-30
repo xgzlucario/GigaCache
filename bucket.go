@@ -133,7 +133,6 @@ func (b *bucket) setTTL(key Key, kstr string, ts int64) bool {
 	return false
 }
 
-// When evict enabled, scan key-values by iter index smap.
 func (b *bucket) scan(f Walker) (next bool) {
 	next = true
 	scanf := func(idx Idx) bool {
@@ -153,28 +152,6 @@ func (b *bucket) scan(f Walker) (next bool) {
 		b.index.All(func(_ Key, idx Idx) bool {
 			return scanf(idx)
 		})
-	}
-	return
-}
-
-// When evict disabled, scan key-values by reading bytes data sequentially.
-func (b *bucket) scan2(f Walker) (next bool) {
-	next = true
-	for index := 0; index < len(b.data) && next; {
-		// klen
-		klen, n := binary.Uvarint(b.data[index:])
-		index += n
-		// vlen
-		vlen, n := binary.Uvarint(b.data[index:])
-		index += n
-		// kstr
-		kstr := b.data[index : index+int(klen)]
-		index += int(klen)
-		// val
-		val := b.data[index : index+int(vlen)]
-		index += int(vlen)
-
-		next = f(kstr, val, 0)
 	}
 	return
 }

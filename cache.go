@@ -110,11 +110,7 @@ func (c *GigaCache) Scan(f Walker) {
 	var next bool
 	for _, b := range c.buckets {
 		b.RLock()
-		if b.options.DisableEvict {
-			next = b.scan2(f)
-		} else {
-			next = b.scan(f)
-		}
+		next = b.scan(f)
 		b.RUnlock()
 		if !next {
 			return

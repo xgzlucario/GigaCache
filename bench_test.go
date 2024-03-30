@@ -94,17 +94,6 @@ func BenchmarkScan(b *testing.B) {
 			})
 		}
 	})
-	b.Run("cache/disableEvict", func(b *testing.B) {
-		opt := DefaultOptions
-		opt.DisableEvict = true
-		m := getCache(N, opt)
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			m.Scan(func(s, b []byte, i int64) bool {
-				return true
-			})
-		}
-	})
 }
 
 func BenchmarkRemove(b *testing.B) {

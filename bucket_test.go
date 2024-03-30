@@ -192,31 +192,11 @@ func TestBucketScan(t *testing.T) {
 			return true
 		})
 		assert.Equal(100, count)
-
-		count = 0
-		m.scan2(func(key, val []byte, _ int64) bool {
-			k, v := genKV(count)
-			assert.Equal(k, string(key))
-			assert.Equal(v, val)
-			count++
-			return true
-		})
-		assert.Equal(100, count)
 	})
 
 	t.Run("scan-break", func(t *testing.T) {
 		var count int
 		m.scan(func(_, _ []byte, _ int64) bool {
-			count++
-			return count < 50
-		})
-		assert.Equal(50, count)
-
-		count = 0
-		m.scan2(func(key, val []byte, _ int64) bool {
-			k, v := genKV(count)
-			assert.Equal(k, string(key))
-			assert.Equal(v, val)
 			count++
 			return count < 50
 		})

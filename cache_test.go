@@ -206,16 +206,6 @@ func TestDisableEvict(t *testing.T) {
 		m.Set(k, v)
 	}
 
-	// scan
-	var count int
-	m.Scan(func(key, val []byte, ttl int64) (next bool) {
-		k, v := genKV(count)
-		assert.Equal(key, []byte(k))
-		assert.Equal(val, []byte(v))
-		count++
-		return true
-	})
-
 	// stat
 	stat := m.Stat()
 	assert.Equal(stat.Len, num)

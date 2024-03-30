@@ -58,7 +58,6 @@ BenchmarkGet/stdmap-20                      8400390              152.7 ns/op    
 BenchmarkGet/cache-20                      10187661              117.5 ns/op            16 B/op          2 allocs/op
 BenchmarkScan/stdmap-20                         151            7814006 ns/op             0 B/op          0 allocs/op
 BenchmarkScan/cache-20                          100           11475189 ns/op             0 B/op          0 allocs/op
-BenchmarkScan/cache/disableEvict-20             300            4048064 ns/op             0 B/op          0 allocs/op
 BenchmarkRemove/stdmap-20                  16358985              66.26 ns/op            16 B/op          1 allocs/op
 BenchmarkRemove/cache-20                    7386679              151.4 ns/op            16 B/op          2 allocs/op
 BenchmarkMigrate/stdmap-20                      676            1739740 ns/op       6441224 B/op       1685 allocs/op
