@@ -54,8 +54,8 @@ cpu: 13th Gen Intel(R) Core(TM) i5-13600KF
 BenchmarkSet/stdmap-20                      3978168              360.2 ns/op           225 B/op          3 allocs/op
 BenchmarkSet/cache-20                       5956052              234.2 ns/op            95 B/op          2 allocs/op
 BenchmarkSet/cache/disableEvict-20          7046114              214.1 ns/op           104 B/op          2 allocs/op
-BenchmarkGet/stdmap-20                     10236864              152.5 ns/op            15 B/op          1 allocs/op
-BenchmarkGet/cache-20                       8866696              117.4 ns/op            16 B/op          2 allocs/op
+BenchmarkGet/stdmap-20                      8400390              152.7 ns/op            15 B/op          1 allocs/op
+BenchmarkGet/cache-20                      10187661              117.5 ns/op            16 B/op          2 allocs/op
 BenchmarkScan/stdmap-20                         151            7814006 ns/op             0 B/op          0 allocs/op
 BenchmarkScan/cache-20                          100           11475189 ns/op             0 B/op          0 allocs/op
 BenchmarkScan/cache/disableEvict-20             300            4048064 ns/op             0 B/op          0 allocs/op
