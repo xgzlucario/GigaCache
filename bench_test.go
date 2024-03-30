@@ -1,78 +1,83 @@
 package cache
 
 import (
-	"strconv"
+	"maps"
 	"testing"
 	"time"
-
-	"github.com/aclements/go-perfevent/perfbench"
 )
 
-var (
-	num = 100 * 10000
-	str = []byte("Hello World")
-)
+const N = 100 * 10000
 
-func getStdmap() map[string][]byte {
+func getStdmap(num int) map[string][]byte {
 	m := map[string][]byte{}
 	for i := 0; i < num; i++ {
-		m[strconv.Itoa(i)] = str
+		k, v := genKV(i)
+		m[k] = v
+	}
+	return m
+}
+
+func getCache(num int, options ...Options) *GigaCache {
+	opt := DefaultOptions
+	if len(options) > 0 {
+		opt = options[0]
+	}
+	m := New(opt)
+	for i := 0; i < num; i++ {
+		k, v := genKV(i)
+		m.Set(k, v)
 	}
 	return m
 }
 
 func BenchmarkSet(b *testing.B) {
 	b.Run("stdmap", func(b *testing.B) {
-		perfbench.Open(b)
 		m := map[string][]byte{}
 		for i := 0; i < b.N; i++ {
-			m[strconv.Itoa(i)] = str
+			k, v := genKV(i)
+			m[k] = v
 		}
 	})
-
-	b.Run("GigaCache", func(b *testing.B) {
-		perfbench.Open(b)
+	b.Run("cache", func(b *testing.B) {
 		m := New(DefaultOptions)
 		for i := 0; i < b.N; i++ {
-			m.Set(strconv.Itoa(i), str)
+			k, v := genKV(i)
+			m.Set(k, v)
 		}
 	})
-
-	b.Run("GigaCache/disableEvict", func(b *testing.B) {
-		perfbench.Open(b)
+	b.Run("cache/disableEvict", func(b *testing.B) {
 		options := DefaultOptions
 		options.DisableEvict = true
 		m := New(options)
 		for i := 0; i < b.N; i++ {
-			m.Set(strconv.Itoa(i), str)
+			k, v := genKV(i)
+			m.Set(k, v)
 		}
 	})
 }
 
 func BenchmarkGet(b *testing.B) {
-	m1 := getStdmap()
 	b.Run("stdmap", func(b *testing.B) {
-		perfbench.Open(b)
+		m := getStdmap(N)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = m1[strconv.Itoa(i)]
+			k, _ := genKV(i)
+			_ = m[k]
 		}
 	})
-
-	m2 := New(DefaultOptions)
-	for i := 0; i < num; i++ {
-		m2.Set(strconv.Itoa(i), str)
-	}
-	b.Run("GigaCache", func(b *testing.B) {
-		perfbench.Open(b)
+	b.Run("cache", func(b *testing.B) {
+		m := getCache(N)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			m2.Get(strconv.Itoa(i))
+			k, _ := genKV(i)
+			m.Get(k)
 		}
 	})
 }
 
 func BenchmarkScan(b *testing.B) {
 	b.Run("stdmap", func(b *testing.B) {
-		m := getStdmap()
+		m := getStdmap(N)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			for k, v := range m {
@@ -80,12 +85,8 @@ func BenchmarkScan(b *testing.B) {
 			}
 		}
 	})
-
-	b.Run("GigaCache", func(b *testing.B) {
-		m := New(DefaultOptions)
-		for i := 0; i < num; i++ {
-			m.Set(strconv.Itoa(i), str)
-		}
+	b.Run("cache", func(b *testing.B) {
+		m := getCache(N)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			m.Scan(func(s, b []byte, i int64) bool {
@@ -93,14 +94,10 @@ func BenchmarkScan(b *testing.B) {
 			})
 		}
 	})
-
-	b.Run("GigaCache/disableEvict", func(b *testing.B) {
+	b.Run("cache/disableEvict", func(b *testing.B) {
 		opt := DefaultOptions
 		opt.DisableEvict = true
-		m := New(opt)
-		for i := 0; i < num; i++ {
-			m.Set(strconv.Itoa(i), str)
-		}
+		m := getCache(N, opt)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			m.Scan(func(s, b []byte, i int64) bool {
@@ -112,26 +109,48 @@ func BenchmarkScan(b *testing.B) {
 
 func BenchmarkRemove(b *testing.B) {
 	b.Run("stdmap", func(b *testing.B) {
-		m := getStdmap()
+		m := getStdmap(N)
 		b.ResetTimer()
-		for i := 0; i < num; i++ {
-			delete(m, strconv.Itoa(i))
+		for i := 0; i < b.N; i++ {
+			k, _ := genKV(i)
+			delete(m, k)
 		}
 	})
-
-	b.Run("GigaCache", func(b *testing.B) {
-		m := New(DefaultOptions)
-		for i := 0; i < num; i++ {
-			m.Set(strconv.Itoa(i), str)
-		}
+	b.Run("cache", func(b *testing.B) {
+		m := getCache(N)
 		b.ResetTimer()
-		for i := 0; i < num; i++ {
-			m.Remove(strconv.Itoa(i))
+		for i := 0; i < b.N; i++ {
+			k, _ := genKV(i)
+			m.Remove(k)
 		}
 	})
 }
 
-func BenchmarkConvTTL(b *testing.B) {
+func BenchmarkMigrate(b *testing.B) {
+	b.Run("stdmap", func(b *testing.B) {
+		m := getStdmap(100000)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			maps.Clone(m)
+		}
+	})
+	b.Run("cache", func(b *testing.B) {
+		m := getCache(100000)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			m.Migrate(1)
+		}
+	})
+	b.Run("cache/parallel", func(b *testing.B) {
+		m := getCache(100000)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			m.Migrate()
+		}
+	})
+}
+
+func BenchmarkIdx(b *testing.B) {
 	b.Run("newIdx", func(b *testing.B) {
 		idx := newIdx(1024, time.Now().Unix())
 		for i := 0; i < b.N; i++ {
