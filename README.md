@@ -54,16 +54,16 @@ cpu: 13th Gen Intel(R) Core(TM) i5-13600KF
 BenchmarkSet/stdmap-20                      3978168              360.2 ns/op           225 B/op          3 allocs/op
 BenchmarkSet/cache-20                       5956052              234.2 ns/op            95 B/op          2 allocs/op
 BenchmarkSet/cache/disableEvict-20          7046114              214.1 ns/op           104 B/op          2 allocs/op
-BenchmarkGet/stdmap-20                      8696785              152.5 ns/op            15 B/op          1 allocs/op
-BenchmarkGet/cache-20                       8866696              131.2 ns/op            16 B/op          2 allocs/op
+BenchmarkGet/stdmap-20                     10236864              152.5 ns/op            15 B/op          1 allocs/op
+BenchmarkGet/cache-20                       8866696              117.4 ns/op            16 B/op          2 allocs/op
 BenchmarkScan/stdmap-20                         151            7814006 ns/op             0 B/op          0 allocs/op
 BenchmarkScan/cache-20                          100           11475189 ns/op             0 B/op          0 allocs/op
-BenchmarkScan/cache/disableEvict-20             288            4273882 ns/op             0 B/op          0 allocs/op
+BenchmarkScan/cache/disableEvict-20             300            4048064 ns/op             0 B/op          0 allocs/op
 BenchmarkRemove/stdmap-20                  16358985              66.26 ns/op            16 B/op          1 allocs/op
 BenchmarkRemove/cache-20                    7386679              151.4 ns/op            16 B/op          2 allocs/op
 BenchmarkMigrate/stdmap-20                      676            1739740 ns/op       6441224 B/op       1685 allocs/op
 BenchmarkMigrate/cache-20                       343            3561328 ns/op         24620 B/op       1024 allocs/op
-BenchmarkMigrate/cache/parallel-20              973            1118931 ns/op         42541 B/op       2092 allocs/op
+BenchmarkMigrate/cache/parallel-20             1183            1033018 ns/op         42423 B/op       2091 allocs/op
 BenchmarkIdx/newIdx-20                   1000000000             0.7566 ns/op             0 B/op          0 allocs/op
 BenchmarkIdx/newIdxx-20                  1000000000             0.3761 ns/op             0 B/op          0 allocs/op
 PASS
