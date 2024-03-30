@@ -29,7 +29,7 @@ func genKV(id int) (string, []byte) {
 func main() {
 	c := ""
 	entries := 0
-	flag.StringVar(&c, "cache", "gigacache", "cache to bench.")
+	flag.StringVar(&c, "cache", "cache", "cache to bench.")
 	flag.IntVar(&entries, "entries", 2000*10000, "number of entries to test.")
 	flag.Parse()
 
@@ -38,12 +38,22 @@ func main() {
 
 	start := time.Now()
 	switch c {
-	case "gigacache":
+	case "cache":
 		cache := cache.New(cache.DefaultOptions)
 		for i := 0; i < entries; i++ {
 			k, v := genKV(i)
 			cache.Set(k, v)
 		}
+
+	case "cache-noevict":
+		options := cache.DefaultOptions
+		options.DisableEvict = true
+		cache := cache.New(options)
+		for i := 0; i < entries; i++ {
+			k, v := genKV(i)
+			cache.Set(k, v)
+		}
+
 	case "stdmap":
 		m := make(map[string][]byte)
 		for i := 0; i < entries; i++ {
