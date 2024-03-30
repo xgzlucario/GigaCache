@@ -44,7 +44,7 @@ cost: 21.102264031s
 
 **详细测试**
 
-下面使用 `cache` 来表示 `GigaCache`:
+运行 `make bench` 命令进行详细测试:
 
 ```
 goos: linux
