@@ -44,6 +44,8 @@ cost: 21.102264031s
 
 **详细测试**
 
+下面使用 `cache` 来表示 `GigaCache`:
+
 ```
 goos: linux
 goarch: amd64
