@@ -2,11 +2,11 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/xgzlucario/GigaCache)](https://goreportcard.com/report/github.com/xgzlucario/GigaCache) [![Go Reference](https://pkg.go.dev/badge/github.com/xgzlucario/GigaCache.svg)](https://pkg.go.dev/github.com/xgzlucario/GigaCache) ![](https://img.shields.io/badge/go-1.22-orange.svg) ![](https://img.shields.io/github/languages/code-size/xgzlucario/GigaCache.svg) [![codecov](https://codecov.io/gh/xgzlucario/GigaCache/graph/badge.svg?token=yC1xELYaM2)](https://codecov.io/gh/xgzlucario/GigaCache) [![Test and coverage](https://github.com/xgzlucario/GigaCache/actions/workflows/rotom.yml/badge.svg)](https://github.com/xgzlucario/GigaCache/actions/workflows/rotom.yml)
 
-GigaCache 是一个 Golang 编写的高性能缓存库，使用紧凑的字节数组作为数据容器，为 GB 级序列化数据而设计，支持设置过期时间与淘汰机制，相比 `stdmap` 有更快的速度，更高的内存效率，和更小的延迟。
+GigaCache 是一个 Golang 编写的高性能缓存库，使用紧凑的字节数组作为数据容器，为 GB 级序列化数据而设计，支持设置过期时间与淘汰机制，相比 `stdmap` 有更快的速度，更高的内存效率，和更小的 GC 延迟。
 
 特性：
 
-1. 只支持序列化的数据，性能超强，插入性能相比 `stdmap` 提升了 **93%**，内存使用减少 **50%**。
+1. 只支持序列化的数据，存储相同数据量相比 `map[string]string` 内存占用减少 **50+%**，插入速度提高约 **20%**，GC 延迟降低 **25+%**。
 2. 采用分片技术减小锁粒度，并分块管理数据
 3. 键值对独立的过期时间支持，使用定期淘汰策略驱逐过期的键值对
 4. 内置迁移算法，定期整理碎片空间，以释放内存
