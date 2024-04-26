@@ -2,7 +2,7 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/xgzlucario/GigaCache)](https://goreportcard.com/report/github.com/xgzlucario/GigaCache) [![Go Reference](https://pkg.go.dev/badge/github.com/xgzlucario/GigaCache.svg)](https://pkg.go.dev/github.com/xgzlucario/GigaCache) ![](https://img.shields.io/badge/go-1.22-orange.svg) ![](https://img.shields.io/github/languages/code-size/xgzlucario/GigaCache.svg) [![codecov](https://codecov.io/gh/xgzlucario/GigaCache/graph/badge.svg?token=yC1xELYaM2)](https://codecov.io/gh/xgzlucario/GigaCache) [![Test and coverage](https://github.com/xgzlucario/GigaCache/actions/workflows/rotom.yml/badge.svg)](https://github.com/xgzlucario/GigaCache/actions/workflows/rotom.yml)
 
-GigaCache 是一个基于 `swissmap` 的高性能 Go 缓存库，为 GB 级序列化数据而设计，支持设置过期时间与淘汰机制，相比 `stdmap` 有更快的速度，更高的内存效率，和更小的延迟。
+GigaCache 是一个 Golang 编写的高性能缓存库，使用紧凑的字节数组作为数据容器，为 GB 级序列化数据而设计，支持设置过期时间与淘汰机制，相比 `stdmap` 有更快的速度，更高的内存效率，和更小的延迟。
 
 特性：
 
@@ -16,18 +16,18 @@ GigaCache 是一个基于 `swissmap` 的高性能 Go 缓存库，为 GB 级序�
 
 # 性能
 
-下面是插入 2000 万条数据的性能对比测试，`GigaCache` 的插入速度相比 `stdmap` 提升了 **93%**，内存使用相比也减少了 **50%** 左右。
+下面是插入 2000 万条数据的性能对比测试，`GigaCache` 的插入速度相比 `stdmap` 提升约 **20%**，内存占用减少了 **57%** 左右，GC 延迟降低了 **25%**。
 
 ```
 gigacache
 entries: 20000000
-alloc: 1327 mb
+alloc: 1171 mb
 gcsys: 7 mb
-heap inuse: 1327 mb
-heap object: 5033 k
-gc: 12
-pause: 2.348011ms
-cost: 10.903936565s
+heap inuse: 1172 mb
+heap object: 2680 k
+gc: 13
+pause: 758.016µs
+cost: 6.852312608s
 ```
 
 ```
@@ -38,8 +38,8 @@ gcsys: 16 mb
 heap inuse: 2709 mb
 heap object: 29596 k
 gc: 11
-pause: 2.564445ms
-cost: 21.102264031s
+pause: 998.256µs
+cost: 8.222612328s
 ```
 
 **详细测试**
