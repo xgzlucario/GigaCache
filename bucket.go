@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"sync"
-
-	"github.com/cockroachdb/swiss"
 )
 
 // bucket is the data container for GigaCache.
@@ -14,10 +12,10 @@ type bucket struct {
 	options *Options
 
 	// index is the index map for cache, mapped hash(kstr) to the position that data real stored.
-	index *swiss.Map[Key, Idx]
+	index map[Key]Idx
 
 	// conflict map store keys that hash conflict with index.
-	cmap *cmap
+	cmap map[string]Idx
 
 	// data store all key-value bytes data.
 	data []byte
@@ -33,22 +31,22 @@ type bucket struct {
 func newBucket(options Options) *bucket {
 	return &bucket{
 		options: &options,
-		index:   swiss.New[Key, Idx](options.IndexSize),
-		cmap:    newCMap(),
+		index:   make(map[Key]Idx, options.IndexSize),
+		cmap:    map[string]Idx{},
 		data:    bpool.Get(options.BufferSize)[:0],
 	}
 }
 
 func (b *bucket) get(kstr string, key Key) ([]byte, int64, bool) {
 	// find conflict map.
-	idx, ok := b.cmap.Get(kstr)
+	idx, ok := b.cmap[kstr]
 	if ok && !idx.expired() {
 		_, _, val := b.find(idx)
 		return val, idx.TTL(), ok
 	}
 
 	// find index map.
-	idx, ok = b.index.Get(key)
+	idx, ok = b.index[key]
 	if ok && !idx.expired() {
 		_, _, val := b.find(idx)
 		return val, idx.TTL(), ok
@@ -69,29 +67,32 @@ func (b *bucket) get(kstr string, key Key) ([]byte, int64, bool) {
 //
 // set stores key-value pair into bucket.
 func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
+	var idx Idx
+	var ok bool
+
 	// check conflict map.
-	idx, ok := b.cmap.Get(b2s(kstr))
+	idx, ok = b.cmap[b2s(kstr)]
 	if ok {
 		entry, _, _ := b.find(idx)
 		b.unused += uint64(len(entry))
-		b.cmap.Put(b2s(kstr), newIdx(len(b.data), ts))
+		b.cmap[b2s(kstr)] = newIdx(len(b.data), ts)
 		goto ADD
 	}
 
 	// check index map.
-	idx, ok = b.index.Get(key)
+	idx, ok = b.index[key]
 	if ok {
 		entry, oldKstr, _ := b.find(idx)
 		b.unused += uint64(len(entry))
 		// hash conflict
 		if !idx.expired() && !bytes.Equal(oldKstr, kstr) {
-			b.cmap.Put(string(kstr), newIdx(len(b.data), ts))
+			b.cmap[string(kstr)] = newIdx(len(b.data), ts)
 			goto ADD
 		}
 	}
 
 	// update index.
-	b.index.Put(key, newIdx(len(b.data), ts))
+	b.index[key] = newIdx(len(b.data), ts)
 
 ADD:
 	// append klen, vlen, key, val.
@@ -102,13 +103,13 @@ ADD:
 }
 
 func (b *bucket) remove(key Key, kstr string) bool {
-	idx, ok := b.cmap.Get(kstr)
+	idx, ok := b.cmap[kstr]
 	if ok {
 		b.removeConflict(kstr, idx)
 		return !idx.expired()
 	}
 
-	idx, ok = b.index.Get(key)
+	idx, ok = b.index[key]
 	if ok {
 		b.removeIndex(key, idx)
 		return !idx.expired()
@@ -118,15 +119,15 @@ func (b *bucket) remove(key Key, kstr string) bool {
 }
 
 func (b *bucket) setTTL(key Key, kstr string, ts int64) bool {
-	idx, ok := b.cmap.Get(kstr)
+	idx, ok := b.cmap[kstr]
 	if ok && !idx.expired() {
-		b.cmap.Put(kstr, newIdx(idx.start(), ts))
+		b.cmap[kstr] = newIdx(idx.start(), ts)
 		return true
 	}
 
-	idx, ok = b.index.Get(key)
+	idx, ok = b.index[key]
 	if ok && !idx.expired() {
-		b.index.Put(key, newIdx(idx.start(), ts))
+		b.index[key] = newIdx(idx.start(), ts)
 		return true
 	}
 
@@ -135,23 +136,27 @@ func (b *bucket) setTTL(key Key, kstr string, ts int64) bool {
 
 func (b *bucket) scan(f Walker) (next bool) {
 	next = true
-	scanf := func(idx Idx) bool {
+
+	for _, idx := range b.cmap {
 		if idx.expired() {
-			return true
+			continue
 		}
 		_, kstr, val := b.find(idx)
 		next = f(kstr, val, idx.TTL())
-		return next
+		if !next {
+			return
+		}
 	}
-	if next {
-		b.cmap.All(func(_ string, idx Idx) bool {
-			return scanf(idx)
-		})
-	}
-	if next {
-		b.index.All(func(_ Key, idx Idx) bool {
-			return scanf(idx)
-		})
+
+	for _, idx := range b.index {
+		if idx.expired() {
+			continue
+		}
+		_, kstr, val := b.find(idx)
+		next = f(kstr, val, idx.TTL())
+		if !next {
+			return
+		}
 	}
 	return
 }
@@ -170,31 +175,33 @@ func (b *bucket) eliminate() {
 	b.interval = 0
 
 	// probing
-	b.cmap.All(func(key string, idx Idx) bool {
+	for key, idx := range b.cmap {
 		b.probe++
 		if idx.expired() {
 			b.removeConflict(key, idx)
 			b.evict++
 		}
-		return true
-	})
+	}
 
-	b.index.All(func(key Key, idx Idx) bool {
+	for key, idx := range b.index {
 		b.probe++
 		if idx.expired() {
 			b.removeIndex(key, idx)
 			b.evict++
 			failed = 0
-			return true
+
+		} else {
+			failed++
+			if failed > maxFailCount {
+				break
+			}
 		}
-		failed++
-		return failed <= maxFailCount
-	})
+	}
 
 MIG:
 	// check need to migrate.
 	rate := float64(b.unused) / float64(len(b.data))
-	if b.unused >= b.options.MigrateDelta && rate >= b.options.MigrateRatio {
+	if rate >= b.options.MigrateRatio {
 		b.migrate()
 	}
 }
@@ -204,37 +211,34 @@ func (b *bucket) migrate() {
 	newData := bpool.Get(len(b.data))[:0]
 
 	// migrate data to new bucket.
-	b.index.All(func(key Key, idx Idx) bool {
+	for key, idx := range b.index {
 		if idx.expired() {
-			b.index.Delete(key)
-			return true
+			delete(b.index, key)
+			continue
 		}
 		// update with new position.
-		b.index.Put(key, newIdxx(len(newData), idx))
+		b.index[key] = newIdxx(len(newData), idx)
 		entry, _, _ := b.find(idx)
 		newData = append(newData, entry...)
-		return true
-	})
+	}
 
-	b.cmap.All(func(kstr string, idx Idx) bool {
+	for kstr, idx := range b.cmap {
 		if idx.expired() {
-			b.cmap.Delete(kstr)
-			return true
+			delete(b.cmap, kstr)
+			continue
 		}
 		key := Key(b.options.HashFn(kstr))
 		// check if conflict.
-		_, ok := b.index.Get(key)
+		_, ok := b.index[key]
 		if ok {
-			b.cmap.Put(kstr, newIdxx(len(newData), idx))
+			b.cmap[kstr] = newIdxx(len(newData), idx)
 		} else {
-			b.index.Put(key, newIdxx(len(newData), idx))
-			b.cmap.Delete(kstr)
+			b.index[key] = newIdxx(len(newData), idx)
+			delete(b.cmap, kstr)
 		}
 		entry, _, _ := b.find(idx)
 		newData = append(newData, entry...)
-
-		return true
-	})
+	}
 
 	bpool.Put(b.data)
 	b.data = newData
@@ -263,11 +267,11 @@ func (b *bucket) find(idx Idx) (entry, kstr, val []byte) {
 func (b *bucket) removeConflict(key string, idx Idx) {
 	entry, _, _ := b.find(idx)
 	b.unused += uint64(len(entry))
-	b.cmap.Delete(key)
+	delete(b.cmap, key)
 }
 
 func (b *bucket) removeIndex(key Key, idx Idx) {
 	entry, _, _ := b.find(idx)
 	b.unused += uint64(len(entry))
-	b.index.Delete(key)
+	delete(b.index, key)
 }

@@ -23,7 +23,6 @@ type Options struct {
 
 	// Migrate threshold for a bucket to trigger a migration.
 	MigrateRatio float64
-	MigrateDelta uint64
 
 	// HashFn is custom hash function, default is runtime.memhash.
 	HashFn HashFn
@@ -36,7 +35,6 @@ var DefaultOptions = Options{
 	EvictInterval: 3,
 	DisableEvict:  false,
 	MigrateRatio:  0.4,
-	MigrateDelta:  4 * KB,
 	HashFn:        MemHash,
 }
 

@@ -50,19 +50,19 @@ func TestBucket(t *testing.T) {
 			assert.Equal(100, count)
 		}
 
-		assert.Equal(10, m.index.Len())
-		assert.Equal(90, m.cmap.Len())
+		assert.Equal(10, len(m.index))
+		assert.Equal(90, len(m.cmap))
 
 		m.eliminate()
 		scanCheck()
 		m.migrate()
 
 		if i == 0 {
-			assert.Equal(100, m.index.Len()) // migrate use memhash and migrate all keys to index.
-			assert.Equal(0, m.cmap.Len())
+			assert.Equal(100, len(m.index)) // migrate use memhash and migrate all keys to index.
+			assert.Equal(0, len(m.cmap))
 		} else {
-			assert.Equal(10, m.index.Len())
-			assert.Equal(90, m.cmap.Len())
+			assert.Equal(10, len(m.index))
+			assert.Equal(90, len(m.cmap))
 		}
 		scanCheck()
 	}
@@ -71,31 +71,68 @@ func TestBucket(t *testing.T) {
 func TestBucketExpired(t *testing.T) {
 	assert := assert.New(t)
 
-	m := getBucket()
-	ttl := time.Now().Add(time.Second).UnixNano()
-	for i := 0; i < 100; i++ {
-		k, v := genKV(i)
-		key := Key(i / 10)
-		// set
-		m.set(key, []byte(k), v, ttl)
-		// get
-		val, ts, ok := m.get(k, key)
-		assert.True(ok)
-		assert.Equal(val, v)
-		assert.Equal(ts, ttl/timeCarry*timeCarry)
-	}
+	t.Run("1", func(t *testing.T) {
+		m := getBucket()
+		ttl := time.Now().Add(time.Second).UnixNano()
+		for i := 0; i < 100; i++ {
+			k, v := genKV(i)
+			key := Key(i / 10)
+			// set
+			m.set(key, []byte(k), v, ttl)
+			// get
+			val, ts, ok := m.get(k, key)
+			assert.True(ok)
+			assert.Equal(val, v)
+			assert.Equal(ts, ttl/timeCarry*timeCarry)
+		}
 
-	m.eliminate()
-	assert.Equal(90, m.cmap.Len())
-	assert.Equal(10, m.index.Len())
+		assert.Equal(90, len(m.cmap))
+		assert.Equal(10, len(m.index))
 
-	time.Sleep(time.Second * 2)
-	assert.Equal(90, m.cmap.Len())
-	assert.Equal(10, m.index.Len())
+		// expired
+		time.Sleep(time.Second * 2)
 
-	m.eliminate()
-	assert.Equal(0, m.cmap.Len())
-	assert.Equal(0, m.index.Len())
+		var count int
+		m.scan(func(key, val []byte, ttl int64) (next bool) {
+			count++
+			return true
+		})
+		assert.Equal(count, 0)
+
+		m.eliminate()
+		assert.Equal(0, len(m.cmap))
+		assert.Equal(0, len(m.index))
+	})
+
+	t.Run("expired-scan", func(t *testing.T) {
+		m := getBucket()
+		ttl := time.Now().Add(time.Second).UnixNano()
+		for i := 0; i < 100; i++ {
+			k, v := genKV(i)
+			key := Key(i / 10)
+			// set
+			m.set(key, []byte(k), v, ttl)
+			// get
+			val, ts, ok := m.get(k, key)
+			assert.True(ok)
+			assert.Equal(val, v)
+			assert.Equal(ts, ttl/timeCarry*timeCarry)
+		}
+
+		assert.Equal(90, len(m.cmap))
+		assert.Equal(10, len(m.index))
+
+		// migrate: merge cmap to index
+		m.eliminate()
+		assert.Equal(0, len(m.cmap))
+		assert.Equal(100, len(m.index))
+
+		// expired
+		time.Sleep(time.Second * 2)
+		m.eliminate()
+		assert.Equal(0, len(m.cmap))
+		assert.Equal(0, len(m.index))
+	})
 }
 
 func TestBucketMigrate(t *testing.T) {
@@ -117,11 +154,11 @@ func TestBucketMigrate(t *testing.T) {
 	}
 
 	time.Sleep(time.Second * 2)
-	assert.Equal(90, m.cmap.Len())
-	assert.Equal(10, m.index.Len())
+	assert.Equal(90, len(m.cmap))
+	assert.Equal(10, len(m.index))
 	m.migrate()
-	assert.Equal(0, m.cmap.Len())
-	assert.Equal(0, m.index.Len())
+	assert.Equal(0, len(m.cmap))
+	assert.Equal(0, len(m.index))
 }
 
 func TestBucketRemove(t *testing.T) {
@@ -140,8 +177,8 @@ func TestBucketRemove(t *testing.T) {
 			assert.Equal(val, nilBytes)
 			assert.Equal(ts, int64(0))
 		}
-		assert.Equal(0, m.cmap.Len())
-		assert.Equal(0, m.index.Len())
+		assert.Equal(0, len(m.cmap))
+		assert.Equal(0, len(m.index))
 	})
 
 	t.Run("remove-ttl", func(t *testing.T) {

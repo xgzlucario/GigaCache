@@ -106,7 +106,7 @@ func TestCache(t *testing.T) {
 	{
 		checkValidData(assert, m, 0, num*2/3)
 		checkInvalidData(assert, m, num*2/3, num)
-		m.Migrate(1)
+		m.Migrate()
 		checkValidData(assert, m, 0, num*2/3)
 		checkInvalidData(assert, m, num*2/3, num)
 	}

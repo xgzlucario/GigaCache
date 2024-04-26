@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"maps"
 	"testing"
 	"time"
 )
@@ -111,30 +110,6 @@ func BenchmarkRemove(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			k, _ := genKV(i)
 			m.Remove(k)
-		}
-	})
-}
-
-func BenchmarkMigrate(b *testing.B) {
-	b.Run("stdmap", func(b *testing.B) {
-		m := getStdmap(100000)
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			maps.Clone(m)
-		}
-	})
-	b.Run("cache", func(b *testing.B) {
-		m := getCache(100000)
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			m.Migrate(1)
-		}
-	})
-	b.Run("cache/parallel", func(b *testing.B) {
-		m := getCache(100000)
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			m.Migrate()
 		}
 	})
 }

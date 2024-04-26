@@ -1,11 +1,8 @@
 package cache
 
 import (
-	"runtime"
 	"slices"
 	"time"
-
-	"github.com/sourcegraph/conc/pool"
 )
 
 const (
@@ -118,31 +115,12 @@ func (c *GigaCache) Scan(f Walker) {
 	}
 }
 
-// Migrate move all data to new buckets with num cpu.
-func (c *GigaCache) Migrate(numCPU ...int) {
-	cpu := runtime.NumCPU()
-	if len(numCPU) > 0 {
-		cpu = numCPU[0]
-	}
-
-	if cpu == 1 {
-		for _, b := range c.buckets {
-			b.Lock()
-			b.migrate()
-			b.Unlock()
-		}
-
-	} else {
-		p := pool.New().WithMaxGoroutines(cpu)
-		for _, b := range c.buckets {
-			b := b
-			p.Go(func() {
-				b.Lock()
-				b.migrate()
-				b.Unlock()
-			})
-		}
-		p.Wait()
+// Migrate move all data to new buckets.
+func (c *GigaCache) Migrate() {
+	for _, b := range c.buckets {
+		b.Lock()
+		b.migrate()
+		b.Unlock()
 	}
 }
 
@@ -161,8 +139,8 @@ type Stat struct {
 func (c *GigaCache) Stat() (s Stat) {
 	for _, b := range c.buckets {
 		b.RLock()
-		s.Len += b.index.Len() + b.cmap.Len()
-		s.Conflict += b.cmap.Len()
+		s.Len += len(b.index) + len(b.cmap)
+		s.Conflict += len(b.cmap)
 		s.Alloc += uint64(len(b.data))
 		s.Unused += b.unused
 		s.Migrates += b.migrates

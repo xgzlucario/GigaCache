@@ -26,7 +26,7 @@ func TestIndex(t *testing.T) {
 		newIdx(math.MaxUint32+1, 0)
 	})
 	assert.Panics(func() {
-		newIdxx(math.MaxUint32+1, 0)
+		newIdxx(math.MaxUint32+1, Idx{})
 	})
 
 	// panic-ttl
