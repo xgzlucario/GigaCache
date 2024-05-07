@@ -67,39 +67,60 @@ func (b *bucket) get(kstr string, key Key) ([]byte, int64, bool) {
 //
 // set stores key-value pair into bucket.
 func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
-	var idx Idx
-	var ok bool
-
 	// check conflict map.
-	idx, ok = b.cmap[b2s(kstr)]
+	idx, ok := b.cmap[b2s(kstr)]
 	if ok {
-		entry, _, _ := b.find(idx)
+		entry, kstrOld, valOld := b.find(idx)
+
+		// update inplaced.
+		if len(kstr) == len(kstrOld) && len(val) == len(valOld) {
+			copy(kstrOld, kstr)
+			copy(valOld, val)
+			b.cmap[string(kstr)] = idx.setTTL(ts)
+			return
+		}
+
+		// alloc new space.
 		b.unused += uint64(len(entry))
-		b.cmap[b2s(kstr)] = newIdx(len(b.data), ts)
-		goto ADD
+		b.cmap[string(kstr)] = b.appendEntry(kstr, val, ts)
+		return
 	}
 
 	// check index map.
 	idx, ok = b.index[key]
 	if ok {
-		entry, oldKstr, _ := b.find(idx)
-		b.unused += uint64(len(entry))
-		// hash conflict
-		if !idx.expired() && !bytes.Equal(oldKstr, kstr) {
-			b.cmap[string(kstr)] = newIdx(len(b.data), ts)
-			goto ADD
+		entry, kstrOld, valOld := b.find(idx)
+
+		// if hash conflict, insert to cmap.
+		if !idx.expired() && !bytes.Equal(kstr, kstrOld) {
+			b.cmap[string(kstr)] = b.appendEntry(kstr, val, ts)
+			return
 		}
+
+		// update inplaced.
+		if len(kstr) == len(kstrOld) && len(val) == len(valOld) {
+			copy(kstrOld, kstr)
+			copy(valOld, val)
+			b.index[key] = idx.setTTL(ts)
+			return
+		}
+
+		// alloc new space.
+		b.unused += uint64(len(entry))
 	}
 
-	// update index.
-	b.index[key] = newIdx(len(b.data), ts)
+	// insert.
+	b.index[key] = b.appendEntry(kstr, val, ts)
+}
 
-ADD:
+func (b *bucket) appendEntry(kstr, val []byte, ts int64) Idx {
+	idx := newIdx(len(b.data), ts)
 	// append klen, vlen, key, val.
 	b.data = binary.AppendUvarint(b.data, uint64(len(kstr)))
 	b.data = binary.AppendUvarint(b.data, uint64(len(val)))
 	b.data = append(b.data, kstr...)
 	b.data = append(b.data, val...)
+	return idx
 }
 
 func (b *bucket) remove(key Key, kstr string) bool {

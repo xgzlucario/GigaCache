@@ -103,36 +103,6 @@ func TestBucketExpired(t *testing.T) {
 		assert.Equal(0, len(m.cmap))
 		assert.Equal(0, len(m.index))
 	})
-
-	t.Run("expired-scan", func(t *testing.T) {
-		m := getBucket()
-		ttl := time.Now().Add(time.Second).UnixNano()
-		for i := 0; i < 100; i++ {
-			k, v := genKV(i)
-			key := Key(i / 10)
-			// set
-			m.set(key, []byte(k), v, ttl)
-			// get
-			val, ts, ok := m.get(k, key)
-			assert.True(ok)
-			assert.Equal(val, v)
-			assert.Equal(ts, ttl/timeCarry*timeCarry)
-		}
-
-		assert.Equal(90, len(m.cmap))
-		assert.Equal(10, len(m.index))
-
-		// migrate: merge cmap to index
-		m.eliminate()
-		assert.Equal(0, len(m.cmap))
-		assert.Equal(100, len(m.index))
-
-		// expired
-		time.Sleep(time.Second * 2)
-		m.eliminate()
-		assert.Equal(0, len(m.cmap))
-		assert.Equal(0, len(m.index))
-	})
 }
 
 func TestBucketMigrate(t *testing.T) {

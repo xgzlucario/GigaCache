@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"math/bits"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -71,4 +72,10 @@ func s2b(str *string) []byte {
 
 func b2s(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
+}
+
+// SizeUvarint
+// See https://go-review.googlesource.com/c/go/+/572196/1/src/encoding/binary/varint.go#174
+func SizeUvarint(x uint64) int {
+	return int(9*uint32(bits.Len64(x))+64) / 64
 }

@@ -191,44 +191,73 @@ func TestEvict(t *testing.T) {
 	assert.Equal(stat.Migrates, uint64(1))
 }
 
-func TestDisableEvict(t *testing.T) {
+func TestDataAlloc(t *testing.T) {
 	assert := assert.New(t)
-	const num = 1000
 
-	opt := DefaultOptions
-	opt.ShardCount = 1
-	opt.DisableEvict = true
-	m := New(opt)
+	t.Run("memhash", func(t *testing.T) {
+		opt := DefaultOptions
+		opt.ShardCount = 1
+		opt.DisableEvict = true
+		m := New(opt)
+		m.Set("hello", []byte("world"))
 
-	// set data.
-	for i := 0; i < num; i++ {
-		k, v := genKV(i)
-		m.Set(k, v)
-	}
+		m.Set("abc", []byte("123"))
+		// stat
+		stat := m.Stat()
+		assert.Equal(stat.Len, 2)
+		assert.Equal(stat.Alloc, uint64(12+8))
+		assert.Equal(stat.Unused, uint64(0))
 
-	// stat
-	stat := m.Stat()
-	assert.Equal(stat.Len, num)
-	assert.Equal(stat.Alloc, uint64(stat.Len*(16+2)))
-	assert.Equal(stat.Unused, uint64(0))
-	assert.Equal(stat.Migrates, uint64(0))
-	assert.Equal(stat.Evict, uint64(0))
-	assert.Equal(stat.Probe, uint64(0))
+		// set same data(update inplaced).
+		m.Set("abc", []byte("234"))
 
-	// set same data.
-	for i := 0; i < num/5; i++ {
-		k, v := genKV(i)
-		m.Set(k, v)
-	}
-	m.Set("trig1234", []byte("trig1234"))
+		stat = m.Stat()
+		assert.Equal(stat.Len, 2)
+		assert.Equal(stat.Alloc, uint64(12+8))
+		assert.Equal(stat.Unused, uint64(0))
 
-	stat = m.Stat()
-	assert.Equal(stat.Len, num+1)
-	assert.Equal(stat.Alloc, uint64((num+1+num/5)*(16+2)))
-	assert.Equal(stat.Unused, uint64(num/5*(16+2)))
-	assert.Equal(stat.Migrates, uint64(0))
-	assert.Equal(stat.Evict, uint64(0))
-	assert.Equal(stat.Probe, uint64(0))
+		// set great.
+		m.Set("abc", []byte("12345"))
+
+		stat = m.Stat()
+		assert.Equal(stat.Len, 2)
+		assert.Equal(stat.Alloc, uint64(12+8+10))
+		assert.Equal(stat.Unused, uint64(8))
+	})
+
+	t.Run("testHash", func(t *testing.T) {
+		opt := DefaultOptions
+		opt.ShardCount = 1
+		opt.DisableEvict = true
+		opt.HashFn = func(s string) uint64 {
+			return 0
+		}
+		m := New(opt)
+		m.Set("hello", []byte("world"))
+
+		m.Set("abc", []byte("123"))
+		// stat
+		stat := m.Stat()
+		assert.Equal(stat.Len, 2)
+		assert.Equal(stat.Alloc, uint64(12+8))
+		assert.Equal(stat.Unused, uint64(0))
+
+		// set same data(update inplaced).
+		m.Set("abc", []byte("234"))
+
+		stat = m.Stat()
+		assert.Equal(stat.Len, 2)
+		assert.Equal(stat.Alloc, uint64(12+8))
+		assert.Equal(stat.Unused, uint64(0))
+
+		// set great.
+		m.Set("abc", []byte("12345"))
+
+		stat = m.Stat()
+		assert.Equal(stat.Len, 2)
+		assert.Equal(stat.Alloc, uint64(12+8+10))
+		assert.Equal(stat.Unused, uint64(8))
+	})
 }
 
 func TestScanSmall(t *testing.T) {
@@ -250,4 +279,8 @@ func TestScanSmall(t *testing.T) {
 		return true
 	})
 	assert.Equal(count, 100)
+}
+
+func TestUtils(t *testing.T) {
+	_ = SizeUvarint(1)
 }

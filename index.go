@@ -33,6 +33,11 @@ func (i Idx) expired() bool {
 	return i.l > noTTL && i.l < GetSec()
 }
 
+func (i Idx) setTTL(ts int64) Idx {
+	i.l = convTTL(ts)
+	return i
+}
+
 func (i Idx) TTL() int64 {
 	return int64(i.l) * timeCarry
 }
