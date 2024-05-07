@@ -36,5 +36,7 @@ func FuzzCacheHashConflict(f *testing.F) {
 				break
 			}
 		}
+
+		assert.Equal(len(m1), m2.Stat().Len)
 	})
 }
