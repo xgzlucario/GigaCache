@@ -138,8 +138,8 @@ func (c *GigaCache) GetStats() (stats Stats) {
 		stats.Len += len(bucket.index) + len(bucket.conflictMap)
 		stats.Conflicts += len(bucket.conflictMap)
 		stats.Alloc += uint64(len(bucket.data))
-		stats.Unused += bucket.unused
-		stats.Migrates += bucket.migrations
+		stats.Unused += uint64(bucket.unused)
+		stats.Migrates += uint64(bucket.migrations)
 		stats.Evictions += bucket.evictions
 		stats.Probes += bucket.probes
 		bucket.RUnlock()

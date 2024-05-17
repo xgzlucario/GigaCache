@@ -23,8 +23,8 @@ type bucket struct {
 
 	// runtime statistics
 	interval   byte
-	unused     uint64
-	migrations uint64
+	unused     uint32
+	migrations uint32
 	evictions  uint64
 	probes     uint64
 }
@@ -75,7 +75,7 @@ func (b *bucket) set(key Key, keyStr, val []byte, ts int64) {
 		}
 
 		// Allocate new space if lengths differ.
-		b.unused += uint64(len(entry))
+		b.unused += uint32(len(entry))
 		b.conflictMap[string(keyStr)] = b.appendEntry(keyStr, val, ts)
 		return
 	}
@@ -100,7 +100,7 @@ func (b *bucket) set(key Key, keyStr, val []byte, ts int64) {
 		}
 
 		// Allocate new space if lengths differ.
-		b.unused += uint64(len(entry))
+		b.unused += uint32(len(entry))
 	}
 
 	// Insert new entry.
@@ -292,13 +292,13 @@ func (b *bucket) findEntry(idx Idx) (entry, key, val []byte) {
 // removeConflictEntry removes a conflict entry from the conflict map.
 func (b *bucket) removeConflictEntry(key string, idx Idx) {
 	entry, _, _ := b.findEntry(idx)
-	b.unused += uint64(len(entry))
+	b.unused += uint32(len(entry))
 	delete(b.conflictMap, key)
 }
 
 // removeIndexEntry removes an index entry from the index map.
 func (b *bucket) removeIndexEntry(key Key, idx Idx) {
 	entry, _, _ := b.findEntry(idx)
-	b.unused += uint64(len(entry))
+	b.unused += uint32(len(entry))
 	delete(b.index, key)
 }
