@@ -18,7 +18,7 @@ func TestIndex(t *testing.T) {
 		idxx := newIdxx(start, idx)
 		assert.Equal(idx, idxx)
 		assert.Equal(idx.start(), start)
-		assert.Equal(idx.TTL()/timeCarry, ttl/timeCarry)
+		assert.Equal(int64(idx.l), ttl/timeCarry)
 	}
 
 	// panic-start

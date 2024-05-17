@@ -11,13 +11,12 @@ const (
 	maxFailCount = 3 // maxFailCount indicates that the eviction algorithm breaks when consecutive unexpired key-value pairs are detected.
 )
 
-var bufferPool = NewBufferPool()
-
 // GigaCache implements a key-value cache.
 type GigaCache struct {
-	mask    uint32
-	hashFn  HashFn
-	buckets []*bucket
+	mask      uint32
+	hashFn    HashFn
+	buckets   []*bucket
+	reusedBuf []byte
 }
 
 // New creates a new instance of GigaCache.
@@ -31,7 +30,7 @@ func New(options Options) *GigaCache {
 		buckets: make([]*bucket, options.ShardCount),
 	}
 	for i := range cache.buckets {
-		cache.buckets[i] = newBucket(options)
+		cache.buckets[i] = newBucket(options, cache)
 	}
 	return cache
 }

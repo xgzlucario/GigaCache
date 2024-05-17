@@ -19,7 +19,7 @@ func getBucket(options ...Options) *bucket {
 		opt = DefaultOptions
 		opt.EvictInterval = 1
 	}
-	m := newBucket(opt)
+	m := newBucket(opt, nil)
 
 	for i := 0; i < 100; i++ {
 		k, v := genKV(i)
@@ -154,7 +154,7 @@ func TestBucketRemove(t *testing.T) {
 	t.Run("remove-ttl", func(t *testing.T) {
 		options := DefaultOptions
 		options.EvictInterval = 1
-		m := newBucket(options)
+		m := newBucket(options, nil)
 
 		ts1 := time.Now().Add(time.Hour).UnixNano()
 		for i := 0; i < 100; i++ {

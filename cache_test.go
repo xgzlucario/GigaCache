@@ -13,7 +13,7 @@ func genKV(i int) (string, []byte) {
 	return k, []byte(k)
 }
 
-func getOptions(num, interval int) Options {
+func getOptions(num int, interval uint8) Options {
 	opt := DefaultOptions
 	opt.ShardCount = 1
 	opt.EvictInterval = interval
@@ -148,12 +148,6 @@ func TestCache(t *testing.T) {
 	assert.Panics(func() {
 		opt := DefaultOptions
 		opt.ShardCount = 0
-		New(opt)
-	})
-
-	assert.Panics(func() {
-		opt := DefaultOptions
-		opt.EvictInterval = -1
 		New(opt)
 	})
 }

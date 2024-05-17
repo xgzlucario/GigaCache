@@ -15,7 +15,7 @@ type Options struct {
 	// the higher the frequency, the more expired key-value pairs will be evicted,
 	// but accordingly it will slow down the overall performance,
 	// because the system needs to spend more time on probing and evicting.
-	EvictInterval int
+	EvictInterval uint8
 
 	// DisableEvict
 	// Set `true` when you don't need any expiration times.
@@ -41,9 +41,6 @@ var DefaultOptions = Options{
 func validateOptions(options Options) error {
 	if options.ShardCount == 0 {
 		return errors.New("cache/options: invalid shard count")
-	}
-	if options.EvictInterval < 0 {
-		return errors.New("cache/options: invalid evict interval")
 	}
 	return nil
 }

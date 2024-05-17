@@ -1,8 +1,8 @@
 package cache
 
 import (
+	"maps"
 	"testing"
-	"time"
 )
 
 const N = 100 * 10000
@@ -114,17 +114,19 @@ func BenchmarkRemove(b *testing.B) {
 	})
 }
 
-func BenchmarkIdx(b *testing.B) {
-	b.Run("newIdx", func(b *testing.B) {
-		idx := newIdx(1024, time.Now().Unix())
+func BenchmarkMigrate(b *testing.B) {
+	b.Run("stdmap", func(b *testing.B) {
+		m := getStdmap(100000)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			newIdx(idx.start(), idx.TTL())
+			maps.Clone(m)
 		}
 	})
-	b.Run("newIdxx", func(b *testing.B) {
-		idx := newIdx(1024, time.Now().Unix())
+	b.Run("cache", func(b *testing.B) {
+		m := getCache(100000)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			newIdxx(idx.start(), idx)
+			m.Migrate()
 		}
 	})
 }

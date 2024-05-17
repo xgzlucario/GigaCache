@@ -9,6 +9,7 @@ import (
 // bucket is the data container for GigaCache.
 type bucket struct {
 	sync.RWMutex
+	root    *GigaCache
 	options *Options
 
 	// index maps hashed keys to their storage positions in data.
@@ -21,7 +22,7 @@ type bucket struct {
 	data []byte
 
 	// runtime statistics
-	interval   int
+	interval   byte
 	unused     uint64
 	migrations uint64
 	evictions  uint64
@@ -29,12 +30,13 @@ type bucket struct {
 }
 
 // newBucket initializes and returns a new bucket instance.
-func newBucket(options Options) *bucket {
+func newBucket(options Options, root *GigaCache) *bucket {
 	return &bucket{
+		root:        root,
 		options:     &options,
 		index:       make(map[Key]Idx, options.IndexSize),
 		conflictMap: make(map[string]Idx),
-		data:        bufferPool.Get(options.BufferSize)[:0],
+		data:        make([]byte, 0, options.BufferSize),
 	}
 }
 
@@ -224,7 +226,12 @@ CHECK_MIGRATION:
 
 // migrate transfers valid key-value pairs to a new container to save memory.
 func (b *bucket) migrate() {
-	newData := bufferPool.Get(len(b.data))[:0]
+	var newData []byte
+	if b.root != nil {
+		newData = b.root.reusedBuf[:0]
+	} else {
+		newData = make([]byte, 0, len(b.data))
+	}
 
 	// Migrate data to the new bucket.
 	for key, idx := range b.index {
@@ -255,7 +262,9 @@ func (b *bucket) migrate() {
 		newData = append(newData, entry...)
 	}
 
-	bufferPool.Put(b.data)
+	if b.root != nil {
+		b.root.reusedBuf = b.data
+	}
 	b.data = newData
 	b.unused = 0
 	b.migrations++
