@@ -51,18 +51,18 @@ func TestBucket(t *testing.T) {
 		}
 
 		assert.Equal(10, len(m.index))
-		assert.Equal(90, len(m.cmap))
+		assert.Equal(90, len(m.conflictMap))
 
-		m.eliminate()
+		m.evictExpiredItems()
 		scanCheck()
 		m.migrate()
 
 		if i == 0 {
 			assert.Equal(100, len(m.index)) // migrate use memhash and migrate all keys to index.
-			assert.Equal(0, len(m.cmap))
+			assert.Equal(0, len(m.conflictMap))
 		} else {
 			assert.Equal(10, len(m.index))
-			assert.Equal(90, len(m.cmap))
+			assert.Equal(90, len(m.conflictMap))
 		}
 		scanCheck()
 	}
@@ -86,7 +86,7 @@ func TestBucketExpired(t *testing.T) {
 			assert.Equal(ts, ttl/timeCarry*timeCarry)
 		}
 
-		assert.Equal(90, len(m.cmap))
+		assert.Equal(90, len(m.conflictMap))
 		assert.Equal(10, len(m.index))
 
 		// expired
@@ -99,8 +99,8 @@ func TestBucketExpired(t *testing.T) {
 		})
 		assert.Equal(count, 0)
 
-		m.eliminate()
-		assert.Equal(0, len(m.cmap))
+		m.evictExpiredItems()
+		assert.Equal(0, len(m.conflictMap))
 		assert.Equal(0, len(m.index))
 	})
 }
@@ -124,10 +124,10 @@ func TestBucketMigrate(t *testing.T) {
 	}
 
 	time.Sleep(time.Second * 2)
-	assert.Equal(90, len(m.cmap))
+	assert.Equal(90, len(m.conflictMap))
 	assert.Equal(10, len(m.index))
 	m.migrate()
-	assert.Equal(0, len(m.cmap))
+	assert.Equal(0, len(m.conflictMap))
 	assert.Equal(0, len(m.index))
 }
 
@@ -147,7 +147,7 @@ func TestBucketRemove(t *testing.T) {
 			assert.Equal(val, nilBytes)
 			assert.Equal(ts, int64(0))
 		}
-		assert.Equal(0, len(m.cmap))
+		assert.Equal(0, len(m.conflictMap))
 		assert.Equal(0, len(m.index))
 	})
 

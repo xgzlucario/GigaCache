@@ -38,7 +38,7 @@ var DefaultOptions = Options{
 	HashFn:        MemHash,
 }
 
-func checkOptions(options Options) error {
+func validateOptions(options Options) error {
 	if options.ShardCount == 0 {
 		return errors.New("cache/options: invalid shard count")
 	}

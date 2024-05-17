@@ -172,19 +172,19 @@ func TestEvict(t *testing.T) {
 	time.Sleep(time.Second * 2)
 
 	// stat
-	stat := m.Stat()
+	stat := m.GetStats()
 	assert.Equal(stat.Len, num)
 	assert.Equal(stat.Alloc, uint64(stat.Len*(16+2)))
 	assert.Equal(stat.Unused, uint64(0))
 	assert.Equal(stat.Evict, uint64(0))
 	assert.Greater(stat.Probe, uint64(0))
-	assert.Equal(stat.EvictRate(), float64(0))
+	assert.Equal(stat.EvictionRate(), float64(0))
 	assert.Equal(stat.UnusedRate(), float64(0))
 
 	// trig evict.
 	m.Set("trig1234", []byte("trig1234"))
 
-	stat = m.Stat()
+	stat = m.GetStats()
 	assert.Equal(stat.Len, int(num-stat.Evict+1))
 	assert.Equal(stat.Alloc, uint64(16+2))
 	assert.Equal(stat.Unused, uint64(0))
@@ -203,7 +203,7 @@ func TestDataAlloc(t *testing.T) {
 
 		m.Set("abc", []byte("123"))
 		// stat
-		stat := m.Stat()
+		stat := m.GetStats()
 		assert.Equal(stat.Len, 2)
 		assert.Equal(stat.Alloc, uint64(12+8))
 		assert.Equal(stat.Unused, uint64(0))
@@ -211,7 +211,7 @@ func TestDataAlloc(t *testing.T) {
 		// set same data(update inplaced).
 		m.Set("abc", []byte("234"))
 
-		stat = m.Stat()
+		stat = m.GetStats()
 		assert.Equal(stat.Len, 2)
 		assert.Equal(stat.Alloc, uint64(12+8))
 		assert.Equal(stat.Unused, uint64(0))
@@ -219,7 +219,7 @@ func TestDataAlloc(t *testing.T) {
 		// set great.
 		m.Set("abc", []byte("12345"))
 
-		stat = m.Stat()
+		stat = m.GetStats()
 		assert.Equal(stat.Len, 2)
 		assert.Equal(stat.Alloc, uint64(12+8+10))
 		assert.Equal(stat.Unused, uint64(8))
@@ -237,7 +237,7 @@ func TestDataAlloc(t *testing.T) {
 
 		m.Set("abc", []byte("123"))
 		// stat
-		stat := m.Stat()
+		stat := m.GetStats()
 		assert.Equal(stat.Len, 2)
 		assert.Equal(stat.Alloc, uint64(12+8))
 		assert.Equal(stat.Unused, uint64(0))
@@ -245,7 +245,7 @@ func TestDataAlloc(t *testing.T) {
 		// set same data(update inplaced).
 		m.Set("abc", []byte("234"))
 
-		stat = m.Stat()
+		stat = m.GetStats()
 		assert.Equal(stat.Len, 2)
 		assert.Equal(stat.Alloc, uint64(12+8))
 		assert.Equal(stat.Unused, uint64(0))
@@ -253,7 +253,7 @@ func TestDataAlloc(t *testing.T) {
 		// set great.
 		m.Set("abc", []byte("12345"))
 
-		stat = m.Stat()
+		stat = m.GetStats()
 		assert.Equal(stat.Len, 2)
 		assert.Equal(stat.Alloc, uint64(12+8+10))
 		assert.Equal(stat.Unused, uint64(8))

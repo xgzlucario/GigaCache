@@ -11,143 +11,138 @@ type bucket struct {
 	sync.RWMutex
 	options *Options
 
-	// index is the index map for cache, mapped hash(kstr) to the position that data real stored.
+	// index maps hashed keys to their storage positions in data.
 	index map[Key]Idx
 
-	// conflict map store keys that hash conflict with index.
-	cmap map[string]Idx
+	// conflictMap stores keys that have hash conflicts with the index.
+	conflictMap map[string]Idx
 
-	// data store all key-value bytes data.
+	// data stores all key-value bytes data.
 	data []byte
 
-	// runtime stats.
-	interval int
-	unused   uint64
-	migrates uint64
-	evict    uint64
-	probe    uint64
+	// runtime statistics
+	interval   int
+	unused     uint64
+	migrations uint64
+	evictions  uint64
+	probes     uint64
 }
 
+// newBucket initializes and returns a new bucket instance.
 func newBucket(options Options) *bucket {
 	return &bucket{
-		options: &options,
-		index:   make(map[Key]Idx, options.IndexSize),
-		cmap:    map[string]Idx{},
-		data:    bpool.Get(options.BufferSize)[:0],
+		options:     &options,
+		index:       make(map[Key]Idx, options.IndexSize),
+		conflictMap: make(map[string]Idx),
+		data:        bufferPool.Get(options.BufferSize)[:0],
 	}
 }
 
-func (b *bucket) get(kstr string, key Key) ([]byte, int64, bool) {
-	// find conflict map.
-	idx, ok := b.cmap[kstr]
-	if ok && !idx.expired() {
-		_, _, val := b.find(idx)
-		return val, idx.TTL(), ok
+// get retrieves the value and its expiration time for the given key string.
+func (b *bucket) get(keyStr string, key Key) ([]byte, int64, bool) {
+	// Check conflict map.
+	idx, found := b.conflictMap[keyStr]
+	if found && !idx.expired() {
+		_, _, val := b.findEntry(idx)
+		return val, idx.TTL(), found
 	}
 
-	// find index map.
-	idx, ok = b.index[key]
-	if ok && !idx.expired() {
-		_, _, val := b.find(idx)
-		return val, idx.TTL(), ok
+	// Check index map.
+	idx, found = b.index[key]
+	if found && !idx.expired() {
+		_, _, val := b.findEntry(idx)
+		return val, idx.TTL(), found
 	}
 
 	return nil, 0, false
 }
 
-//	 map[Key]Idx ----+
-//	                 |
-//	                 v
-//	               start
-//			   +-----+------------+------------+------------+------------+-----+
-//			   | ... |    klen    |    vlen    |    key     |    value   | ... |
-//			   +-----+------------+------------+------------+------------+-----+
-//		             |<- varint ->|<- varint ->|<-- klen -->|<-- vlen -->|
-//				     |<--------------------- entry --------------------->|
-//
-// set stores key-value pair into bucket.
-func (b *bucket) set(key Key, kstr, val []byte, ts int64) {
-	// check conflict map.
-	idx, ok := b.cmap[b2s(kstr)]
-	if ok {
-		entry, kstrOld, valOld := b.find(idx)
+// set stores the key-value pair into the bucket with an expiration timestamp.
+func (b *bucket) set(key Key, keyStr, val []byte, ts int64) {
+	// Check conflict map.
+	idx, found := b.conflictMap[b2s(keyStr)]
+	if found {
+		entry, oldKeyStr, oldVal := b.findEntry(idx)
 
-		// update inplaced.
-		if len(kstr) == len(kstrOld) && len(val) == len(valOld) {
-			copy(kstrOld, kstr)
-			copy(valOld, val)
-			b.cmap[string(kstr)] = idx.setTTL(ts)
+		// Update in-place if the lengths match.
+		if len(keyStr) == len(oldKeyStr) && len(val) == len(oldVal) {
+			copy(oldKeyStr, keyStr)
+			copy(oldVal, val)
+			b.conflictMap[string(keyStr)] = idx.setTTL(ts)
 			return
 		}
 
-		// alloc new space.
+		// Allocate new space if lengths differ.
 		b.unused += uint64(len(entry))
-		b.cmap[string(kstr)] = b.appendEntry(kstr, val, ts)
+		b.conflictMap[string(keyStr)] = b.appendEntry(keyStr, val, ts)
 		return
 	}
 
-	// check index map.
-	idx, ok = b.index[key]
-	if ok {
-		entry, kstrOld, valOld := b.find(idx)
+	// Check index map.
+	idx, found = b.index[key]
+	if found {
+		entry, oldKeyStr, oldVal := b.findEntry(idx)
 
-		// if hash conflict, insert to cmap.
-		if !idx.expired() && !bytes.Equal(kstr, kstrOld) {
-			b.cmap[string(kstr)] = b.appendEntry(kstr, val, ts)
+		// Insert to conflictMap if hash conflict occurs.
+		if !idx.expired() && !bytes.Equal(keyStr, oldKeyStr) {
+			b.conflictMap[string(keyStr)] = b.appendEntry(keyStr, val, ts)
 			return
 		}
 
-		// update inplaced.
-		if len(kstr) == len(kstrOld) && len(val) == len(valOld) {
-			copy(kstrOld, kstr)
-			copy(valOld, val)
+		// Update in-place if the lengths match.
+		if len(keyStr) == len(oldKeyStr) && len(val) == len(oldVal) {
+			copy(oldKeyStr, keyStr)
+			copy(oldVal, val)
 			b.index[key] = idx.setTTL(ts)
 			return
 		}
 
-		// alloc new space.
+		// Allocate new space if lengths differ.
 		b.unused += uint64(len(entry))
 	}
 
-	// insert.
-	b.index[key] = b.appendEntry(kstr, val, ts)
+	// Insert new entry.
+	b.index[key] = b.appendEntry(keyStr, val, ts)
 }
 
-func (b *bucket) appendEntry(kstr, val []byte, ts int64) Idx {
+// appendEntry appends a key-value entry to the data slice and returns the index.
+func (b *bucket) appendEntry(keyStr, val []byte, ts int64) Idx {
 	idx := newIdx(len(b.data), ts)
-	// append klen, vlen, key, val.
-	b.data = binary.AppendUvarint(b.data, uint64(len(kstr)))
+	// Append key length, value length, key, and value.
+	b.data = binary.AppendUvarint(b.data, uint64(len(keyStr)))
 	b.data = binary.AppendUvarint(b.data, uint64(len(val)))
-	b.data = append(b.data, kstr...)
+	b.data = append(b.data, keyStr...)
 	b.data = append(b.data, val...)
 	return idx
 }
 
-func (b *bucket) remove(key Key, kstr string) bool {
-	idx, ok := b.cmap[kstr]
-	if ok {
-		b.removeConflict(kstr, idx)
+// remove deletes the key-value pair from the bucket.
+func (b *bucket) remove(key Key, keyStr string) bool {
+	idx, found := b.conflictMap[keyStr]
+	if found {
+		b.removeConflictEntry(keyStr, idx)
 		return !idx.expired()
 	}
 
-	idx, ok = b.index[key]
-	if ok {
-		b.removeIndex(key, idx)
+	idx, found = b.index[key]
+	if found {
+		b.removeIndexEntry(key, idx)
 		return !idx.expired()
 	}
 
 	return false
 }
 
-func (b *bucket) setTTL(key Key, kstr string, ts int64) bool {
-	idx, ok := b.cmap[kstr]
-	if ok && !idx.expired() {
-		b.cmap[kstr] = newIdx(idx.start(), ts)
+// setTTL updates the expiration timestamp for a given key.
+func (b *bucket) setTTL(key Key, keyStr string, ts int64) bool {
+	idx, found := b.conflictMap[keyStr]
+	if found && !idx.expired() {
+		b.conflictMap[keyStr] = newIdx(idx.start(), ts)
 		return true
 	}
 
-	idx, ok = b.index[key]
-	if ok && !idx.expired() {
+	idx, found = b.index[key]
+	if found && !idx.expired() {
 		b.index[key] = newIdx(idx.start(), ts)
 		return true
 	}
@@ -155,16 +150,17 @@ func (b *bucket) setTTL(key Key, kstr string, ts int64) bool {
 	return false
 }
 
-func (b *bucket) scan(f Walker) (next bool) {
-	next = true
+// scan iterates over all alive key-value pairs, calling the Walker function for each.
+func (b *bucket) scan(walker Walker) (continueIteration bool) {
+	continueIteration = true
 
-	for _, idx := range b.cmap {
+	for _, idx := range b.conflictMap {
 		if idx.expired() {
 			continue
 		}
-		_, kstr, val := b.find(idx)
-		next = f(kstr, val, idx.TTL())
-		if !next {
+		_, keyBytes, val := b.findEntry(idx)
+		continueIteration = walker(keyBytes, val, idx.TTL())
+		if !continueIteration {
 			return
 		}
 	}
@@ -173,20 +169,20 @@ func (b *bucket) scan(f Walker) (next bool) {
 		if idx.expired() {
 			continue
 		}
-		_, kstr, val := b.find(idx)
-		next = f(kstr, val, idx.TTL())
-		if !next {
+		_, keyBytes, val := b.findEntry(idx)
+		continueIteration = walker(keyBytes, val, idx.TTL())
+		if !continueIteration {
 			return
 		}
 	}
 	return
 }
 
-// eliminate the expired key-value pairs.
-func (b *bucket) eliminate() {
-	var failed int
+// eliminate removes expired key-value pairs and triggers migration if necessary.
+func (b *bucket) evictExpiredItems() {
+	var failCount int
 	if b.options.DisableEvict {
-		goto MIG
+		goto CHECK_MIGRATION
 	}
 
 	b.interval++
@@ -195,104 +191,105 @@ func (b *bucket) eliminate() {
 	}
 	b.interval = 0
 
-	// probing
-	for key, idx := range b.cmap {
-		b.probe++
+	// Probing
+	for keyStr, idx := range b.conflictMap {
+		b.probes++
 		if idx.expired() {
-			b.removeConflict(key, idx)
-			b.evict++
+			b.removeConflictEntry(keyStr, idx)
+			b.evictions++
 		}
 	}
 
 	for key, idx := range b.index {
-		b.probe++
+		b.probes++
 		if idx.expired() {
-			b.removeIndex(key, idx)
-			b.evict++
-			failed = 0
-
+			b.removeIndexEntry(key, idx)
+			b.evictions++
+			failCount = 0
 		} else {
-			failed++
-			if failed > maxFailCount {
+			failCount++
+			if failCount > maxFailCount {
 				break
 			}
 		}
 	}
 
-MIG:
-	// check need to migrate.
-	rate := float64(b.unused) / float64(len(b.data))
-	if rate >= b.options.MigrateRatio {
+CHECK_MIGRATION:
+	// Check if migration is needed.
+	unusedRate := float64(b.unused) / float64(len(b.data))
+	if unusedRate >= b.options.MigrateRatio {
 		b.migrate()
 	}
 }
 
-// migrate move valid key-value pairs to the new container to save memory.
+// migrate transfers valid key-value pairs to a new container to save memory.
 func (b *bucket) migrate() {
-	newData := bpool.Get(len(b.data))[:0]
+	newData := bufferPool.Get(len(b.data))[:0]
 
-	// migrate data to new bucket.
+	// Migrate data to the new bucket.
 	for key, idx := range b.index {
 		if idx.expired() {
 			delete(b.index, key)
 			continue
 		}
-		// update with new position.
+		// Update with new position.
 		b.index[key] = newIdxx(len(newData), idx)
-		entry, _, _ := b.find(idx)
+		entry, _, _ := b.findEntry(idx)
 		newData = append(newData, entry...)
 	}
 
-	for kstr, idx := range b.cmap {
+	for keyStr, idx := range b.conflictMap {
 		if idx.expired() {
-			delete(b.cmap, kstr)
+			delete(b.conflictMap, keyStr)
 			continue
 		}
-		key := Key(b.options.HashFn(kstr))
-		// check if conflict.
-		_, ok := b.index[key]
-		if ok {
-			b.cmap[kstr] = newIdxx(len(newData), idx)
+		key := Key(b.options.HashFn(keyStr))
+		// Check if conflict exists.
+		if _, exists := b.index[key]; exists {
+			b.conflictMap[keyStr] = newIdxx(len(newData), idx)
 		} else {
 			b.index[key] = newIdxx(len(newData), idx)
-			delete(b.cmap, kstr)
+			delete(b.conflictMap, keyStr)
 		}
-		entry, _, _ := b.find(idx)
+		entry, _, _ := b.findEntry(idx)
 		newData = append(newData, entry...)
 	}
 
-	bpool.Put(b.data)
+	bufferPool.Put(b.data)
 	b.data = newData
 	b.unused = 0
-	b.migrates++
+	b.migrations++
 }
 
-func (b *bucket) find(idx Idx) (entry, kstr, val []byte) {
-	var index = idx.start()
-	// klen
-	klen, n := binary.Uvarint(b.data[index:])
-	index += n
-	// vlen
-	vlen, n := binary.Uvarint(b.data[index:])
-	index += n
-	// kstr
-	kstr = b.data[index : index+int(klen)]
-	index += int(klen)
-	// val
-	val = b.data[index : index+int(vlen)]
-	index += int(vlen)
+// findEntry retrieves the full entry, key, and value bytes for the given index.
+func (b *bucket) findEntry(idx Idx) (entry, key, val []byte) {
+	position := idx.start()
+	// Key length
+	keyLen, bytesRead := binary.Uvarint(b.data[position:])
+	position += bytesRead
+	// Value length
+	valLen, bytesRead := binary.Uvarint(b.data[position:])
+	position += bytesRead
+	// Key
+	key = b.data[position : position+int(keyLen)]
+	position += int(keyLen)
+	// Value
+	val = b.data[position : position+int(valLen)]
+	position += int(valLen)
 
-	return b.data[idx.start():index], kstr, val
+	return b.data[idx.start():position], key, val
 }
 
-func (b *bucket) removeConflict(key string, idx Idx) {
-	entry, _, _ := b.find(idx)
+// removeConflictEntry removes a conflict entry from the conflict map.
+func (b *bucket) removeConflictEntry(key string, idx Idx) {
+	entry, _, _ := b.findEntry(idx)
 	b.unused += uint64(len(entry))
-	delete(b.cmap, key)
+	delete(b.conflictMap, key)
 }
 
-func (b *bucket) removeIndex(key Key, idx Idx) {
-	entry, _, _ := b.find(idx)
+// removeIndexEntry removes an index entry from the index map.
+func (b *bucket) removeIndexEntry(key Key, idx Idx) {
+	entry, _, _ := b.findEntry(idx)
 	b.unused += uint64(len(entry))
 	delete(b.index, key)
 }

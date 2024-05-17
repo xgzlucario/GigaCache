@@ -86,7 +86,7 @@ func benchmark(options cache.Options) {
 	}
 
 	// Stat
-	stat := bc.Stat()
+	stat := bc.GetStats()
 
 	fmt.Printf("[Cache] %.0fs | %dw | len: %dw | alloc: %v (unused: %.1f%%)\n",
 		time.Since(start).Seconds(),
@@ -96,7 +96,7 @@ func benchmark(options cache.Options) {
 		stat.UnusedRate(),
 	)
 	fmt.Printf("[Evict] probe: %vw / %vw (%.1f%%) | mgr: %d\n",
-		stat.Evict/1e5, stat.Probe/1e5, stat.EvictRate(),
+		stat.Evict/1e5, stat.Probe/1e5, stat.EvictionRate(),
 		stat.Migrates)
 
 	// mem stats

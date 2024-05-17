@@ -6,15 +6,12 @@ import (
 )
 
 const (
-	noTTL = 0
-	KB    = 1024
-
-	// maxFailCount indicates that the evict algorithm break
-	// when consecutive unexpired key-value pairs are detected.
-	maxFailCount = 3
+	noTTL        = 0
+	KB           = 1024
+	maxFailCount = 3 // maxFailCount indicates that the eviction algorithm breaks when consecutive unexpired key-value pairs are detected.
 )
 
-var bpool = NewBufferPool()
+var bufferPool = NewBufferPool()
 
 // GigaCache implements a key-value cache.
 type GigaCache struct {
@@ -23,9 +20,9 @@ type GigaCache struct {
 	buckets []*bucket
 }
 
-// New returns new GigaCache instance.
+// New creates a new instance of GigaCache.
 func New(options Options) *GigaCache {
-	if err := checkOptions(options); err != nil {
+	if err := validateOptions(options); err != nil {
 		panic(err)
 	}
 	cache := &GigaCache{
@@ -39,122 +36,124 @@ func New(options Options) *GigaCache {
 	return cache
 }
 
-// getShard returns the bucket and the real key by hash(kstr).
-// sharding and index use different hash function, can reduce the hash conflicts greatly.
-func (c *GigaCache) getShard(kstr string) (*bucket, Key) {
-	hash := c.hashFn(kstr)
+// getShard returns the appropriate bucket and key by hashing the input string.
+// Different hash functions for sharding and indexing significantly reduce hash conflicts.
+func (c *GigaCache) getShard(keyStr string) (*bucket, Key) {
+	hash := c.hashFn(keyStr)
 	hash32 := uint32(hash >> 1)
 	return c.buckets[hash32&c.mask], Key(hash)
 }
 
-// Get returns value with expiration time by the key.
-func (c *GigaCache) Get(kstr string) ([]byte, int64, bool) {
-	b, key := c.getShard(kstr)
-	b.RLock()
-	val, ts, ok := b.get(kstr, key)
-	if ok {
-		val = slices.Clone(val)
+// Get retrieves the value and its expiration time for a given key.
+func (c *GigaCache) Get(keyStr string) ([]byte, int64, bool) {
+	bucket, key := c.getShard(keyStr)
+	bucket.RLock()
+	value, timestamp, found := bucket.get(keyStr, key)
+	if found {
+		value = slices.Clone(value)
 	}
-	b.RUnlock()
-	return val, ts, ok
+	bucket.RUnlock()
+	return value, timestamp, found
 }
 
-// SetTx store key-value pair with deadline.
-func (c *GigaCache) SetTx(kstr string, val []byte, ts int64) {
-	b, key := c.getShard(kstr)
-	b.Lock()
-	b.eliminate()
-	b.set(key, s2b(&kstr), val, ts)
-	b.Unlock()
+// SetTx stores a key-value pair with a specific expiration timestamp.
+func (c *GigaCache) SetTx(keyStr string, value []byte, expiration int64) {
+	bucket, key := c.getShard(keyStr)
+	bucket.Lock()
+	bucket.evictExpiredItems()
+	bucket.set(key, s2b(&keyStr), value, expiration)
+	bucket.Unlock()
 }
 
-// Set store key-value pair.
-func (c *GigaCache) Set(kstr string, val []byte) {
-	c.SetTx(kstr, val, noTTL)
+// Set stores a key-value pair with no expiration.
+func (c *GigaCache) Set(keyStr string, value []byte) {
+	c.SetTx(keyStr, value, noTTL)
 }
 
-// SetEx store key-value pair with expired duration.
-func (c *GigaCache) SetEx(kstr string, val []byte, dur time.Duration) {
-	c.SetTx(kstr, val, GetNanoSec()+int64(dur))
+// SetEx stores a key-value pair with a specific expiration duration.
+func (c *GigaCache) SetEx(keyStr string, value []byte, duration time.Duration) {
+	expiration := GetNanoSec() + int64(duration)
+	c.SetTx(keyStr, value, expiration)
 }
 
-// Remove removes the key-value pair by the key.
-func (c *GigaCache) Remove(kstr string) bool {
-	b, key := c.getShard(kstr)
-	b.Lock()
-	b.eliminate()
-	ok := b.remove(key, kstr)
-	b.Unlock()
-	return ok
+// Remove deletes a key-value pair from the cache.
+func (c *GigaCache) Remove(keyStr string) bool {
+	bucket, key := c.getShard(keyStr)
+	bucket.Lock()
+	bucket.evictExpiredItems()
+	removed := bucket.remove(key, keyStr)
+	bucket.Unlock()
+	return removed
 }
 
-// SetTTL set ttl for key.
-func (c *GigaCache) SetTTL(kstr string, ts int64) bool {
-	b, key := c.getShard(kstr)
-	b.Lock()
-	ok := b.setTTL(key, kstr, ts)
-	b.eliminate()
-	b.Unlock()
-	return ok
+// SetTTL updates the expiration timestamp for a key.
+func (c *GigaCache) SetTTL(keyStr string, expiration int64) bool {
+	bucket, key := c.getShard(keyStr)
+	bucket.Lock()
+	success := bucket.setTTL(key, keyStr, expiration)
+	bucket.evictExpiredItems()
+	bucket.Unlock()
+	return success
 }
 
-// Walker is the callback function for iterator.
-type Walker func(key, val []byte, ttl int64) (next bool)
+// Walker defines a callback function for iterating over key-value pairs.
+type Walker func(key, value []byte, ttl int64) (continueIteration bool)
 
-// Scan walk all alive key-value pairs.
-// DO NOT EDIT the bytes as they are NO COPY.
-func (c *GigaCache) Scan(f Walker) {
-	var next bool
-	for _, b := range c.buckets {
-		b.RLock()
-		next = b.scan(f)
-		b.RUnlock()
-		if !next {
+// Scan iterates over all alive key-value pairs without copying the data.
+// DO NOT MODIFY the bytes as they are not copied.
+func (c *GigaCache) Scan(callback Walker) {
+	for _, bucket := range c.buckets {
+		bucket.RLock()
+		continueIteration := bucket.scan(callback)
+		bucket.RUnlock()
+		if !continueIteration {
 			return
 		}
 	}
 }
 
-// Migrate move all data to new buckets.
+// Migrate transfers all data to new buckets.
 func (c *GigaCache) Migrate() {
-	for _, b := range c.buckets {
-		b.Lock()
-		b.migrate()
-		b.Unlock()
+	for _, bucket := range c.buckets {
+		bucket.Lock()
+		bucket.migrate()
+		bucket.Unlock()
 	}
 }
 
-// Stat is the runtime statistics of GigaCache.
-type Stat struct {
-	Len      int
-	Conflict int
-	Alloc    uint64
-	Unused   uint64
-	Migrates uint64
-	Evict    uint64
-	Probe    uint64
+// Stats represents the runtime statistics of GigaCache.
+type Stats struct {
+	Len       int
+	Conflicts int
+	Alloc     uint64
+	Unused    uint64
+	Migrates  uint64
+	Evict     uint64
+	Probe     uint64
 }
 
-// Stat return the runtime statistics of GigaCache.
-func (c *GigaCache) Stat() (s Stat) {
-	for _, b := range c.buckets {
-		b.RLock()
-		s.Len += len(b.index) + len(b.cmap)
-		s.Conflict += len(b.cmap)
-		s.Alloc += uint64(len(b.data))
-		s.Unused += b.unused
-		s.Migrates += b.migrates
-		s.Evict += b.evict
-		s.Probe += b.probe
-		b.RUnlock()
+// GetStats returns the current runtime statistics of GigaCache.
+func (c *GigaCache) GetStats() (stats Stats) {
+	for _, bucket := range c.buckets {
+		bucket.RLock()
+		stats.Len += len(bucket.index) + len(bucket.conflictMap)
+		stats.Conflicts += len(bucket.conflictMap)
+		stats.Alloc += uint64(len(bucket.data))
+		stats.Unused += bucket.unused
+		stats.Migrates += bucket.migrations
+		stats.Evict += bucket.evictions
+		stats.Probe += bucket.probes
+		bucket.RUnlock()
 	}
 	return
 }
 
-func (s Stat) UnusedRate() float64 {
+// UnusedRate calculates the percentage of unused space in the cache.
+func (s Stats) UnusedRate() float64 {
 	return float64(s.Unused) / float64(s.Alloc) * 100
 }
 
-func (s Stat) EvictRate() float64 {
+// EvictionRate calculates the percentage of evictions relative to probes.
+func (s Stats) EvictionRate() float64 {
 	return float64(s.Evict) / float64(s.Probe) * 100
 }
