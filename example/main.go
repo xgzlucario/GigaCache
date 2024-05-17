@@ -96,7 +96,7 @@ func benchmark(options cache.Options) {
 		stat.UnusedRate(),
 	)
 	fmt.Printf("[Evict] probe: %vw / %vw (%.1f%%) | mgr: %d\n",
-		stat.Evict/1e5, stat.Probe/1e5, stat.EvictionRate(),
+		stat.Evictions/1e5, stat.Probes/1e5, stat.EvictionRate(),
 		stat.Migrates)
 
 	// mem stats

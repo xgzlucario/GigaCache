@@ -176,8 +176,8 @@ func TestEvict(t *testing.T) {
 	assert.Equal(stat.Len, num)
 	assert.Equal(stat.Alloc, uint64(stat.Len*(16+2)))
 	assert.Equal(stat.Unused, uint64(0))
-	assert.Equal(stat.Evict, uint64(0))
-	assert.Greater(stat.Probe, uint64(0))
+	assert.Equal(stat.Evictions, uint64(0))
+	assert.Greater(stat.Probes, uint64(0))
 	assert.Equal(stat.EvictionRate(), float64(0))
 	assert.Equal(stat.UnusedRate(), float64(0))
 
@@ -185,7 +185,7 @@ func TestEvict(t *testing.T) {
 	m.Set("trig1234", []byte("trig1234"))
 
 	stat = m.GetStats()
-	assert.Equal(stat.Len, int(num-stat.Evict+1))
+	assert.Equal(stat.Len, int(num-stat.Evictions+1))
 	assert.Equal(stat.Alloc, uint64(16+2))
 	assert.Equal(stat.Unused, uint64(0))
 	assert.Equal(stat.Migrates, uint64(1))

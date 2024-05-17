@@ -128,8 +128,8 @@ type Stats struct {
 	Alloc     uint64
 	Unused    uint64
 	Migrates  uint64
-	Evict     uint64
-	Probe     uint64
+	Evictions uint64
+	Probes    uint64
 }
 
 // GetStats returns the current runtime statistics of GigaCache.
@@ -141,8 +141,8 @@ func (c *GigaCache) GetStats() (stats Stats) {
 		stats.Alloc += uint64(len(bucket.data))
 		stats.Unused += bucket.unused
 		stats.Migrates += bucket.migrations
-		stats.Evict += bucket.evictions
-		stats.Probe += bucket.probes
+		stats.Evictions += bucket.evictions
+		stats.Probes += bucket.probes
 		bucket.RUnlock()
 	}
 	return
@@ -155,5 +155,5 @@ func (s Stats) UnusedRate() float64 {
 
 // EvictionRate calculates the percentage of evictions relative to probes.
 func (s Stats) EvictionRate() float64 {
-	return float64(s.Evict) / float64(s.Probe) * 100
+	return float64(s.Evictions) / float64(s.Probes) * 100
 }
