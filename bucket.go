@@ -8,7 +8,7 @@ import (
 
 // bucket is the data container for GigaCache.
 type bucket struct {
-	sync.RWMutex
+	rwlocker
 	root    *GigaCache
 	options *Options
 
@@ -29,15 +29,37 @@ type bucket struct {
 	probes     uint64
 }
 
+type rwlocker interface {
+	Lock()
+	Unlock()
+	RLock()
+	RUnlock()
+}
+
+type emptyLocker struct{}
+
+func (emptyLocker) Lock() {}
+
+func (emptyLocker) Unlock() {}
+
+func (emptyLocker) RLock() {}
+
+func (emptyLocker) RUnlock() {}
+
 // newBucket initializes and returns a new bucket instance.
 func newBucket(options Options, root *GigaCache) *bucket {
-	return &bucket{
+	bucket := &bucket{
+		rwlocker:    &emptyLocker{},
 		root:        root,
 		options:     &options,
 		index:       make(map[Key]Idx, options.IndexSize),
 		conflictMap: make(map[string]Idx),
 		data:        make([]byte, 0, options.BufferSize),
 	}
+	if options.ConcurrencySafe {
+		bucket.rwlocker = &sync.RWMutex{}
+	}
+	return bucket
 }
 
 // get retrieves the value and its expiration time for the given key string.

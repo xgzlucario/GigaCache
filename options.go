@@ -26,16 +26,20 @@ type Options struct {
 
 	// HashFn is custom hash function, default is runtime.memhash.
 	HashFn HashFn
+
+	// ConcurrencySafe specifies whether RWLocker are required for multithreading safety.
+	ConcurrencySafe bool
 }
 
 var DefaultOptions = Options{
-	ShardCount:    1024,
-	IndexSize:     1024,
-	BufferSize:    64 * KB,
-	EvictInterval: 3,
-	DisableEvict:  false,
-	MigrateRatio:  0.4,
-	HashFn:        MemHash,
+	ShardCount:      1024,
+	IndexSize:       1024,
+	BufferSize:      64 * KB,
+	EvictInterval:   3,
+	DisableEvict:    false,
+	MigrateRatio:    0.4,
+	HashFn:          MemHash,
+	ConcurrencySafe: true,
 }
 
 func validateOptions(options Options) error {

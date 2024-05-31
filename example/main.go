@@ -48,6 +48,7 @@ func main() {
 
 	for _, arg := range []uint8{3} {
 		options.EvictInterval = arg
+		options.ConcurrencySafe = false
 		fmt.Println("=====Options=====")
 		fmt.Printf("%+v\n", options)
 		benchmark(options)

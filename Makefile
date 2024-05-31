@@ -10,7 +10,7 @@ bench:
 	go test -bench . -benchmem
 
 web-profile:
-	go tool pprof -http=:18081 "http://localhost:6060/debug/pprof/profile?seconds=60"
+	go tool pprof -http=:18081 "http://localhost:6060/debug/pprof/profile?seconds=30"
 
 cmd-heap:
 	go tool pprof "http://localhost:6060/debug/pprof/heap"
