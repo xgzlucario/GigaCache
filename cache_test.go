@@ -256,9 +256,7 @@ func TestDataAlloc(t *testing.T) {
 
 func TestScanSmall(t *testing.T) {
 	assert := assert.New(t)
-	opt := DefaultOptions
-	opt.ShardCount = 1024
-	m := New(opt)
+	m := New(DefaultOptions)
 
 	for i := 0; i < 100; i++ {
 		k, v := genKV(i)
@@ -277,4 +275,19 @@ func TestScanSmall(t *testing.T) {
 
 func TestUtils(t *testing.T) {
 	_ = SizeUvarint(1)
+}
+
+func TestHSetNewField(t *testing.T) {
+	assert := assert.New(t)
+	m := New(DefaultOptions)
+
+	newField := m.Set("k1", []byte("v1"))
+	assert.True(newField)
+
+	newField = m.Set("k1", []byte("v1"))
+	assert.False(newField)
+
+	m.Remove("k1")
+	newField = m.Set("k1", []byte("v1"))
+	assert.True(newField)
 }

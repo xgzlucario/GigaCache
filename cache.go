@@ -56,23 +56,24 @@ func (c *GigaCache) Get(keyStr string) ([]byte, int64, bool) {
 }
 
 // SetTx stores a key-value pair with a specific expiration timestamp.
-func (c *GigaCache) SetTx(keyStr string, value []byte, expiration int64) {
+func (c *GigaCache) SetTx(keyStr string, value []byte, expiration int64) bool {
 	bucket, key := c.getShard(keyStr)
 	bucket.Lock()
 	bucket.evictExpiredItems()
-	bucket.set(key, s2b(&keyStr), value, expiration)
+	newField := bucket.set(key, s2b(&keyStr), value, expiration)
 	bucket.Unlock()
+	return newField
 }
 
 // Set stores a key-value pair with no expiration.
-func (c *GigaCache) Set(keyStr string, value []byte) {
-	c.SetTx(keyStr, value, noTTL)
+func (c *GigaCache) Set(keyStr string, value []byte) bool {
+	return c.SetTx(keyStr, value, noTTL)
 }
 
 // SetEx stores a key-value pair with a specific expiration duration.
-func (c *GigaCache) SetEx(keyStr string, value []byte, duration time.Duration) {
+func (c *GigaCache) SetEx(keyStr string, value []byte, duration time.Duration) bool {
 	expiration := GetNanoSec() + int64(duration)
-	c.SetTx(keyStr, value, expiration)
+	return c.SetTx(keyStr, value, expiration)
 }
 
 // Remove deletes a key-value pair from the cache.

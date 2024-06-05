@@ -82,7 +82,7 @@ func (b *bucket) get(keyStr string, key Key) ([]byte, int64, bool) {
 }
 
 // set stores the key-value pair into the bucket with an expiration timestamp.
-func (b *bucket) set(key Key, keyStr, val []byte, ts int64) {
+func (b *bucket) set(key Key, keyStr, val []byte, ts int64) (newField bool) {
 	// Check conflict map.
 	idx, found := b.conflictMap[b2s(keyStr)]
 	if found {
@@ -93,13 +93,13 @@ func (b *bucket) set(key Key, keyStr, val []byte, ts int64) {
 			copy(oldKeyStr, keyStr)
 			copy(oldVal, val)
 			b.conflictMap[string(keyStr)] = idx.setTTL(ts)
-			return
+			return false
 		}
 
 		// Allocate new space if lengths differ.
 		b.unused += uint32(len(entry))
 		b.conflictMap[string(keyStr)] = b.appendEntry(keyStr, val, ts)
-		return
+		return false
 	}
 
 	// Check index map.
@@ -110,7 +110,7 @@ func (b *bucket) set(key Key, keyStr, val []byte, ts int64) {
 		// Insert to conflictMap if hash conflict occurs.
 		if !idx.expired() && !bytes.Equal(keyStr, oldKeyStr) {
 			b.conflictMap[string(keyStr)] = b.appendEntry(keyStr, val, ts)
-			return
+			return false
 		}
 
 		// Update in-place if the lengths match.
@@ -118,7 +118,7 @@ func (b *bucket) set(key Key, keyStr, val []byte, ts int64) {
 			copy(oldKeyStr, keyStr)
 			copy(oldVal, val)
 			b.index[key] = idx.setTTL(ts)
-			return
+			return false
 		}
 
 		// Allocate new space if lengths differ.
@@ -127,6 +127,7 @@ func (b *bucket) set(key Key, keyStr, val []byte, ts int64) {
 
 	// Insert new entry.
 	b.index[key] = b.appendEntry(keyStr, val, ts)
+	return true
 }
 
 // appendEntry appends a key-value entry to the data slice and returns the index.
