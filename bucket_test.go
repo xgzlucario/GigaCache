@@ -50,19 +50,19 @@ func TestBucket(t *testing.T) {
 			assert.Equal(100, count)
 		}
 
-		assert.Equal(10, len(m.index))
-		assert.Equal(90, len(m.conflictMap))
+		assert.Equal(10, m.index.Len())
+		assert.Equal(90, m.conflictMap.Len())
 
 		m.evictExpiredItems()
 		scanCheck()
 		m.migrate()
 
 		if i == 0 {
-			assert.Equal(100, len(m.index)) // migrate use memhash and migrate all keys to index.
-			assert.Equal(0, len(m.conflictMap))
+			assert.Equal(100, m.index.Len()) // migrate use memhash and migrate all keys to index.
+			assert.Equal(0, m.conflictMap.Len())
 		} else {
-			assert.Equal(10, len(m.index))
-			assert.Equal(90, len(m.conflictMap))
+			assert.Equal(10, m.index.Len())
+			assert.Equal(90, m.conflictMap.Len())
 		}
 		scanCheck()
 	}
@@ -86,8 +86,8 @@ func TestBucketExpired(t *testing.T) {
 			assert.Equal(ts, ttl/timeCarry*timeCarry)
 		}
 
-		assert.Equal(90, len(m.conflictMap))
-		assert.Equal(10, len(m.index))
+		assert.Equal(90, m.conflictMap.Len())
+		assert.Equal(10, m.index.Len())
 
 		// expired
 		time.Sleep(time.Second * 2)
@@ -100,8 +100,8 @@ func TestBucketExpired(t *testing.T) {
 		assert.Equal(count, 0)
 
 		m.evictExpiredItems()
-		assert.Equal(0, len(m.conflictMap))
-		assert.Equal(0, len(m.index))
+		assert.Equal(0, m.conflictMap.Len())
+		assert.Equal(0, m.index.Len())
 	})
 }
 
@@ -124,11 +124,11 @@ func TestBucketMigrate(t *testing.T) {
 	}
 
 	time.Sleep(time.Second * 2)
-	assert.Equal(90, len(m.conflictMap))
-	assert.Equal(10, len(m.index))
+	assert.Equal(90, m.conflictMap.Len())
+	assert.Equal(10, m.index.Len())
 	m.migrate()
-	assert.Equal(0, len(m.conflictMap))
-	assert.Equal(0, len(m.index))
+	assert.Equal(0, m.conflictMap.Len())
+	assert.Equal(0, m.index.Len())
 }
 
 func TestBucketRemove(t *testing.T) {
@@ -147,8 +147,8 @@ func TestBucketRemove(t *testing.T) {
 			assert.Equal(val, nilBytes)
 			assert.Equal(ts, int64(0))
 		}
-		assert.Equal(0, len(m.conflictMap))
-		assert.Equal(0, len(m.index))
+		assert.Equal(0, m.conflictMap.Len())
+		assert.Equal(0, m.index.Len())
 	})
 
 	t.Run("remove-ttl", func(t *testing.T) {

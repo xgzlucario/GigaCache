@@ -136,8 +136,8 @@ type Stats struct {
 func (c *GigaCache) GetStats() (stats Stats) {
 	for _, bucket := range c.buckets {
 		bucket.RLock()
-		stats.Len += len(bucket.index) + len(bucket.conflictMap)
-		stats.Conflicts += len(bucket.conflictMap)
+		stats.Len += bucket.index.Len() + bucket.conflictMap.Len()
+		stats.Conflicts += bucket.conflictMap.Len()
 		stats.Alloc += uint64(len(bucket.data))
 		stats.Unused += uint64(bucket.unused)
 		stats.Migrates += uint64(bucket.migrations)

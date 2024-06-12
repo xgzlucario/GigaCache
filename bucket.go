@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"sync"
+
+	"github.com/cockroachdb/swiss"
 )
 
 // bucket is the data container for GigaCache.
@@ -13,10 +15,10 @@ type bucket struct {
 	options *Options
 
 	// index maps hashed keys to their storage positions in data.
-	index map[Key]Idx
+	index *swiss.Map[Key, Idx]
 
 	// conflictMap stores keys that have hash conflicts with the index.
-	conflictMap map[string]Idx
+	conflictMap *swiss.Map[string, Idx]
 
 	// data stores all key-value bytes data.
 	data []byte
@@ -52,8 +54,8 @@ func newBucket(options Options, root *GigaCache) *bucket {
 		rwlocker:    &emptyLocker{},
 		root:        root,
 		options:     &options,
-		index:       make(map[Key]Idx, options.IndexSize),
-		conflictMap: make(map[string]Idx),
+		index:       swiss.New[Key, Idx](options.IndexSize),
+		conflictMap: swiss.New[string, Idx](8),
 		data:        make([]byte, 0, options.BufferSize),
 	}
 	if options.ConcurrencySafe {
@@ -65,14 +67,14 @@ func newBucket(options Options, root *GigaCache) *bucket {
 // get retrieves the value and its expiration time for the given key string.
 func (b *bucket) get(keyStr string, key Key) ([]byte, int64, bool) {
 	// Check conflict map.
-	idx, found := b.conflictMap[keyStr]
+	idx, found := b.conflictMap.Get(keyStr)
 	if found && !idx.expired() {
 		_, _, val := b.findEntry(idx)
 		return val, idx.TTL(), found
 	}
 
 	// Check index map.
-	idx, found = b.index[key]
+	idx, found = b.index.Get(key)
 	if found && !idx.expired() {
 		_, _, val := b.findEntry(idx)
 		return val, idx.TTL(), found
@@ -84,7 +86,7 @@ func (b *bucket) get(keyStr string, key Key) ([]byte, int64, bool) {
 // set stores the key-value pair into the bucket with an expiration timestamp.
 func (b *bucket) set(key Key, keyStr, val []byte, ts int64) (newField bool) {
 	// Check conflict map.
-	idx, found := b.conflictMap[b2s(keyStr)]
+	idx, found := b.conflictMap.Get(b2s(keyStr))
 	if found {
 		entry, oldKeyStr, oldVal := b.findEntry(idx)
 
@@ -92,24 +94,24 @@ func (b *bucket) set(key Key, keyStr, val []byte, ts int64) (newField bool) {
 		if len(keyStr) == len(oldKeyStr) && len(val) == len(oldVal) {
 			copy(oldKeyStr, keyStr)
 			copy(oldVal, val)
-			b.conflictMap[string(keyStr)] = idx.setTTL(ts)
+			b.conflictMap.Put(string(keyStr), idx.setTTL(ts))
 			return false
 		}
 
 		// Allocate new space if lengths differ.
 		b.unused += uint32(len(entry))
-		b.conflictMap[string(keyStr)] = b.appendEntry(keyStr, val, ts)
+		b.conflictMap.Put(string(keyStr), b.appendEntry(keyStr, val, ts))
 		return false
 	}
 
 	// Check index map.
-	idx, found = b.index[key]
+	idx, found = b.index.Get(key)
 	if found {
 		entry, oldKeyStr, oldVal := b.findEntry(idx)
 
 		// Insert to conflictMap if hash conflict occurs.
 		if !idx.expired() && !bytes.Equal(keyStr, oldKeyStr) {
-			b.conflictMap[string(keyStr)] = b.appendEntry(keyStr, val, ts)
+			b.conflictMap.Put(string(keyStr), b.appendEntry(keyStr, val, ts))
 			return false
 		}
 
@@ -117,7 +119,7 @@ func (b *bucket) set(key Key, keyStr, val []byte, ts int64) (newField bool) {
 		if len(keyStr) == len(oldKeyStr) && len(val) == len(oldVal) {
 			copy(oldKeyStr, keyStr)
 			copy(oldVal, val)
-			b.index[key] = idx.setTTL(ts)
+			b.index.Put(key, idx.setTTL(ts))
 			return false
 		}
 
@@ -126,7 +128,7 @@ func (b *bucket) set(key Key, keyStr, val []byte, ts int64) (newField bool) {
 	}
 
 	// Insert new entry.
-	b.index[key] = b.appendEntry(keyStr, val, ts)
+	b.index.Put(key, b.appendEntry(keyStr, val, ts))
 	return true
 }
 
@@ -143,13 +145,13 @@ func (b *bucket) appendEntry(keyStr, val []byte, ts int64) Idx {
 
 // remove deletes the key-value pair from the bucket.
 func (b *bucket) remove(key Key, keyStr string) bool {
-	idx, found := b.conflictMap[keyStr]
+	idx, found := b.conflictMap.Get(keyStr)
 	if found {
 		b.removeConflictEntry(keyStr, idx)
 		return !idx.expired()
 	}
 
-	idx, found = b.index[key]
+	idx, found = b.index.Get(key)
 	if found {
 		b.removeIndexEntry(key, idx)
 		return !idx.expired()
@@ -160,15 +162,15 @@ func (b *bucket) remove(key Key, keyStr string) bool {
 
 // setTTL updates the expiration timestamp for a given key.
 func (b *bucket) setTTL(key Key, keyStr string, ts int64) bool {
-	idx, found := b.conflictMap[keyStr]
+	idx, found := b.conflictMap.Get(keyStr)
 	if found && !idx.expired() {
-		b.conflictMap[keyStr] = newIdx(idx.start(), ts)
+		b.conflictMap.Put(keyStr, newIdx(idx.start(), ts))
 		return true
 	}
 
-	idx, found = b.index[key]
+	idx, found = b.index.Get(key)
 	if found && !idx.expired() {
-		b.index[key] = newIdx(idx.start(), ts)
+		b.index.Put(key, newIdx(idx.start(), ts))
 		return true
 	}
 
@@ -179,26 +181,24 @@ func (b *bucket) setTTL(key Key, keyStr string, ts int64) bool {
 func (b *bucket) scan(walker Walker) (continueIteration bool) {
 	continueIteration = true
 
-	for _, idx := range b.conflictMap {
+	b.conflictMap.All(func(_ string, idx Idx) bool {
 		if idx.expired() {
-			continue
+			return true
 		}
 		_, keyBytes, val := b.findEntry(idx)
 		continueIteration = walker(keyBytes, val, idx.TTL())
-		if !continueIteration {
-			return
-		}
-	}
+		return continueIteration
+	})
 
-	for _, idx := range b.index {
-		if idx.expired() {
-			continue
-		}
-		_, keyBytes, val := b.findEntry(idx)
-		continueIteration = walker(keyBytes, val, idx.TTL())
-		if !continueIteration {
-			return
-		}
+	if continueIteration {
+		b.index.All(func(_ Key, idx Idx) bool {
+			if idx.expired() {
+				return true
+			}
+			_, keyBytes, val := b.findEntry(idx)
+			continueIteration = walker(keyBytes, val, idx.TTL())
+			return continueIteration
+		})
 	}
 	return
 }
@@ -217,15 +217,16 @@ func (b *bucket) evictExpiredItems() {
 	b.interval = 0
 
 	// Probing
-	for keyStr, idx := range b.conflictMap {
+	b.conflictMap.All(func(keyStr string, idx Idx) bool {
 		b.probes++
 		if idx.expired() {
 			b.removeConflictEntry(keyStr, idx)
 			b.evictions++
 		}
-	}
+		return true
+	})
 
-	for key, idx := range b.index {
+	b.index.All(func(key Key, idx Idx) bool {
 		b.probes++
 		if idx.expired() {
 			b.removeIndexEntry(key, idx)
@@ -234,10 +235,11 @@ func (b *bucket) evictExpiredItems() {
 		} else {
 			failCount++
 			if failCount > maxFailCount {
-				break
+				return false
 			}
 		}
-	}
+		return true
+	})
 
 CHECK_MIGRATION:
 	// Check if migration is needed.
@@ -257,33 +259,35 @@ func (b *bucket) migrate() {
 	}
 
 	// Migrate data to the new bucket.
-	for key, idx := range b.index {
+	b.index.All(func(key Key, idx Idx) bool {
 		if idx.expired() {
-			delete(b.index, key)
-			continue
+			b.index.Delete(key)
+			return true
 		}
 		// Update with new position.
-		b.index[key] = newIdxx(len(newData), idx)
+		b.index.Put(key, newIdxx(len(newData), idx))
 		entry, _, _ := b.findEntry(idx)
 		newData = append(newData, entry...)
-	}
+		return true
+	})
 
-	for keyStr, idx := range b.conflictMap {
+	b.conflictMap.All(func(keyStr string, idx Idx) bool {
 		if idx.expired() {
-			delete(b.conflictMap, keyStr)
-			continue
+			b.conflictMap.Delete(keyStr)
+			return true
 		}
 		key := Key(b.options.HashFn(keyStr))
 		// Check if conflict exists.
-		if _, exists := b.index[key]; exists {
-			b.conflictMap[keyStr] = newIdxx(len(newData), idx)
+		if _, exists := b.index.Get(key); exists {
+			b.conflictMap.Put(keyStr, newIdxx(len(newData), idx))
 		} else {
-			b.index[key] = newIdxx(len(newData), idx)
-			delete(b.conflictMap, keyStr)
+			b.index.Put(key, newIdxx(len(newData), idx))
+			b.conflictMap.Delete(keyStr)
 		}
 		entry, _, _ := b.findEntry(idx)
 		newData = append(newData, entry...)
-	}
+		return true
+	})
 
 	if b.root != nil {
 		b.root.reusedBuf = b.data
@@ -316,12 +320,12 @@ func (b *bucket) findEntry(idx Idx) (entry, key, val []byte) {
 func (b *bucket) removeConflictEntry(key string, idx Idx) {
 	entry, _, _ := b.findEntry(idx)
 	b.unused += uint32(len(entry))
-	delete(b.conflictMap, key)
+	b.conflictMap.Delete(key)
 }
 
 // removeIndexEntry removes an index entry from the index map.
 func (b *bucket) removeIndexEntry(key Key, idx Idx) {
 	entry, _, _ := b.findEntry(idx)
 	b.unused += uint32(len(entry))
-	delete(b.index, key)
+	b.index.Delete(key)
 }
