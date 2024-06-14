@@ -46,7 +46,7 @@ func main() {
 
 	options := cache.DefaultOptions
 
-	for _, arg := range []uint8{3} {
+	for _, arg := range []uint8{3, 5, 10} {
 		options.EvictInterval = arg
 		options.ConcurrencySafe = false
 		fmt.Println("=====Options=====")

@@ -23,9 +23,3 @@ cmd-allocs:
 
 web-allocs:
 	go tool pprof -http=:18083 "http://localhost:6060/debug/pprof/allocs?seconds=60"
-
-cmd-mutex:
-	go tool pprof "http://localhost:6060/debug/pprof/mutex"
-
-cmd-block:
-	go tool pprof "http://localhost:6060/debug/pprof/block"

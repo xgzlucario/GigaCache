@@ -2,55 +2,36 @@ package cache
 
 import (
 	"math"
+	"time"
+
+	"github.com/zeebo/xxh3"
 )
 
-// Key is the key of GigaCache.
-// +------------------------------------------------+
-// |                    hash(64)                    |
-// +------------------------------------------------+
-
-type Key = uint64
-
-// Idx is the index of GigaCache.
-// +-----------------------+-------------------------+
-// |       start(32)       |       ttl(uint32)       |
-// +-----------------------+-------------------------+
+type Key = xxh3.Uint128
 
 type Idx struct {
-	h, l uint32
+	hi uint32 // hi is position of data.
+	lo int64  // lo is timestamp of key.
 }
 
-const (
-	ttlMask   = 0x00000000ffffffff
-	timeCarry = 1e9
-)
-
 func (i Idx) start() int {
-	return int(i.h)
+	return int(i.hi)
 }
 
 func (i Idx) expired() bool {
-	return i.l > noTTL && i.l < GetSec()
+	return i.lo > noTTL && i.lo < time.Now().UnixNano()
+}
+
+func (i Idx) expiredWith(nanosec int64) bool {
+	return i.lo > noTTL && i.lo < nanosec
 }
 
 func (i Idx) setTTL(ts int64) Idx {
-	i.l = convTTL(ts)
+	i.lo = ts
 	return i
 }
 
-func (i Idx) TTL() int64 {
-	return int64(i.l) * timeCarry
-}
-
-func convTTL(ttl int64) uint32 {
-	if ttl < 0 {
-		panic("ttl is negetive")
-	}
-	check(ttl / timeCarry)
-	return uint32(ttl / timeCarry)
-}
-
-func check[T int | int64](x T) {
+func check(x int) {
 	if x > math.MaxUint32 {
 		panic("x overflows the limit of uint32")
 	}
@@ -58,11 +39,11 @@ func check[T int | int64](x T) {
 
 func newIdx(start int, ttl int64) Idx {
 	check(start)
-	return Idx{h: uint32(start), l: convTTL(ttl)}
+	return Idx{hi: uint32(start), lo: ttl}
 }
 
 // newIdxx is more efficient than newIdx.
 func newIdxx(start int, idx Idx) Idx {
 	check(start)
-	return Idx{h: uint32(start), l: idx.l}
+	return Idx{hi: uint32(start), lo: idx.lo}
 }

@@ -60,6 +60,9 @@ func main() {
 			k, v := genKV(i)
 			m[string(k)] = v
 		}
+
+	default:
+		panic("cache not found")
 	}
 	cost := time.Since(start)
 

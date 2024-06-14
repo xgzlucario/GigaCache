@@ -100,7 +100,7 @@ func TestCache(t *testing.T) {
 	}
 
 	// wait for expired.
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second)
 
 	// check.
 	{
@@ -163,7 +163,7 @@ func TestEvict(t *testing.T) {
 		k, v := genKV(i)
 		m.SetEx(k, v, time.Second)
 	}
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second)
 
 	// stat
 	stat := m.GetStats()
@@ -179,7 +179,7 @@ func TestEvict(t *testing.T) {
 	m.Set("trig1234", []byte("trig1234"))
 
 	stat = m.GetStats()
-	assert.Equal(stat.Len, int(num-stat.Evictions+1))
+	assert.Equal(stat.Len, 1)
 	assert.Equal(stat.Alloc, uint64(16+2))
 	assert.Equal(stat.Unused, uint64(0))
 	assert.Equal(stat.Migrates, uint64(1))
@@ -192,40 +192,6 @@ func TestDataAlloc(t *testing.T) {
 		opt := DefaultOptions
 		opt.ShardCount = 1
 		opt.DisableEvict = true
-		m := New(opt)
-		m.Set("hello", []byte("world"))
-
-		m.Set("abc", []byte("123"))
-		// stat
-		stat := m.GetStats()
-		assert.Equal(stat.Len, 2)
-		assert.Equal(stat.Alloc, uint64(12+8))
-		assert.Equal(stat.Unused, uint64(0))
-
-		// set same data(update inplaced).
-		m.Set("abc", []byte("234"))
-
-		stat = m.GetStats()
-		assert.Equal(stat.Len, 2)
-		assert.Equal(stat.Alloc, uint64(12+8))
-		assert.Equal(stat.Unused, uint64(0))
-
-		// set great.
-		m.Set("abc", []byte("12345"))
-
-		stat = m.GetStats()
-		assert.Equal(stat.Len, 2)
-		assert.Equal(stat.Alloc, uint64(12+8+10))
-		assert.Equal(stat.Unused, uint64(8))
-	})
-
-	t.Run("testHash", func(t *testing.T) {
-		opt := DefaultOptions
-		opt.ShardCount = 1
-		opt.DisableEvict = true
-		opt.HashFn = func(s string) uint64 {
-			return 0
-		}
 		m := New(opt)
 		m.Set("hello", []byte("world"))
 
@@ -290,4 +256,25 @@ func TestHSetNewField(t *testing.T) {
 	m.Remove("k1")
 	newField = m.Set("k1", []byte("v1"))
 	assert.True(newField)
+}
+
+func TestEvictManual(t *testing.T) {
+	assert := assert.New(t)
+	options := DefaultOptions
+	options.ShardCount = 1
+	options.DisableEvict = true
+
+	m := New(options)
+
+	m.SetEx("foo", []byte("bar"), time.Second)
+	time.Sleep(time.Second)
+
+	m.Set("test", []byte("test"))
+	stat := m.GetStats()
+	assert.Equal(stat.Len, 2)
+
+	m.EvictExpiredKeys()
+	stat = m.GetStats()
+	assert.Equal(stat.Len, 1)
+	assert.Equal(stat.Evictions, uint64(1))
 }

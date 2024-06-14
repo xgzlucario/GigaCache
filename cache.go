@@ -1,22 +1,21 @@
 package cache
 
 import (
+	"math/rand/v2"
 	"slices"
 	"time"
 )
 
 const (
-	noTTL        = 0
-	KB           = 1024
-	maxFailCount = 3 // maxFailCount indicates that the eviction algorithm breaks when consecutive unexpired key-value pairs are detected.
+	noTTL     = 0
+	KB        = 1024
+	maxFailed = 3 // maxFailed indicates that the eviction algorithm breaks when consecutive unexpired key-value pairs are detected.
 )
 
 // GigaCache implements a key-value cache.
 type GigaCache struct {
-	mask      uint32
-	hashFn    HashFn
-	buckets   []*bucket
-	reusedBuf []byte
+	mask    uint32
+	buckets []*bucket
 }
 
 // New creates a new instance of GigaCache.
@@ -26,11 +25,10 @@ func New(options Options) *GigaCache {
 	}
 	cache := &GigaCache{
 		mask:    options.ShardCount - 1,
-		hashFn:  options.HashFn,
 		buckets: make([]*bucket, options.ShardCount),
 	}
 	for i := range cache.buckets {
-		cache.buckets[i] = newBucket(options, cache)
+		cache.buckets[i] = newBucket(options)
 	}
 	return cache
 }
@@ -38,16 +36,16 @@ func New(options Options) *GigaCache {
 // getShard returns the appropriate bucket and key by hashing the input string.
 // Different hash functions for sharding and indexing significantly reduce hash conflicts.
 func (c *GigaCache) getShard(keyStr string) (*bucket, Key) {
-	hash := c.hashFn(keyStr)
-	hash32 := uint32(hash >> 1)
-	return c.buckets[hash32&c.mask], Key(hash)
+	hash := hashFn(keyStr)
+	hash32 := uint32(hash.Lo >> 1)
+	return c.buckets[hash32&c.mask], hash
 }
 
 // Get retrieves the value and its expiration time for a given key.
 func (c *GigaCache) Get(keyStr string) ([]byte, int64, bool) {
 	bucket, key := c.getShard(keyStr)
 	bucket.RLock()
-	value, timestamp, found := bucket.get(keyStr, key)
+	value, timestamp, found := bucket.get(key)
 	if found {
 		value = slices.Clone(value)
 	}
@@ -59,7 +57,7 @@ func (c *GigaCache) Get(keyStr string) ([]byte, int64, bool) {
 func (c *GigaCache) SetTx(keyStr string, value []byte, expiration int64) bool {
 	bucket, key := c.getShard(keyStr)
 	bucket.Lock()
-	bucket.evictExpiredItems()
+	bucket.evictExpiredKeys()
 	newField := bucket.set(key, s2b(&keyStr), value, expiration)
 	bucket.Unlock()
 	return newField
@@ -72,16 +70,15 @@ func (c *GigaCache) Set(keyStr string, value []byte) bool {
 
 // SetEx stores a key-value pair with a specific expiration duration.
 func (c *GigaCache) SetEx(keyStr string, value []byte, duration time.Duration) bool {
-	expiration := GetNanoSec() + int64(duration)
-	return c.SetTx(keyStr, value, expiration)
+	return c.SetTx(keyStr, value, time.Now().Add(duration).UnixNano())
 }
 
 // Remove deletes a key-value pair from the cache.
 func (c *GigaCache) Remove(keyStr string) bool {
 	bucket, key := c.getShard(keyStr)
 	bucket.Lock()
-	bucket.evictExpiredItems()
-	removed := bucket.remove(key, keyStr)
+	bucket.evictExpiredKeys()
+	removed := bucket.remove(key)
 	bucket.Unlock()
 	return removed
 }
@@ -90,8 +87,8 @@ func (c *GigaCache) Remove(keyStr string) bool {
 func (c *GigaCache) SetTTL(keyStr string, expiration int64) bool {
 	bucket, key := c.getShard(keyStr)
 	bucket.Lock()
-	success := bucket.setTTL(key, keyStr, expiration)
-	bucket.evictExpiredItems()
+	success := bucket.setTTL(key, expiration)
+	bucket.evictExpiredKeys()
 	bucket.Unlock()
 	return success
 }
@@ -121,10 +118,18 @@ func (c *GigaCache) Migrate() {
 	}
 }
 
+// EvictExpiredKeys
+func (c *GigaCache) EvictExpiredKeys() {
+	id := rand.IntN(len(c.buckets))
+	bucket := c.buckets[id]
+	bucket.Lock()
+	bucket.evictExpiredKeys(true)
+	bucket.Unlock()
+}
+
 // Stats represents the runtime statistics of GigaCache.
 type Stats struct {
 	Len       int
-	Conflicts int
 	Alloc     uint64
 	Unused    uint64
 	Migrates  uint64
@@ -136,8 +141,7 @@ type Stats struct {
 func (c *GigaCache) GetStats() (stats Stats) {
 	for _, bucket := range c.buckets {
 		bucket.RLock()
-		stats.Len += bucket.index.Len() + bucket.conflictMap.Len()
-		stats.Conflicts += bucket.conflictMap.Len()
+		stats.Len += bucket.index.Len()
 		stats.Alloc += uint64(len(bucket.data))
 		stats.Unused += uint64(bucket.unused)
 		stats.Migrates += uint64(bucket.migrations)

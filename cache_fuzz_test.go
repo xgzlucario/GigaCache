@@ -11,9 +11,7 @@ func FuzzCacheHashConflict(f *testing.F) {
 
 	options := DefaultOptions
 	options.DisableEvict = true
-	options.HashFn = func(s string) uint64 {
-		return uint64(uint16(MemHash(s)))
-	}
+
 	m2 := New(options)
 
 	f.Fuzz(func(t *testing.T, key string, val []byte, n byte) {
