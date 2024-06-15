@@ -46,7 +46,7 @@ func BenchmarkSet(b *testing.B) {
 	})
 	b.Run("cache/disableEvict", func(b *testing.B) {
 		options := DefaultOptions
-		options.DisableEvict = true
+		options.EvictInterval = -1
 		m := New(options)
 		for i := 0; i < b.N; i++ {
 			k, v := genKV(i)

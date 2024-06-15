@@ -47,7 +47,7 @@ func main() {
 
 	case "cache-noevict":
 		options := cache.DefaultOptions
-		options.DisableEvict = true
+		options.EvictInterval = -1
 		cache := cache.New(options)
 		for i := 0; i < entries; i++ {
 			k, v := genKV(i)

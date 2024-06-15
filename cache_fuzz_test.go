@@ -10,7 +10,7 @@ func FuzzCacheHashConflict(f *testing.F) {
 	m1 := make(map[string]string, 100*10000)
 
 	options := DefaultOptions
-	options.DisableEvict = true
+	options.EvictInterval = -1
 
 	m2 := New(options)
 

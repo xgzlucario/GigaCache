@@ -33,10 +33,9 @@ func New(options Options) *GigaCache {
 	return cache
 }
 
-// getShard returns the appropriate bucket and key by hashing the input string.
-// Different hash functions for sharding and indexing significantly reduce hash conflicts.
 func (c *GigaCache) getShard(keyStr string) (*bucket, Key) {
 	hash := hashFn(keyStr)
+	// shard with different hash function.
 	hash32 := uint32(hash.Lo >> 1)
 	return c.buckets[hash32&c.mask], hash
 }

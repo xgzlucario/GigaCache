@@ -11,15 +11,10 @@ type Options struct {
 	IndexSize  int
 	BufferSize int
 
-	// EvictInterval indicates the frequency of execution of the eliminate algorithm.
-	// the higher the frequency, the more expired key-value pairs will be evicted,
-	// but accordingly it will slow down the overall performance,
-	// because the system needs to spend more time on probing and evicting.
-	EvictInterval uint8
-
-	// DisableEvict
-	// Set `true` when you don't need any expiration times.
-	DisableEvict bool
+	// EvictInterval indicates the frequency of execution of the evict algorithm.
+	// if n >= 0, evict algorithm auto perform every `n` times write.
+	// if n < 0, evict is disabled.
+	EvictInterval int
 
 	// Migrate threshold for a bucket to trigger a migration.
 	MigrateRatio float64
@@ -33,7 +28,6 @@ var DefaultOptions = Options{
 	IndexSize:       1024,
 	BufferSize:      64 * KB,
 	EvictInterval:   5,
-	DisableEvict:    false,
 	MigrateRatio:    0.4,
 	ConcurrencySafe: true,
 }

@@ -13,7 +13,7 @@ func genKV(i int) (string, []byte) {
 	return k, []byte(k)
 }
 
-func getOptions(num int, interval uint8) Options {
+func getOptions(num, interval int) Options {
 	opt := DefaultOptions
 	opt.ShardCount = 1
 	opt.EvictInterval = interval
@@ -191,7 +191,7 @@ func TestDataAlloc(t *testing.T) {
 	t.Run("memhash", func(t *testing.T) {
 		opt := DefaultOptions
 		opt.ShardCount = 1
-		opt.DisableEvict = true
+		opt.EvictInterval = -1
 		m := New(opt)
 		m.Set("hello", []byte("world"))
 
@@ -262,7 +262,7 @@ func TestEvictManual(t *testing.T) {
 	assert := assert.New(t)
 	options := DefaultOptions
 	options.ShardCount = 1
-	options.DisableEvict = true
+	options.EvictInterval = -1
 
 	m := New(options)
 

@@ -21,7 +21,7 @@ type bucket struct {
 	data []byte
 
 	// runtime statistics
-	interval   byte
+	interval   int
 	unused     uint32
 	migrations uint32
 	evictions  uint64
@@ -148,7 +148,7 @@ func (b *bucket) scan(walker Walker) (next bool) {
 func (b *bucket) evictExpiredKeys(force ...bool) {
 	flag := len(force) > 0 && force[0]
 	if !flag {
-		if b.options.DisableEvict {
+		if b.options.EvictInterval < 0 {
 			return
 		}
 
